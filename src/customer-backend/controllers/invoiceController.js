@@ -1,5 +1,30 @@
 const { getOrderById } = require('../services/orderService');
 
+const PAYMENT_LABELS = {
+  cash: 'Cash on Delivery',
+  cod: 'Cash on Delivery',
+  upi: 'UPI',
+  card: 'Credit/Debit Card',
+  netbanking: 'Net Banking',
+  wallet: 'Wallet',
+};
+
+function resolvePaymentLabel(paymentMethod, paymentMethodFallback) {
+  if (typeof paymentMethod === 'string') {
+    return PAYMENT_LABELS[paymentMethod.toLowerCase()] || paymentMethod;
+  }
+  if (paymentMethod && typeof paymentMethod === 'object') {
+    const key = paymentMethod.type || paymentMethod.methodType || '';
+    const label = PAYMENT_LABELS[key.toLowerCase()] || key || 'N/A';
+    if (paymentMethod.last4) return `${label} (****${paymentMethod.last4})`;
+    return label;
+  }
+  if (typeof paymentMethodFallback === 'string') {
+    return PAYMENT_LABELS[paymentMethodFallback.toLowerCase()] || paymentMethodFallback;
+  }
+  return 'N/A';
+}
+
 async function invoice(req, res) {
   try {
     const userId = req.user?._id;
@@ -8,7 +33,7 @@ async function invoice(req, res) {
     }
 
     const orderId = req.params.id;
-    const order = await getOrderById(orderId, userId);
+    const order = await getOrderById(userId, orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
@@ -32,7 +57,7 @@ async function invoice(req, res) {
       orderNumber: order.orderNumber || order.order_id || orderId,
       orderDate: order.createdAt || new Date().toISOString(),
       deliveryAddress: addressStr,
-      paymentMethod: order.paymentMethod || order.payment_method || 'N/A',
+      paymentMethod: resolvePaymentLabel(order.paymentMethod, order.payment_method),
       items,
       subtotal: order.itemTotal || items.reduce((sum, i) => sum + i.total, 0),
       handlingCharge: order.handlingCharge || 0,

@@ -1,22 +1,48 @@
-const { getIO } = require('../config/socket');
+/**
+ * HHD Socket Service — Redis Pub/Sub Publisher
+ *
+ * Publishes HHD-specific events to the 'ws:hhd' Redis channel.
+ * The standalone ws-server subscribes and relays to the right rooms.
+ */
+
+const Redis = require('ioredis');
 const { logger } = require('../utils/logger');
 
+let pub;
+
+function getPublisher() {
+  if (!pub) {
+    const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+    pub = new Redis(redisUrl);
+    pub.on('error', (err) => {
+      logger.error(`HHD socket Redis publisher error: ${err.message}`);
+    });
+  }
+  return pub;
+}
+
 function emitOrderUpdate(orderId, data) {
-  const io = getIO();
-  io.to(`order:${orderId}`).emit('order:updated', data);
-  logger.debug(`Order update emitted for order: ${orderId}`);
+  getPublisher().publish(
+    'ws:hhd',
+    JSON.stringify({ roomType: 'order', target: orderId, event: 'order:updated', data })
+  );
+  logger.debug(`Order update published for order: ${orderId}`);
 }
 
 function emitUserNotification(userId, data) {
-  const io = getIO();
-  io.to(`user:${userId}`).emit('notification', data);
-  logger.debug(`Notification sent to user: ${userId}`);
+  getPublisher().publish(
+    'ws:hhd',
+    JSON.stringify({ roomType: 'user', target: userId, event: 'notification', data })
+  );
+  logger.debug(`Notification published for user: ${userId}`);
 }
 
 function emitNewOrder(userId, orderData) {
-  const io = getIO();
-  io.to(`user:${userId}`).emit('order:received', orderData);
-  logger.debug(`New order notification sent to user: ${userId}`);
+  getPublisher().publish(
+    'ws:hhd',
+    JSON.stringify({ roomType: 'user', target: userId, event: 'order:received', data: orderData })
+  );
+  logger.debug(`New order notification published for user: ${userId}`);
 }
 
 module.exports = {

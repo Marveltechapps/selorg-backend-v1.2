@@ -26,28 +26,71 @@ function fillTemplate(template, data) {
   return template.replace(/\{(\w+)\}/g, (_, key) => data[key] || '');
 }
 
+const ORDER_CHANNEL_TYPES = new Set([
+  'ORDER_PLACED', 'ORDER_CONFIRMED', 'ORDER_PACKED', 'ORDER_ON_WAY',
+  'ORDER_ARRIVED', 'ORDER_DELIVERED', 'ORDER_CANCELLED', 'DELIVERY_DELAYED', 'MISSING_ITEMS',
+]);
+const PAYMENT_CHANNEL_TYPES = new Set([
+  'REFUND_APPROVED', 'REFUND_COMPLETED', 'REFUND_REJECTED', 'WALLET_CREDIT',
+]);
+
+function resolveChannelId(type) {
+  if (ORDER_CHANNEL_TYPES.has(type)) return 'orders';
+  if (PAYMENT_CHANNEL_TYPES.has(type)) return 'payments';
+  return 'default';
+}
+
 async function deliverToExpo(tokens, title, body, data) {
+  const channelId = resolveChannelId(data?.type);
   const messages = tokens.map((t) => ({
     to: t,
     sound: 'default',
     title,
     body,
     data,
-    channelId: 'default',
+    channelId,
+    priority: 'high',
   }));
 
-  try {
-    const res = await fetch(EXPO_PUSH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(messages),
-    });
-    const result = await res.json();
-    return result;
-  } catch (err) {
-    logger.error('Expo push delivery failed', { err: err.message });
-    return null;
+  const CHUNK_SIZE = 100;
+  const results = [];
+
+  for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
+    const chunk = messages.slice(i, i + CHUNK_SIZE);
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      if (process.env.EXPO_ACCESS_TOKEN) {
+        headers['Authorization'] = `Bearer ${process.env.EXPO_ACCESS_TOKEN}`;
+      }
+
+      const res = await fetch(EXPO_PUSH_URL, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(chunk),
+      });
+      const result = await res.json();
+
+      if (result.data) {
+        const errors = result.data.filter((r) => r.status === 'error');
+        if (errors.length > 0) {
+          logger.warn('Expo push partial failures', {
+            total: chunk.length,
+            failed: errors.length,
+            errors: errors.map((e) => ({ message: e.message, details: e.details?.error })),
+          });
+        }
+      }
+
+      results.push(result);
+    } catch (err) {
+      logger.error('Expo push delivery failed', { err: err.message, chunkSize: chunk.length });
+    }
   }
+
+  return results.length === 1 ? results[0] : results;
 }
 
 async function sendPushNotification(customerId, type, data = {}) {
@@ -85,10 +128,11 @@ async function sendPushNotification(customerId, type, data = {}) {
     const tokenDocs = await PushToken.find({ userId: customerId, active: true }).lean();
     const pushTokens = tokenDocs.map((d) => d.token);
     if (pushTokens.length > 0) {
-      await deliverToExpo(pushTokens, title, body, { type, ...data });
+      const result = await deliverToExpo(pushTokens, title, body, { type, ...data });
+      logger.info('Push notification delivered', { customerId, type, title, deviceCount: pushTokens.length, result: JSON.stringify(result).slice(0, 200) });
+    } else {
+      logger.warn('No active push tokens found for user', { customerId, type });
     }
-
-    logger.info('Push notification sent', { customerId, type, title, deviceCount: pushTokens.length });
 
     return { success: true, title, body };
   } catch (err) {

@@ -278,12 +278,9 @@ const PORT = process.env.PORT || 5000;
 // Create HTTP server
 const httpServer = createServer(app);
 
-// Initialize WebSocket (skip in test mode)
+// Initialize WebSocket publisher (Redis Pub/Sub — actual WS server runs separately)
 if (process.env.NODE_ENV !== 'test') {
   websocketService.initialize(httpServer);
-  // HHD Socket.IO for real-time order updates
-  const { initSocketIO } = require('./hhd/config/socket');
-  initSocketIO(httpServer);
 }
 
 // Start server (only if not in test mode)

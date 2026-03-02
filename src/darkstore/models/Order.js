@@ -6,7 +6,7 @@ const orderSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      match: /^ORD-\d+$/,
+      match: /^ORD-[\d-]+$/,
     },
     store_id: {
       type: String,
@@ -28,6 +28,18 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 1,
+    },
+    items: {
+      type: [
+        {
+          productName: { type: String, default: '' },
+          quantity: { type: Number, default: 1 },
+          price: { type: Number, default: 0 },
+          image: { type: String, default: '' },
+          variantSize: { type: String, default: '' },
+        },
+      ],
+      default: [],
     },
     sla_timer: {
       type: String,
@@ -68,6 +80,28 @@ const orderSchema = new mongoose.Schema(
       default: 'Customer',
     },
     customer_phone: {
+      type: String,
+      default: '',
+    },
+    payment_status: {
+      type: String,
+      enum: ['paid', 'cod_pending', 'pending', 'failed'],
+      default: 'pending',
+    },
+    payment_method: {
+      type: String,
+      enum: ['card', 'upi', 'cash', 'wallet'],
+      default: 'cash',
+    },
+    total_bill: {
+      type: Number,
+      default: 0,
+    },
+    delivery_address: {
+      type: String,
+      default: '',
+    },
+    delivery_notes: {
       type: String,
       default: '',
     },

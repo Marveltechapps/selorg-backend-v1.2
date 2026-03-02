@@ -223,28 +223,48 @@ async function createOrder(userId, body) {
       || process.env.DEFAULT_STORE_ID
       || 'DS-DEFAULT-01';
     const orderId = response.orderNumber || response.id || `ORD-${Date.now()}`;
-    const now = Date.now();
-    const darkstoreIntegrationId = `ORD-${now}`;
-    const warehouseIntegrationId = `ORD-${now + 1}`;
       const itemCount = (response.items || []).length || 1;
       const slaMinutes = parseInt(process.env.DEFAULT_SLA_MINUTES || '15', 10);
       const slaDeadline = new Date(Date.now() + slaMinutes * 60 * 1000);
 
+      const deliveryAddrParts = [
+        response.deliveryAddress?.line1,
+        response.deliveryAddress?.line2,
+        response.deliveryAddress?.city,
+        response.deliveryAddress?.state,
+        response.deliveryAddress?.pincode,
+      ].filter(Boolean);
+      const deliveryAddrStr = deliveryAddrParts.join(', ') || response.deliveryAddress?.address || '';
+
+      const dsItems = (response.items || []).map((it) => ({
+        productName: it.productName || '',
+        quantity: it.quantity || 1,
+        price: it.price || 0,
+        image: it.image || '',
+        variantSize: it.variantSize || '',
+      }));
+
       try {
         await DarkstoreOrder.create({
-          order_id: darkstoreIntegrationId,
-          id: darkstoreIntegrationId,
+          order_id: orderId,
+          id: orderId,
           store_id: storeId,
           order_type: response.order_type || 'Normal',
           status: 'new',
           item_count: itemCount,
+          items: dsItems,
           sla_timer: `${String(slaMinutes).padStart(2, '0')}:00`,
           sla_status: 'safe',
           sla_deadline: slaDeadline,
           assignee: {},
           customer_name: customerName,
           customer_phone: phoneNumber || '',
+          delivery_address: deliveryAddrStr,
+          delivery_notes: response.deliveryNotes || '',
           rto_risk: false,
+          payment_status: paymentStatus,
+          payment_method: resolvedMethodType,
+          total_bill: totalBill,
         });
       } catch (err) {
         console.warn('Darkstore order create failed (non-blocking):', err.message);
@@ -252,8 +272,8 @@ async function createOrder(userId, body) {
 
       try {
         await WarehouseOrder.create({
-          id: warehouseIntegrationId,
-          order_id: warehouseIntegrationId,
+          id: orderId,
+          order_id: orderId,
           status: 'pending',
           riderId: null,
           etaMinutes: null,
@@ -286,7 +306,7 @@ async function createOrder(userId, body) {
             entityId: 'default',
             customerName: customerName,
             customerEmail: `customer-${userId}@selorg.com`,
-            orderId: darkstoreIntegrationId,
+            orderId,
             amount: response.totalBill || 0,
             currency: 'INR',
             paymentMethodDisplay: methodDisplay,
@@ -298,24 +318,33 @@ async function createOrder(userId, body) {
           console.warn('CustomerPayment create failed (non-blocking):', err.message);
         }
 
+        let liveTxnId = null;
+        const txnTimestamp = new Date().toISOString();
+        const txnIdStr = `TXN-${Date.now()}`;
+        const maskedDetails = paymentType === 'card' ? '****' : paymentType.toUpperCase();
+        const gateway = paymentType === 'cash' ? 'cod' : 'internal';
+
         try {
-          await LiveTransaction.create({
-            txnId: `TXN-${Date.now()}`,
+          const liveTxn = await LiveTransaction.create({
+            txnId: txnIdStr,
             entityId: 'default',
             amount: response.totalBill || 0,
             currency: 'INR',
             methodDisplay: methodDisplay,
-            maskedDetails: paymentType === 'card' ? '****' : paymentType.toUpperCase(),
+            maskedDetails,
             status: initialStatus,
-            gateway: paymentType === 'cash' ? 'cod' : 'internal',
-            orderId: darkstoreIntegrationId,
+            gateway,
+            orderId,
             customerName,
           });
+          liveTxnId = liveTxn._id.toString();
         } catch (err) {
           console.warn('LiveTransaction create failed (non-blocking):', err.message);
         }
 
-        websocketService?.broadcastToRole?.('finance', 'payment:created', {
+        const paymentEvent = {
+          id: liveTxnId || `txn-${Date.now()}`,
+          txnId: txnIdStr,
           orderId,
           amount: response.totalBill || 0,
           currency: 'INR',
@@ -323,30 +352,44 @@ async function createOrder(userId, body) {
           methodDisplay: methodDisplay,
           status: initialStatus,
           customerName,
-          maskedDetails: paymentType === 'card' ? '****' : paymentType.toUpperCase(),
-          gateway: paymentType === 'cash' ? 'cod' : 'internal',
-          createdAt: new Date().toISOString(),
-        });
+          maskedDetails,
+          gateway,
+          createdAt: txnTimestamp,
+        };
+        websocketService?.broadcastToRole?.('finance', 'payment:created', paymentEvent);
+        websocketService?.broadcastToRole?.('admin', 'payment:created', paymentEvent);
+        websocketService?.broadcastToRole?.('darkstore', 'payment:created', paymentEvent);
       } catch (err) {
         console.warn('Payment integration failed (non-blocking):', err.message);
       }
 
       // Emit order created events (same payload to all relevant rooms)
       try {
+        const ph = String(phoneNumber || '');
+        const maskedPhone = ph.length >= 8
+          ? ph.slice(0, 2) + '******' + ph.slice(-2)
+          : ph ? '******' : '';
+
         const orderEvent = {
           order_id: orderId,
           item_count: itemCount,
+          items: dsItems,
           customer_name: customerName,
-          customer_phone: phoneNumber ? `${String(phoneNumber).slice(0, 3)}***${String(phoneNumber).slice(-2)}` : '',
+          customer_phone: maskedPhone,
+          delivery_address: deliveryAddrStr,
           store_id: storeId,
           sla_deadline: slaDeadline,
           sla_status: 'safe',
           status: 'new',
           order_type: 'Normal',
           createdAt: new Date(),
+          payment_status: paymentStatus,
+          payment_method: resolvedMethodType,
+          total_bill: totalBill,
         };
         websocketService?.broadcastToRole?.('darkstore', 'order:created', orderEvent);
         websocketService?.broadcastToRole?.('admin', 'order:created', orderEvent);
+        websocketService?.broadcastToRole?.('finance', 'order:created', orderEvent);
       } catch (err) {
         console.warn('Websocket broadcast failed (non-blocking):', err.message);
       }
@@ -402,6 +445,9 @@ async function updateCustomerOrderStatus(orderId, newStatus, { actor, note, ride
 
   if (riderId) order.riderId = riderId;
   if (newStatus === 'delivered') order.deliveredAt = new Date();
+  if (newStatus === 'cancelled') {
+    order.cancellationReason = note || 'Order cancelled';
+  }
 
   await order.save();
 
@@ -433,12 +479,25 @@ async function cancelOrder(userId, orderId, reason) {
 
 async function getActiveOrder(userId) {
   const activeStatuses = ['pending', 'confirmed', 'getting-packed', 'on-the-way', 'arrived'];
-  const order = await Order.findOne({
+  let order = await Order.findOne({
     userId: new mongoose.Types.ObjectId(userId),
     status: { $in: activeStatuses },
   })
     .sort({ createdAt: -1 })
     .lean();
+
+  // If no active order, check for recently cancelled/delivered orders (last 5 min)
+  // so the customer app can redirect to the appropriate screen
+  if (!order) {
+    const recentCutoff = new Date(Date.now() - 5 * 60 * 1000);
+    order = await Order.findOne({
+      userId: new mongoose.Types.ObjectId(userId),
+      status: { $in: ['cancelled', 'delivered'] },
+      updatedAt: { $gte: recentCutoff },
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+  }
 
   if (!order) return null;
 

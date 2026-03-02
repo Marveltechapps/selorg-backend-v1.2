@@ -3,6 +3,7 @@
  */
 const sharedOrdersService = require('../services/sharedOrders.service');
 const { success, error } = require('../utils/response.util');
+const websocketService = require('../../utils/websocket');
 
 async function getOrders(req, res, next) {
   try {
@@ -71,8 +72,7 @@ async function updateOrderStatus(req, res, next) {
     });
     if (!order) return error(res, 'Order not found', 404);
     try {
-      const { getIO } = require('../../hhd/config/socket');
-      getIO().emit('order:updated', { orderId, status: order.status, updatedAt: order.updatedAt });
+      websocketService.broadcast('order:updated', { orderId, status: order.status, updatedAt: order.updatedAt });
     } catch (_) {}
     success(res, order);
   } catch (err) {
@@ -87,13 +87,12 @@ async function completeOrder(req, res, next) {
     const result = await sharedOrdersService.completeOrder(orderId, req.hhdUserId, payload);
     if (!result) return error(res, 'Order not found', 404);
     try {
-      const { getIO } = require('../../hhd/config/socket');
-      getIO().emit('order:updated', {
+      websocketService.broadcast('order:updated', {
         orderId,
         status: 'completed',
         updatedAt: result.order.updatedAt,
       });
-      getIO().emit('assignorder:updated', {
+      websocketService.broadcast('assignorder:updated', {
         orderId,
         status: 'completed',
         updatedAt: result.order.updatedAt,

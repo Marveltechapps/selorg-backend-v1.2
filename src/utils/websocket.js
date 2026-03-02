@@ -1,133 +1,98 @@
-const { Server: SocketServer } = require('socket.io');
-const jwt = require('jsonwebtoken');
+/**
+ * WebSocket Service — Redis Pub/Sub Publisher
+ *
+ * Instead of managing Socket.IO connections directly, this service
+ * publishes events to Redis channels. A standalone ws-server process
+ * subscribes and relays them to connected dashboard/app clients.
+ *
+ * The public API (broadcastToRole, broadcastToUser, broadcastToRoom,
+ * broadcast) is unchanged so callers require zero modifications.
+ */
+
+const Redis = require('ioredis');
 const logger = require('../core/utils/logger');
 
 class WebSocketService {
   constructor() {
-    this.io = null;
-    this.connectedClients = new Map();
+    this.pub = null;
+    this._ready = false;
   }
 
-  initialize(httpServer) {
-    this.io = new SocketServer(httpServer, {
-      cors: {
-        origin: process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS?.split(',')[0] || '*',
-        methods: ['GET', 'POST'],
-        credentials: true,
-      },
-      transports: ['websocket', 'polling'],
+  /**
+   * Initialise the Redis publisher. Called once from server.js on startup.
+   * The `httpServer` param is accepted for backward-compat but ignored —
+   * Socket.IO now lives in the separate ws-server process.
+   */
+  initialize(_httpServer) {
+    const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+
+    this.pub = new Redis(redisUrl);
+
+    this.pub.on('connect', () => {
+      this._ready = true;
+      logger.info('WebSocket service: Redis publisher connected', { redisUrl });
     });
 
-    this.io.use((socket, next) => {
-      const token = socket.handshake.auth.token || 
-                   socket.handshake.headers.authorization?.replace('Bearer ', '');
-      
-      if (!token) {
-        return next(new Error('Authentication error: No token provided'));
-      }
-
-      try {
-        const jwtSecret = process.env.JWT_SECRET;
-        if (!jwtSecret) {
-          return next(new Error('JWT_SECRET not configured'));
-        }
-
-        const decoded = jwt.verify(token, jwtSecret);
-        socket.userId = decoded.id || decoded.userId;
-        socket.role = decoded.role || decoded.roleId;
-        next();
-      } catch (err) {
-        logger.warn('WebSocket authentication failed', {
-          error: err.message,
-          socketId: socket.id,
-        });
-        next(new Error('Authentication error: Invalid token'));
-      }
+    this.pub.on('error', (err) => {
+      logger.error('WebSocket service: Redis publisher error', { error: err.message });
     });
 
-    this.io.on('connection', (socket) => {
-      const clientId = socket.id;
-      this.connectedClients.set(clientId, socket);
-
-      logger.info('WebSocket client connected', {
-        clientId,
-        userId: socket.userId,
-        role: socket.role,
-      });
-
-      // Join user-specific room
-      if (socket.userId) {
-        socket.join(`user:${socket.userId}`);
-      }
-
-      // Join role-specific room
-      if (socket.role) {
-        socket.join(`role:${socket.role}`);
-      }
-
-      // Handle room subscriptions
-      socket.on('subscribe', (room) => {
-        socket.join(room);
-        logger.debug('Client subscribed to room', { clientId, room });
-      });
-
-      socket.on('unsubscribe', (room) => {
-        socket.leave(room);
-        logger.debug('Client unsubscribed from room', { clientId, room });
-      });
-
-      // Handle disconnection
-      socket.on('disconnect', () => {
-        this.connectedClients.delete(clientId);
-        logger.info('WebSocket client disconnected', { clientId });
-      });
+    this.pub.on('close', () => {
+      this._ready = false;
+      logger.warn('WebSocket service: Redis publisher disconnected');
     });
 
-    logger.info('WebSocket service initialized');
-    return this.io;
+    logger.info('WebSocket service initialized (Redis Pub/Sub mode)');
   }
 
-  // Broadcast to a specific room
-  broadcastToRoom(room, event, data) {
-    if (this.io) {
-      this.io.to(room).emit(event, data);
+  _publish(channel, payload) {
+    if (!this.pub) {
+      logger.warn('WebSocket service: publish called before initialize');
+      return;
+    }
+    try {
+      this.pub.publish(channel, JSON.stringify(payload));
+    } catch (err) {
+      logger.error('WebSocket service: publish failed', {
+        channel,
+        error: err.message,
+      });
     }
   }
 
-  // Broadcast to a specific user
-  broadcastToUser(userId, event, data) {
-    if (this.io) {
-      this.io.to(`user:${userId}`).emit(event, data);
-    }
-  }
-
-  // Broadcast to a specific role
   broadcastToRole(role, event, data) {
-    if (this.io) {
-      this.io.to(`role:${role}`).emit(event, data);
-    }
+    this._publish('ws:role', { target: role, event, data });
   }
 
-  // Broadcast to all connected clients
+  broadcastToUser(userId, event, data) {
+    this._publish('ws:user', { target: userId, event, data });
+  }
+
+  broadcastToRoom(room, event, data) {
+    this._publish('ws:room', { target: room, event, data });
+  }
+
   broadcast(event, data) {
-    if (this.io) {
-      this.io.emit(event, data);
-    }
+    this._publish('ws:broadcast', { event, data });
   }
 
-  // Get connected clients count
+  /**
+   * @deprecated — client count is tracked by the standalone ws-server.
+   */
   getConnectedCount() {
-    return this.connectedClients.size;
+    return 0;
   }
 
-  // Get IO instance
+  /**
+   * @deprecated — Socket.IO instance lives in ws-server, not here.
+   * Returns null; callers should migrate away from direct io access.
+   */
   getIO() {
-    return this.io;
+    return null;
   }
 
-  // Check if initialized
   isInitialized() {
-    return this.io !== null;
+    return this._ready;
   }
 }
 

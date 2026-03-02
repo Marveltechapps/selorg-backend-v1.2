@@ -4,7 +4,7 @@ const HHDCompletedOrder = require('../../models/CompletedOrder.model');
 const HHDItem = require('../../models/Item.model');
 const { ORDER_STATUS, ORDER_PRIORITY } = require('../../utils/constants');
 const { emitOrderUpdate, emitNewOrder } = require('../../services/socket.service');
-const { getIO } = require('../../config/socket');
+const websocketService = require('../../../utils/websocket');
 const mongoose = require('mongoose');
 
 async function getOrders(req, res, next) {
@@ -136,8 +136,7 @@ async function updateAssignOrderStatus(req, res, next) {
     await assignOrdersCollection.updateOne({ orderId }, { $set: updateData });
     const updatedOrder = await assignOrdersCollection.findOne({ orderId });
     emitOrderUpdate(orderId, { orderId, status: updateData.status, updatedAt: updateData.updatedAt });
-    const io = getIO();
-    io.emit('assignorder:updated', { orderId, status: updateData.status, updatedAt: updateData.updatedAt });
+    websocketService.broadcast('assignorder:updated', { orderId, status: updateData.status, updatedAt: updateData.updatedAt });
     res.status(200).json({ success: true, data: updatedOrder, message: `AssignOrder status updated to ${status}` });
   } catch (error) {
     next(error);

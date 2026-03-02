@@ -11,6 +11,7 @@ const websocketService = require('../../utils/websocket');
 const DARKSTORE_TO_CUSTOMER_STATUS = {
   processing: 'confirmed',
   ready: 'getting-packed',
+  cancelled: 'cancelled',
 };
 
 async function propagateToCustomerOrder(darkstoreOrderId, darkstoreStatus) {
@@ -50,11 +51,45 @@ const getOrders = async (req, res) => {
       .limit(limit)
       .lean();
 
-    const formattedOrders = orders.map((order) => ({
-      ...order,
-      customer_name: order.customer_name || 'Customer',
-      customer_phone: order.customer_phone || '',
-    }));
+    const ordersMissingItems = orders.filter((o) => !o.items || o.items.length === 0);
+    let customerItemsMap = {};
+    if (ordersMissingItems.length > 0) {
+      try {
+        const ids = ordersMissingItems.map((o) => o.order_id);
+        const custOrders = await CustomerOrder.find({ orderNumber: { $in: ids } }, { orderNumber: 1, items: 1 }).lean();
+        for (const co of custOrders) {
+          customerItemsMap[co.orderNumber] = (co.items || []).map((it) => ({
+            productName: it.productName || 'Item',
+            quantity: it.quantity || 1,
+            price: it.price || 0,
+            image: it.image || '',
+            variantSize: it.variantSize || '',
+          }));
+        }
+      } catch (_) { /* non-blocking fallback */ }
+    }
+
+    const formattedOrders = orders.map((order) => {
+      const rawPhone = order.customer_phone || '';
+      const maskedPhone = rawPhone.length >= 8
+        ? rawPhone.slice(0, 2) + '******' + rawPhone.slice(-2)
+        : rawPhone ? '******' : '';
+      const resolvedItems = (order.items && order.items.length > 0)
+        ? order.items.map((it) => ({
+            productName: it.productName || 'Item',
+            quantity: it.quantity || 1,
+            price: it.price || 0,
+            image: it.image || '',
+            variantSize: it.variantSize || '',
+          }))
+        : (customerItemsMap[order.order_id] || []);
+      return {
+        ...order,
+        items: resolvedItems,
+        customer_name: order.customer_name || 'Customer',
+        customer_phone: maskedPhone,
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -215,10 +250,13 @@ const markRTO = async (req, res) => {
         store_id: order.store_id,
         status: 'rto',
         rto_status: order.rto_status,
+        customer_name: order.customer_name || 'Customer',
+        total_bill: order.total_bill || 0,
         updated_at: new Date(),
       };
       websocketService?.broadcastToRole?.('darkstore', 'order:updated', rtoEvent);
       websocketService?.broadcastToRole?.('admin', 'order:updated', rtoEvent);
+      websocketService?.broadcastToRole?.('finance', 'order:updated', rtoEvent);
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({
@@ -320,10 +358,14 @@ const updateOrder = async (req, res) => {
         store_id: order.store_id,
         status: order.status,
         sla_status: order.sla_status,
+        customer_name: order.customer_name || 'Customer',
+        total_bill: order.total_bill || 0,
+        payment_status: order.payment_status || 'pending',
         updated_at: new Date(),
       };
       websocketService?.broadcastToRole?.('darkstore', 'order:updated', updateEvent);
       websocketService?.broadcastToRole?.('admin', 'order:updated', updateEvent);
+      websocketService?.broadcastToRole?.('finance', 'order:updated', updateEvent);
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({
@@ -363,15 +405,34 @@ const cancelOrder = async (req, res) => {
     await order.save();
     await cache.delByPattern('dashboard:*');
 
+    // Propagate cancellation to the customer order so the customer app reflects it
+    try {
+      const customerOrder = await CustomerOrder.findOne({ orderNumber: orderId }).lean();
+      if (customerOrder) {
+        await updateCustomerOrderStatus(customerOrder._id, 'cancelled', {
+          actor: 'admin',
+          note: reason || 'Order cancelled by admin',
+        });
+      }
+    } catch (err) {
+      console.warn('Customer order cancellation propagation failed (non-blocking):', err.message);
+    }
+
     try {
       const cancelEvent = {
         order_id: orderId,
         store_id: order.store_id,
         status: 'cancelled',
+        customer_name: order.customer_name || 'Customer',
+        total_bill: order.total_bill || 0,
+        payment_status: order.payment_status || 'pending',
+        payment_method: order.payment_method || 'cash',
+        reason: reason || '',
         updated_at: new Date(),
       };
       websocketService?.broadcastToRole?.('darkstore', 'order:cancelled', cancelEvent);
       websocketService?.broadcastToRole?.('admin', 'order:cancelled', cancelEvent);
+      websocketService?.broadcastToRole?.('finance', 'order:cancelled', cancelEvent);
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({
