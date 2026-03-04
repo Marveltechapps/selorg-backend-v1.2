@@ -77,8 +77,8 @@ const sendOtp = async (phone) => {
   return {
     success: true,
     message: 'OTP sent successfully',
-    debugOtp: otp, // For testing - remove in production
-    ...(testOtp && { otp: testOtp }),
+    ...(isOtpDevMode() && { otp }),           // Dev mode: return OTP (no SMS)
+    ...(testOtp && { otp: testOtp }),         // Test numbers (e.g. 9698790921): return fixed OTP (no SMS)
   };
 };
 
