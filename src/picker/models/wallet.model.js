@@ -9,6 +9,7 @@ const walletSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     availableBalance: { type: Number, default: 0 },
     pendingBalance: { type: Number, default: 0 },
+    reservedBalance: { type: Number, default: 0 }, // Locked for PENDING/APPROVED withdrawal requests
     totalEarnings: { type: Number, default: 0 },
     currency: { type: String, default: 'INR' },
   },

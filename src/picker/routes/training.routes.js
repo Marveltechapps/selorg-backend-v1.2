@@ -1,5 +1,6 @@
 /**
- * Training routes – Enhanced with video management and watch-time tracking
+ * Training routes – Enhanced with video management and watch-time tracking.
+ * Phase 1 RBAC: Dashboard endpoints for training video CRUD will require Admin role.
  */
 const express = require('express');
 const trainingController = require('../controllers/training.controller');

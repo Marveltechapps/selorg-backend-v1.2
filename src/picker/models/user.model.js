@@ -5,10 +5,21 @@
  * hhdUserId links this picker to HHD User for "orders to order complete" in the shared DB.
  */
 const mongoose = require('mongoose');
+const { PICKER_STATUS } = require('../../constants/pickerEnums');
 
 const userSchema = new mongoose.Schema(
   {
     phone: { type: String, required: true, unique: true },
+    /** Picker onboarding/employment status. New users default to PENDING. */
+    status: { type: String, enum: Object.values(PICKER_STATUS), default: PICKER_STATUS.PENDING },
+    /** Reason for rejection when status is REJECTED. */
+    rejectedReason: { type: String },
+    /** When the picker was rejected. */
+    rejectedAt: { type: Date },
+    /** When the picker was approved (status -> ACTIVE). */
+    approvedAt: { type: Date },
+    /** Admin user who approved the picker (ObjectId of admin/dashboard user). */
+    approvedBy: { type: mongoose.Schema.Types.ObjectId },
     email: { type: String },
     name: { type: String },
     age: { type: Number },
@@ -46,6 +57,15 @@ const userSchema = new mongoose.Schema(
       employerName: { type: String },
       employeeId: { type: String },
       department: { type: String },
+    },
+    /** Heartbeat/presence – updated by HHD device. Offline when now - lastSeenAt > 90s */
+    lastSeenAt: { type: Date },
+    batteryLevel: { type: Number }, // 0-100
+    activeOrderId: { type: String },
+    gpsLocation: {
+      latitude: { type: Number },
+      longitude: { type: Number },
+      timestamp: { type: Date },
     },
   },
   { timestamps: true, collection: 'picker_users' }

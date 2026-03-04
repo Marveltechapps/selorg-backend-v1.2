@@ -1,11 +1,13 @@
 /**
  * Shared orders service – Picker app reads/updates HHD orders by hhdUserId (same person).
  * Uses HHD Order, CompletedOrder and assignorders collection in the shared DB.
+ * Syncs status to darkstore Order when orderId matches (best-effort).
  */
 const mongoose = require('mongoose');
 const HHDOrder = require('../../hhd/models/Order.model');
 const HHDCompletedOrder = require('../../hhd/models/CompletedOrder.model');
 const { ORDER_STATUS } = require('../../hhd/utils/constants');
+const { syncStatusToDarkstore } = require('../../shared/services/darkstoreOrderSyncService');
 
 /**
  * List orders for the linked HHD user.
@@ -66,6 +68,9 @@ async function updateOrderStatus(orderId, hhdUserId, status, extra = {}) {
   if (extra.pickTime != null) order.pickTime = extra.pickTime;
   if (status === ORDER_STATUS.COMPLETED || status === 'completed') order.completedAt = new Date();
   await order.save();
+  try {
+    await syncStatusToDarkstore(orderId, status, { ...extra, pickerId: order.userId?.toString?.() });
+  } catch (_) { /* non-blocking */ }
   return order;
 }
 
@@ -103,12 +108,22 @@ async function completeOrder(orderId, hhdUserId, payload = {}) {
 
   const assignColl = mongoose.connection.collection('assignorders');
   const assignOrder = await assignColl.findOne({ orderId });
-  if (assignOrder && assignHHDOrder.userId?.toString() === hhdUserId.toString()) {
+  if (assignOrder && assignOrder.userId?.toString() === hhdUserId.toString()) {
     await assignColl.updateOne(
       { orderId },
       { $set: { status: ORDER_STATUS.COMPLETED, completedAt, updatedAt: completedAt } }
     );
   }
+
+  try {
+    await syncStatusToDarkstore(orderId, ORDER_STATUS.COMPLETED, {
+      pickTime: payload.pickTime ?? order.pickTime,
+      bagId: payload.bagId || order.bagId,
+      rackLocation: payload.rackLocation || order.rackLocation,
+      pickerId: order.userId?.toString?.(),
+      missingItems: payload.missingItems,
+    });
+  } catch (_) { /* non-blocking */ }
 
   return { order, completedOrder };
 }

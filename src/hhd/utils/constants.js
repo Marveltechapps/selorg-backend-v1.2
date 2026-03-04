@@ -1,3 +1,4 @@
+/** HHD device order flow status. For workforce order lifecycle (ASSIGNED, PICKING, PICKED, etc.) use constants/pickerEnums ORDER_STATUS. */
 const ORDER_STATUS = {
   PENDING: 'pending',
   RECEIVED: 'received',

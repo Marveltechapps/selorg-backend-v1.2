@@ -5,7 +5,6 @@
  */
 const Wallet = require('../models/wallet.model');
 const Transaction = require('../models/transaction.model');
-const BankAccount = require('../models/bankAccount.model');
 const Attendance = require('../models/attendance.model');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
 
@@ -37,42 +36,18 @@ const getBalance = async (userId) => {
   }
 };
 
+const withdrawalRequestService = require('./withdrawalRequest.service');
+
 const withdraw = async (userId, body) => {
-  const { amount, bankAccountId, idempotencyKey } = body;
-  if (!amount || amount <= 0) return { success: false, error: 'Invalid amount' };
-  const wallet = await getOrCreateWallet(userId);
-  if (wallet.availableBalance < amount) {
-    return { success: false, transactionId: '', amount, status: 'failed', error: 'Insufficient balance' };
-  }
-  const bank = await BankAccount.findOne({ _id: bankAccountId, userId });
-  if (!bank) {
-    return { success: false, transactionId: '', amount, status: 'failed', error: 'Bank account not found' };
-  }
-  const tx = new Transaction({
-    userId,
-    type: 'debit',
-    amount,
-    status: 'processing',
-    description: 'Withdrawal',
-    bankAccountId,
-    referenceId: idempotencyKey,
-    metadata: { bankAccountId: bankAccountId.toString() },
-  });
-  await tx.save();
-  wallet.availableBalance -= amount;
-  wallet.pendingBalance = (wallet.pendingBalance || 0) + amount;
-  await wallet.save();
-  tx.status = 'completed';
-  tx.completedAt = new Date();
-  await tx.save();
-  wallet.pendingBalance -= amount;
-  await wallet.save();
+  const result = await withdrawalRequestService.createRequest(userId, body);
+  if (!result.success) return result;
   return {
     success: true,
-    transactionId: tx._id.toString(),
-    amount,
-    status: 'completed',
-    estimatedCompletionTime: new Date().toISOString(),
+    transactionId: result.transactionId || '',
+    withdrawalRequestId: result.withdrawalRequestId,
+    amount: result.amount,
+    status: result.status,
+    error: result.error,
   };
 };
 

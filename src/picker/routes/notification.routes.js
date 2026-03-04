@@ -1,5 +1,6 @@
 /**
  * Notification routes – from backend-workflow.yaml (notifications, notifications/:id/read, notifications/read-all).
+ * Phase 1 RBAC: Dashboard endpoints for bulk send to pickers will require Admin role.
  */
 const express = require('express');
 const notificationController = require('../controllers/notification.controller');

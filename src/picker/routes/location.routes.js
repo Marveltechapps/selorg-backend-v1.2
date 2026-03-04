@@ -1,6 +1,6 @@
 /**
- * Location Routes
- * API endpoints for work location management
+ * Location Routes – API endpoints for work location management.
+ * Phase 1 RBAC: Dashboard endpoints for location CRUD will require Warehouse role.
  */
 const express = require('express');
 const locationController = require('../controllers/location.controller');

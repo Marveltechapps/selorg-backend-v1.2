@@ -1,5 +1,6 @@
 /**
  * Bank routes – from frontend YAML (application-spec paths /bank/*).
+ * Phase 1 RBAC: Dashboard endpoints for bank account verify will require Finance role.
  */
 const express = require('express');
 const bankController = require('../controllers/bank.controller');

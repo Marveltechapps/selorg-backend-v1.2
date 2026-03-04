@@ -1,5 +1,6 @@
 /**
  * Support ticket routes – from backend-workflow.yaml (support/tickets GET, POST).
+ * Phase 1 RBAC: Dashboard endpoints for ticket resolve/close will require Admin or Warehouse role.
  */
 const express = require('express');
 const supportTicketController = require('../controllers/supportTicket.controller');

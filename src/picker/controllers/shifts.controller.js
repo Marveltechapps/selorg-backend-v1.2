@@ -46,4 +46,28 @@ const end = async (req, res, next) => {
   }
 };
 
-module.exports = { getAvailable, select, start, end };
+const startBreak = async (req, res, next) => {
+  try {
+    const result = await shiftsService.startBreak(req.userId);
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    success(res, {});
+  } catch (err) {
+    next(err);
+  }
+};
+
+const endBreak = async (req, res, next) => {
+  try {
+    const result = await shiftsService.endBreak(req.userId);
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    success(res, {});
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getAvailable, select, start, end, startBreak, endBreak };

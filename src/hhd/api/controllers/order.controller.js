@@ -5,6 +5,7 @@ const HHDItem = require('../../models/Item.model');
 const { ORDER_STATUS, ORDER_PRIORITY } = require('../../utils/constants');
 const { emitOrderUpdate, emitNewOrder } = require('../../services/socket.service');
 const websocketService = require('../../../utils/websocket');
+const { syncStatusToDarkstore } = require('../../../shared/services/darkstoreOrderSyncService');
 const mongoose = require('mongoose');
 
 async function getOrders(req, res, next) {
@@ -88,6 +89,9 @@ async function updateOrderStatus(req, res, next) {
     if (status === ORDER_STATUS.PICKING && !order.startedAt) order.startedAt = new Date();
     if (status === ORDER_STATUS.COMPLETED) order.completedAt = new Date();
     await order.save();
+    try {
+      await syncStatusToDarkstore(orderId, status, { bagId: order.bagId, rackLocation: order.rackLocation, pickerId: userId, pickTime: order.pickTime });
+    } catch (_) { /* non-blocking */ }
     emitOrderUpdate(orderId, { orderId, status: order.status, updatedAt: order.updatedAt });
     res.status(200).json({ success: true, data: order });
   } catch (error) {
@@ -135,6 +139,9 @@ async function updateAssignOrderStatus(req, res, next) {
     if (status === ORDER_STATUS.COMPLETED || status === 'completed') updateData.completedAt = new Date();
     await assignOrdersCollection.updateOne({ orderId }, { $set: updateData });
     const updatedOrder = await assignOrdersCollection.findOne({ orderId });
+    try {
+      await syncStatusToDarkstore(orderId, status || updateData.status, {});
+    } catch (_) { /* non-blocking */ }
     emitOrderUpdate(orderId, { orderId, status: updateData.status, updatedAt: updateData.updatedAt });
     websocketService.broadcast('assignorder:updated', { orderId, status: updateData.status, updatedAt: updateData.updatedAt });
     res.status(200).json({ success: true, data: updatedOrder, message: `AssignOrder status updated to ${status}` });

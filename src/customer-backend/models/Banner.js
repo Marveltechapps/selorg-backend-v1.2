@@ -1,10 +1,15 @@
 const mongoose = require('mongoose');
+
 const bannerSchema = new mongoose.Schema(
   {
+    siteId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerSite', default: null },
     slot: { type: String, enum: ['hero', 'mid', 'category'], default: 'hero' },
     title: String,
     imageUrl: { type: String, required: true },
-    link: String,
+    mediaId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerMedia', default: null },
+    link: String, // Legacy - kept for backward compatibility during migration
+    redirectType: { type: String, enum: ['product', 'category', 'collection', 'page', 'url', 'screen'], default: null },
+    redirectValue: String,
     categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerCategory' },
     isActive: { type: Boolean, default: true },
     startDate: Date,

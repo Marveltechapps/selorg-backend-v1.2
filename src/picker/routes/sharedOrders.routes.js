@@ -1,5 +1,6 @@
 /**
  * Picker app: HHD orders (read/update/complete) for the linked HHD user (same person).
+ * Phase 1 RBAC: Dashboard endpoints for order assign/reassign, queue view will require Warehouse role.
  */
 const express = require('express');
 const { requireAuth } = require('../middlewares/auth.middleware');

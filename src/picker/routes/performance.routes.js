@@ -1,3 +1,6 @@
+/**
+ * Phase 1 RBAC: Dashboard endpoints for performance reports will require Warehouse or Admin role.
+ */
 const express = require('express');
 const { requireAuth } = require('../middlewares/auth.middleware');
 const { attachHhdUserId, requireLinkedHhdUser } = require('../helpers/hhdLink.helper');

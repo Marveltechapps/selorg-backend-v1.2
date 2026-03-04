@@ -2,6 +2,7 @@
  * Wallet controller – from frontend YAML (wallet.service.ts endpoints).
  */
 const walletService = require('../services/wallet.service');
+const withdrawalRequestService = require('../services/withdrawalRequest.service');
 const { success, error } = require('../utils/response.util');
 
 const getBalance = async (req, res, next) => {
@@ -53,10 +54,28 @@ const getEarningsBreakdown = async (req, res, next) => {
   }
 };
 
+const getWithdrawalRequest = async (req, res, next) => {
+  try {
+    const wr = await withdrawalRequestService.getByIdForPicker(req.params.requestId, req.userId);
+    if (!wr) return error(res, 'Not found', 404);
+    const statusMap = { PENDING: 'pending', APPROVED: 'processing', PAID: 'completed', REJECTED: 'failed' };
+    success(res, {
+      id: wr._id.toString(),
+      withdrawalRequestId: wr._id.toString(),
+      status: statusMap[wr.status] || wr.status.toLowerCase(),
+      amount: wr.amount,
+      requestedAt: wr.requestedAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getBalance,
   withdraw,
   getHistory,
   getTransactionById,
   getEarningsBreakdown,
+  getWithdrawalRequest,
 };

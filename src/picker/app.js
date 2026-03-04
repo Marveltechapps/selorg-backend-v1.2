@@ -1,3 +1,8 @@
+/**
+ * Picker app – mobile-facing API for Picker app.
+ * Phase 1 RBAC: Dashboard endpoints will be added separately with Admin/Finance/Warehouse
+ * role checks. See picker/rbac.plan.js for intended roles per endpoint area.
+ */
 const express = require('express');
 const cors = require('cors');
 const { isDbConnected } = require('./config/db');
@@ -5,6 +10,8 @@ const { errorHandler } = require('./middlewares/error.middleware');
 
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
+const userController = require('./controllers/user.controller');
+const { requireAuth } = require('./middlewares/auth.middleware');
 const documentsRoutes = require('./routes/documents.routes');
 const verifyRoutes = require('./routes/verify.routes');
 const trainingRoutes = require('./routes/training.routes');
@@ -20,6 +27,9 @@ const pushTokenRoutes = require('./routes/pushToken.routes');
 const sampleRoutes = require('./routes/sample.routes');
 const sharedOrdersRoutes = require('./routes/sharedOrders.routes');
 const performanceRoutes = require('./routes/performance.routes');
+const devicesRoutes = require('./routes/devices.routes');
+const heartbeatRoutes = require('./routes/heartbeat.routes');
+const issueRoutes = require('./routes/issue.routes');
 
 const app = express();
 
@@ -56,6 +66,7 @@ const appConfig = require('../config/app');
 app.use(cacheMiddleware(appConfig.cache.picker.default));
 
 app.use('/auth', authRoutes);
+app.get('/me', requireAuth, userController.getProfile);
 app.use('/users', userRoutes);
 app.use('/documents', documentsRoutes);
 app.use('/verify', verifyRoutes);
@@ -72,6 +83,9 @@ app.use('/api/push-tokens', pushTokenRoutes);
 app.use('/api/samples', sampleRoutes);
 app.use('/orders', sharedOrdersRoutes);
 app.use('/performance', performanceRoutes);
+app.use('/devices', devicesRoutes);
+app.use('/heartbeat', heartbeatRoutes);
+app.use('/issues', issueRoutes);
 
 app.use(errorHandler);
 

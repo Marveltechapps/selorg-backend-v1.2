@@ -70,7 +70,7 @@ const getById = async (userId) => {
   return User.findById(userId).lean();
 };
 
-/** GET profile: return current user profile for app display; include linked HHD profile when same person. */
+/** GET profile: return current user profile for app display; include status, rejectedReason, rejectedAt for picker approval flow; include linked HHD profile when same person. */
 const getProfile = async (userId) => {
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return null;
   const user = await User.findById(userId).lean();
@@ -89,6 +89,9 @@ const getProfile = async (userId) => {
     trainingProgress: user.trainingProgress || {},
     upiId: user.upiId,
     upiName: user.upiName,
+    status: user.status,
+    rejectedReason: user.rejectedReason,
+    rejectedAt: user.rejectedAt ? user.rejectedAt.toISOString() : null,
   };
   if (user.hhdUserId) {
     try {

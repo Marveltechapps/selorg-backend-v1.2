@@ -203,11 +203,12 @@ const getLiveOrders = async (req, res) => {
       cacheKey,
       appConfig.cache.dashboard,
       async () => {
-        const query = {
-          store_id: storeId,
-          status: { $in: ['new', 'processing', 'ready'] },
-        };
-        if (status !== 'all') query.status = status;
+        const allActiveStatuses = ['new', 'processing', 'ready', 'ASSIGNED', 'PICKING', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'];
+        const query = { store_id: storeId, status: { $in: allActiveStatuses } };
+        if (status !== 'all') {
+          const statusMap = { new: ['new'], processing: ['processing', 'ASSIGNED', 'PICKING'], ready: ['ready', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'] };
+          query.status = { $in: statusMap[status] || allActiveStatuses };
+        }
         const orders = await Order.find(query).sort({ createdAt: -1 }).limit(limit).lean();
 
         const ordersMissingItems = orders.filter((o) => !o.items || o.items.length === 0);
@@ -241,6 +242,14 @@ const getLiveOrders = async (req, res) => {
 
           return {
             order_id: order.order_id,
+            status: order.status,
+            bagId: order.bagId || '',
+            rackLocation: order.rackLocation || '',
+            assignee: order.assignee || { id: '', name: 'Unassigned', initials: 'UA' },
+            pickerAssignment: order.pickerAssignment || {},
+            timeline: order.timeline || [],
+            pickingData: order.pickingData || {},
+            missingItems: order.pickingData?.missingItems || [],
             order_type: order.order_type,
             item_count: order.item_count,
             items: (order.items && order.items.length > 0)
@@ -260,7 +269,6 @@ const getLiveOrders = async (req, res) => {
             sla_status: getSLAStatus(slaDeadline),
             sla_deadline: slaDeadline.toISOString(),
             created_at: createdAt.toISOString(),
-            assignee: order.assignee || { id: '', name: 'Unassigned', initials: 'UA' },
             payment_status: order.payment_status || 'pending',
             payment_method: order.payment_method || 'cash',
             total_bill: order.total_bill || 0,

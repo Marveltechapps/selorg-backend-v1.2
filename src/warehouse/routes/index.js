@@ -18,6 +18,8 @@ const utilitiesRoutes = require('./utilitiesRoutes');
 const orderRoutes = require('./orderRoutes');
 const staffRoutes = require('./staffRoutes');
 const inventoryRoutes = require('./inventoryRoutes');
+const attendanceRoutes = require('./attendanceRoutes');
+const devicesRoutes = require('./devicesRoutes');
 
 // Auth (login only) - no JWT required
 router.use('/auth', authRoutes);
@@ -32,8 +34,10 @@ protectedRouter.use('/inventory', inventoryRoutes);
 protectedRouter.use('/outbound', outboundRoutes);
 protectedRouter.use('/transfers', transfersRoutes);
 protectedRouter.use('/qc', qcRoutes);
+protectedRouter.use('/attendance', attendanceRoutes);
 protectedRouter.use('/workforce', workforceRoutes);
 protectedRouter.use('/equipment', equipmentRoutes);
+protectedRouter.use('/devices', devicesRoutes);
 protectedRouter.use('/exceptions', exceptionsRoutes);
 protectedRouter.use('/reports', warehouseReportsRoutes);
 protectedRouter.use('/utilities', utilitiesRoutes);

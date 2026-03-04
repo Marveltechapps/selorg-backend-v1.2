@@ -1,9 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const { getOrders, callCustomer, markRTO, updateOrder, cancelOrder } = require('../controllers/orderController');
+const {
+  getOrders,
+  callCustomer,
+  markRTO,
+  updateOrder,
+  cancelOrder,
+  assignOrder,
+  startPicking,
+  completePicking,
+  getOrderActionLogs,
+} = require('../controllers/orderController');
 
 // GET /api/darkstore/orders
 router.get('/', getOrders);
+
+// GET /api/darkstore/orders/:orderId/action-logs
+router.get('/:orderId/action-logs', getOrderActionLogs);
 
 // POST /api/darkstore/orders/:orderId/call-customer
 router.post('/:orderId/call-customer', callCustomer);
@@ -13,6 +26,17 @@ router.post('/:orderId/mark-rto', markRTO);
 
 // PATCH /api/darkstore/orders/:orderId - update status, urgency
 router.patch('/:orderId', updateOrder);
+
+// PATCH /api/darkstore/orders/:orderId/assign - assign picker
+router.patch('/:orderId/assign', assignOrder);
+
+// PATCH /api/darkstore/orders/:orderId/start-picking
+router.patch('/:orderId/start-picking', startPicking);
+
+// PATCH /api/darkstore/orders/:orderId/complete-picking
+router.patch('/:orderId/complete-picking', completePicking);
+
+// NOTE: PATCH /orders/:orderId/bag-rack is mounted at darkstore index (extended auth)
 
 // POST /api/darkstore/orders/:orderId/cancel
 router.post('/:orderId/cancel', cancelOrder);

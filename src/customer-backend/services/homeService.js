@@ -33,8 +33,15 @@ async function getHomePayload(req = {}) {
       .sort({ order: 1 })
       .lean();
   }
-  const heroBanners = await Banner.find({ slot: 'hero', isActive: true }).sort({ order: 1 }).lean();
-  const midBanners = await Banner.find({ slot: 'mid', isActive: true }).sort({ order: 1 }).lean();
+  const now = new Date();
+  const scheduleQuery = {
+    $and: [
+      { $or: [{ startDate: { $exists: false } }, { startDate: null }, { startDate: { $lte: now } }] },
+      { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gte: now } }] },
+    ],
+  };
+  const heroBanners = await Banner.find({ slot: 'hero', isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
+  const midBanners = await Banner.find({ slot: 'mid', isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
   const sectionsDocs = await HomeSection.find({ isActive: true }).lean();
   const sections = {};
   for (const s of sectionsDocs) {

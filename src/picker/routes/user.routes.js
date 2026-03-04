@@ -1,5 +1,6 @@
 /**
  * User routes – from backend-workflow.yaml (users/profile, users/location-type, users/upi).
+ * Phase 1 RBAC: Dashboard endpoints for picker list/approve/reject will require Admin role.
  */
 const express = require('express');
 const userController = require('../controllers/user.controller');

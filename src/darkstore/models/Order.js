@@ -1,5 +1,45 @@
 const mongoose = require('mongoose');
 
+const timelineEntrySchema = new mongoose.Schema(
+  {
+    status: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now },
+    updatedBy: { type: String, default: '' },
+    updatedByRole: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
+const missingItemSchema = new mongoose.Schema(
+  {
+    productName: { type: String, default: '' },
+    orderedQty: { type: Number, required: true },
+    scannedQty: { type: Number, default: 0 },
+    reason: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
+const pickingDataSchema = new mongoose.Schema(
+  {
+    startTime: { type: Date },
+    endTime: { type: Date },
+    pickDuration: { type: Number },
+    accuracy: { type: Number },
+    missingItems: [missingItemSchema],
+  },
+  { _id: false }
+);
+
+const pickerAssignmentSchema = new mongoose.Schema(
+  {
+    pickerId: { type: String, default: '' },
+    pickerName: { type: String, default: '' },
+    assignedAt: { type: Date },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     order_id: {
@@ -21,7 +61,10 @@ const orderSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ['new', 'processing', 'ready', 'completed', 'cancelled', 'rto'],
+      enum: [
+        'new', 'processing', 'ready', 'completed', 'cancelled', 'rto',
+        'ASSIGNED', 'PICKING', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH', 'CANCELLED'
+      ],
       default: 'new',
     },
     item_count: {
@@ -123,6 +166,21 @@ const orderSchema = new mongoose.Schema(
       enum: ['marked_rto', 'pending_confirmation', 'rto_confirmed'],
       required: false,
     },
+    timeline: {
+      type: [timelineEntrySchema],
+      default: [],
+    },
+    pickerAssignment: {
+      type: pickerAssignmentSchema,
+      default: () => ({}),
+    },
+    pickingData: {
+      type: pickingDataSchema,
+      default: () => ({}),
+    },
+    version: { type: Number, default: 0 },
+    bagId: { type: String, default: '' },
+    rackLocation: { type: String, default: '' },
   },
   {
     timestamps: true,
@@ -135,6 +193,7 @@ orderSchema.index({ store_id: 1, status: 1 });
 orderSchema.index({ order_id: 1 });
 orderSchema.index({ sla_deadline: 1 });
 orderSchema.index({ rto_risk: 1 });
+orderSchema.index({ 'pickerAssignment.pickerId': 1, status: 1, updatedAt: 1 });
 
 module.exports = mongoose.models.DarkstoreOrder || mongoose.model('DarkstoreOrder', orderSchema);
 

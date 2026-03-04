@@ -2,6 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken, requireRole, cacheMiddleware } = require('../../core/middleware');
 const appConfig = require('../../config/app');
+const bagRackController = require('../controllers/bagRackController');
+
+// Bag/Rack endpoint – allow darkstore, admin, picker, hhd (before protected router)
+router.patch(
+  '/orders/:orderId/bag-rack',
+  authenticateToken,
+  requireRole('darkstore', 'admin', 'super_admin', 'picker', 'hhd'),
+  bagRackController.updateBagRack
+);
 
 // Import all darkstore routes
 const authRoutes = require('./authRoutes');
@@ -21,6 +30,8 @@ const analyticsRoutes = require('./analyticsRoutes');
 const hsdRoutes = require('./hsdRoutes');
 const utilitiesRoutes = require('./utilitiesRoutes');
 const settingsRoutes = require('./settingsRoutes');
+const pickOpsRoutes = require('./pickOpsRoutes');
+const issueRoutes = require('./issueRoutes');
 
 // Auth (login only) - no JWT required
 router.use('/auth', authRoutes);
@@ -45,6 +56,8 @@ protectedRouter.use('/analytics', analyticsRoutes);
 protectedRouter.use('/hsd', hsdRoutes);
 protectedRouter.use('/utilities', utilitiesRoutes);
 protectedRouter.use('/settings', settingsRoutes);
+protectedRouter.use('/pick-ops', pickOpsRoutes);
+protectedRouter.use('/issues', issueRoutes);
 router.use(protectedRouter);
 
 module.exports = router;

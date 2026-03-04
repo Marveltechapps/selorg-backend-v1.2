@@ -1,5 +1,6 @@
 /**
  * Documents routes – from frontend YAML (application-spec /documents/upload, /documents).
+ * Phase 1 RBAC: Dashboard endpoints for document verify/reject will require Admin or Warehouse role.
  */
 const express = require('express');
 const multer = require('multer');

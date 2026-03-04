@@ -11,6 +11,7 @@ const invoicingController = require('../controllers/invoicingController');
 const financeAlertsController = require('../controllers/financeAlertsController');
 const financeAnalyticsController = require('../controllers/financeAnalyticsController');
 const approvalsController = require('../controllers/approvalsController');
+const pickerWithdrawalsController = require('../controllers/pickerWithdrawalsController');
 const { authenticateToken, requireRole, cacheMiddleware } = require('../../core/middleware');
 const { validateRequest } = require('../../middleware/zodValidator');
 const appConfig = require('../../config/app');
@@ -103,6 +104,11 @@ router.post('/vendor-payments/invoices/:id/reject', ...financeAuth, validateRequ
 router.post('/vendor-payments/invoices/:id/mark-paid', ...financeAuth, validateRequest(markInvoicePaidSchema), vendorPaymentsController.markInvoicePaid);
 router.post('/vendor-payments/payments', ...financeAuth, validateRequest(createPaymentSchema), vendorPaymentsController.createPayment);
 router.get('/vendor-payments/vendors', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), vendorPaymentsController.getVendors);
+
+// Picker Withdrawals routes (Finance Picker Payouts)
+router.get('/picker-withdrawals', ...financeAuth, pickerWithdrawalsController.list);
+router.get('/picker-withdrawals/:id', ...financeAuth, pickerWithdrawalsController.getDetails);
+router.patch('/picker-withdrawals/:id', ...financeAuth, pickerWithdrawalsController.updateAction);
 
 // Refunds routes
 router.get('/refunds/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), refundsController.getRefundsSummary);
