@@ -14,7 +14,7 @@ const logger = require('../../core/utils/logger');
  */
 const getFleetOverview = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
 
     // Build query
@@ -271,7 +271,7 @@ const unassignDevice = async (req, res) => {
  */
 const getLiveSessions = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const deviceId = req.query.deviceId;
 
     const query = { store_id: storeId };
@@ -365,7 +365,7 @@ const deviceControl = async (req, res) => {
       // Log to DeviceHistory for system actions
       await DeviceHistory.create({
         device_id: deviceId,
-        store_id: req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04',
+        store_id: req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01',
         action: action.toUpperCase(),
         performed_by: req.body.performedBy || 'system',
         metadata: {
@@ -380,7 +380,7 @@ const deviceControl = async (req, res) => {
       await HSDDeviceAction.create({
         action_id: generateId('ACTION'),
         device_id: deviceId,
-        store_id: req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04',
+        store_id: req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01',
         event_type: 'system_control',
         details: `${action.replace('_', ' ').toUpperCase()} initiated remotely for ${deviceId}`,
         result: 'success',
@@ -464,7 +464,7 @@ const deviceControl = async (req, res) => {
  */
 const getIssues = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const deviceId = req.query.deviceId;
 
@@ -521,7 +521,7 @@ const reportIssue = async (req, res) => {
 
     const ticketId = generateId('T');
     const now = new Date().toISOString();
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
     await HSDDeviceIssue.create({
       ticket_id: ticketId,
@@ -555,7 +555,7 @@ const reportIssue = async (req, res) => {
  */
 const getHSDLogs = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const deviceId = req.query.deviceId;
     const eventType = req.query.eventType || 'all';
     const search = req.query.search || '';
@@ -632,7 +632,7 @@ const bulkResetDevices = async (req, res) => {
       });
     }
 
-    const storeId = req.body.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.body.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const results = [];
     const errors = [];
 
@@ -811,7 +811,7 @@ const sessionAction = async (req, res) => {
 const createRequisition = async (req, res) => {
   try {
     const { deviceIds, reason, priority } = req.body;
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
     if (!deviceIds || !Array.isArray(deviceIds) || deviceIds.length === 0) {
       return res.status(400).json({

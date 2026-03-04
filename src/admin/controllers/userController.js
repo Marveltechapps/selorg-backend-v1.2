@@ -1,10 +1,28 @@
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Role = require('../models/Role');
+const VendorUser = require('../../vendor/models/User');
 const AuditLog = require('../../common-models/AuditLog');
 const bcrypt = require('bcryptjs');
 const logger = require('../../core/utils/logger');
 const cacheInvalidation = require('../cacheInvalidation');
+
+const DASHBOARD_ROLES = ['darkstore', 'production', 'merch', 'rider', 'finance', 'warehouse', 'admin', 'vendor'];
+
+function getDashboardRole(roleName) {
+  if (!roleName || typeof roleName !== 'string') return null;
+  const r = roleName.toLowerCase().trim();
+  if (DASHBOARD_ROLES.includes(r)) return r;
+  if (r.includes('darkstore')) return 'darkstore';
+  if (r.includes('warehouse')) return 'warehouse';
+  if (r.includes('production')) return 'production';
+  if (r.includes('merch')) return 'merch';
+  if (r.includes('rider')) return 'rider';
+  if (r.includes('finance')) return 'finance';
+  if (r.includes('vendor')) return 'vendor';
+  if (r.includes('admin')) return 'admin';
+  return null;
+}
 
 async function auditAdminAction(req, moduleName, action, entityType, entityId, details = {}) {
   try {
@@ -228,6 +246,27 @@ const createUser = async (req, res, next) => {
     };
 
     const user = await User.create(userData);
+    const dashboardRole = getDashboardRole(role?.name);
+    if (dashboardRole) {
+      try {
+        await VendorUser.findOneAndUpdate(
+          { email: user.email.toLowerCase() },
+          {
+            email: user.email.toLowerCase(),
+            password: hashedPassword,
+            name: user.name,
+            role: dashboardRole,
+            assignedStores: assignedStores || [],
+            primaryStoreId: primaryStoreId || '',
+          },
+          { upsert: true, runValidators: true }
+        );
+        logger.info('Synced user to dashboard login', { email: user.email, dashboardRole });
+      } catch (syncErr) {
+        logger.warn('Failed to sync user to dashboard login', { email: user.email, err: syncErr.message });
+      }
+    }
+
     const userObj = user.toObject();
     userObj.id = userObj._id.toString();
     delete userObj._id;
@@ -339,6 +378,25 @@ const updateUser = async (req, res, next) => {
     if (primaryStoreId !== undefined) user.primaryStoreId = primaryStoreId;
 
     await user.save();
+
+    const dashboardRole = getDashboardRole(user.role);
+    if (dashboardRole) {
+      try {
+        await VendorUser.findOneAndUpdate(
+          { email: user.email.toLowerCase() },
+          {
+            $set: {
+              name: user.name,
+              role: dashboardRole,
+              assignedStores: user.assignedStores || [],
+              primaryStoreId: user.primaryStoreId || '',
+            },
+          }
+        );
+      } catch (syncErr) {
+        logger.warn('Failed to sync user update to dashboard login', { email: user.email, err: syncErr.message });
+      }
+    }
 
     const userObj = user.toObject();
     userObj.id = userObj._id.toString();

@@ -14,7 +14,7 @@ const logger = require('../../core/utils/logger');
  */
 const getOutboundSummary = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
 
     // Count active riders
@@ -73,7 +73,7 @@ const getOutboundSummary = async (req, res) => {
  */
 const getDispatchQueue = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -121,7 +121,7 @@ const getDispatchQueue = async (req, res) => {
  */
 const getActiveRiders = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
 
     // Build query
@@ -153,7 +153,7 @@ const getActiveRiders = async (req, res) => {
 const batchDispatchOrders = async (req, res) => {
   try {
     const { order_ids = [], auto_assign = true, rider_id } = req.body;
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
     let finalOrderIds = [...order_ids];
 
@@ -457,7 +457,7 @@ const batchDispatchOrders = async (req, res) => {
 const manuallyAssignRider = async (req, res) => {
   try {
     const { order_ids = [], rider_id, override_sla = false } = req.body;
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
     let finalOrderIds = [...order_ids];
 
@@ -661,7 +661,7 @@ const manuallyAssignRider = async (req, res) => {
  */
 const getOutboundTransferRequests = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -906,7 +906,7 @@ const getTransferFulfillmentStatus = async (req, res) => {
  */
 const getTransferSLASummary = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
 
     // Get all transfers for the date

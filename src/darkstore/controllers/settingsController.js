@@ -9,7 +9,7 @@ const logger = require('../../core/utils/logger');
  */
 const getSettings = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     
     let settings = await Settings.findOne({ store_id: storeId });
     
@@ -48,7 +48,7 @@ const getSettings = async (req, res) => {
  */
 const updateSettings = async (req, res) => {
   try {
-    const storeId = req.body.storeId || req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.body.storeId || req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const { settings: newSettings } = req.body;
     
     if (!newSettings) {

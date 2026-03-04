@@ -29,7 +29,7 @@ const upload = multer({
 const generateLabel = async (req, res) => {
   try {
     const { searchTerm, labelType, quantity, printerId } = req.body;
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
     if (!searchTerm || !labelType || !quantity) {
       return res.status(400).json({
@@ -115,7 +115,7 @@ const bulkUpload = async (req, res) => {
         });
       }
 
-      const storeId = req.body.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+      const storeId = req.body.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
       const validateOnly = req.body.validateOnly === 'true' || req.body.validateOnly === true;
 
       const uploadId = generateId('UPL');
@@ -217,7 +217,7 @@ const downloadUploadTemplate = async (req, res) => {
  */
 const getSystemStatus = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
     // Mock system status - in production, check actual services
     const services = [
@@ -299,7 +299,7 @@ const runSystemDiagnostics = async (req, res) => {
         status: 'running',
         estimatedCompletion: estimatedCompletion.toISOString(),
       },
-      store_id: storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04',
+      store_id: storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01',
       ip_address: req.ip || req.connection.remoteAddress,
     });
 
@@ -383,7 +383,7 @@ const forceGlobalSync = async (req, res) => {
  */
 const getAuditLogs = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const module = req.query.module || 'all';
     const userId = req.query.userId;
     const action = req.query.action;
@@ -466,7 +466,7 @@ const exportAuditLogs = async (req, res) => {
       });
     }
 
-    const storeId = req.body.storeId || req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.body.storeId || req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     
     // Build query
     const query = {

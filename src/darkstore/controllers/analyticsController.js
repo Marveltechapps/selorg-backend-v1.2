@@ -12,7 +12,7 @@ const logger = require('../../core/utils/logger');
  */
 const getRiderPerformance = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const granularity = req.query.granularity || 'day';
     const dateRange = req.query.dateRange || '7d';
 
@@ -82,7 +82,7 @@ const getRiderPerformance = async (req, res) => {
  */
 const getSlaAdherence = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const granularity = req.query.granularity || 'day';
     const dateRange = req.query.dateRange || '7d';
 
@@ -154,7 +154,7 @@ const getSlaAdherence = async (req, res) => {
  */
 const getFleetUtilization = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const granularity = req.query.granularity || 'day';
     const dateRange = req.query.dateRange || '7d';
 

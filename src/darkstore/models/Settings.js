@@ -4,7 +4,7 @@ const SettingsSchema = new mongoose.Schema({
   store_id: {
     type: String,
     required: true,
-    default: 'DS-Brooklyn-04',
+    default: 'DS-Adyar-01',
     index: true,
   },
   refreshIntervals: {

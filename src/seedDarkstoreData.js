@@ -10,10 +10,9 @@ const RTOAlert = require('./darkstore/models/RTOAlert');
 
 const Store = require('./merch/models/Store');
 
+/** Only Adyar darkstore - all orders route here */
 const STORES = [
-  { id: 'DS-Brooklyn-04', label: 'Brooklyn', lat: 40.6862, lng: -73.9777, radius: 5 },
-  { id: 'DS-Manhattan-10', label: 'Manhattan', lat: 40.7649, lng: -73.9672, radius: 3 },
-  { id: 'DS-Queens-02', label: 'Queens', lat: 40.7282, lng: -73.8625, radius: 6 },
+  { id: 'DS-Adyar-01', label: 'Adyar', lat: 13.0067, lng: 80.2573, radius: 10 },
 ];
 
 const CUSTOMER_NAMES = [
@@ -24,26 +23,12 @@ const CUSTOMER_NAMES = [
 ];
 
 const STAFF_NAMES = {
-  'DS-Brooklyn-04': {
+  'DS-Adyar-01': {
     Picker: ['Alex Rivera', 'Jordan Chen', 'Sam Williams', 'Casey Jones'],
     Packer: ['Morgan Lee', 'Riley Johnson', 'Dakota Kim'],
     Loader: ['Quinn Adams'],
     Rider: ['Blake Thompson', 'Avery Martinez'],
     Supervisor: ['Taylor Brooks'],
-  },
-  'DS-Manhattan-10': {
-    Picker: ['Emma Watson', 'Liam Park', 'Olivia Brown'],
-    Packer: ['Noah Davis', 'Sophia Miller', 'James Wilson'],
-    Loader: ['Isabella Garcia', 'Mason Rodriguez'],
-    Rider: ['Ava Lopez', 'Ethan Hill'],
-    Supervisor: ['Mia Thomas'],
-  },
-  'DS-Queens-02': {
-    Picker: ['Harper Scott', 'Elijah Green', 'Amelia Baker', 'Benjamin Adams', 'Charlotte Nelson'],
-    Packer: ['Lucas Hall', 'Ella Young'],
-    Loader: ['Henry King'],
-    Rider: ['Grace Wright', 'Daniel Torres', 'Chloe Phillips'],
-    Supervisor: ['Jack Robinson'],
   },
 };
 
@@ -63,43 +48,21 @@ const STOCK_ITEMS = [
 ];
 
 const ORDER_CONFIGS = {
-  'DS-Brooklyn-04': { newOrders: 8, processing: 5, ready: 3, baseId: 1000 },
-  'DS-Manhattan-10': { newOrders: 12, processing: 7, ready: 4, baseId: 2000 },
-  'DS-Queens-02':    { newOrders: 5, processing: 3, ready: 2, baseId: 3000 },
+  'DS-Adyar-01': { newOrders: 8, processing: 5, ready: 3, baseId: 1000 },
 };
 
 const STOCK_ALERT_CONFIGS = {
-  'DS-Brooklyn-04': [
+  'DS-Adyar-01': [
     { idx: 0, current: 3, threshold: 20, severity: 'critical' },
     { idx: 1, current: 8, threshold: 15, severity: 'warning' },
     { idx: 2, current: 12, threshold: 25, severity: 'low' },
   ],
-  'DS-Manhattan-10': [
-    { idx: 3, current: 1, threshold: 10, severity: 'critical' },
-    { idx: 4, current: 5, threshold: 30, severity: 'critical' },
-    { idx: 5, current: 15, threshold: 20, severity: 'warning' },
-    { idx: 6, current: 22, threshold: 40, severity: 'warning' },
-    { idx: 7, current: 18, threshold: 25, severity: 'low' },
-  ],
-  'DS-Queens-02': [
-    { idx: 8, current: 2, threshold: 15, severity: 'critical' },
-    { idx: 9, current: 10, threshold: 20, severity: 'warning' },
-  ],
 };
 
 const RTO_CONFIGS = {
-  'DS-Brooklyn-04': [
+  'DS-Adyar-01': [
     { issueType: 'customer_unreachable', severity: 'high', desc: 'Customer not answering phone after 3 attempts' },
     { issueType: 'address_issue', severity: 'medium', desc: 'Incomplete delivery address, building not found' },
-  ],
-  'DS-Manhattan-10': [
-    { issueType: 'delivery_failed', severity: 'critical', desc: 'Building security denied entry to rider' },
-    { issueType: 'customer_unreachable', severity: 'high', desc: 'Wrong phone number provided' },
-    { issueType: 'payment_failed', severity: 'medium', desc: 'COD payment not available, customer wants to cancel' },
-    { issueType: 'address_issue', severity: 'low', desc: 'Floor number missing from address' },
-  ],
-  'DS-Queens-02': [
-    { issueType: 'delivery_failed', severity: 'high', desc: 'Package damaged during transit, customer rejected' },
   ],
 };
 
@@ -164,7 +127,7 @@ function generateOrders(storeId) {
 function generateStaff(storeId) {
   const names = STAFF_NAMES[storeId];
   const staff = [];
-  let idx = storeId === 'DS-Brooklyn-04' ? 100 : storeId === 'DS-Manhattan-10' ? 200 : 300;
+  let idx = 100;
 
   for (const [role, roleNames] of Object.entries(names)) {
     for (const name of roleNames) {

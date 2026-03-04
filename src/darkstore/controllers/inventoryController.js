@@ -594,7 +594,7 @@ const createAdjustment = async (req, res) => {
  */
 const getCycleCount = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
 
     // Normalize date to ensure YYYY-MM-DD format

@@ -12,7 +12,7 @@ const logger = require('../../core/utils/logger');
 const getAlerts = async (req, res) => {
   try {
     logger.info(`[Get Alerts] Request received - storeId: ${req.query.storeId}, status: ${req.query.status || 'all'}`);
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const priority = req.query.priority || 'all';
     const type = req.query.type || 'all';
@@ -355,7 +355,7 @@ const performAlertAction = async (req, res) => {
  */
 const clearResolvedAlerts = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const archive = req.query.archive !== 'false';
 
     const query = {

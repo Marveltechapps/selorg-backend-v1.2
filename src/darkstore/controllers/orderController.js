@@ -33,7 +33,7 @@ async function propagateToCustomerOrder(darkstoreOrderId, darkstoreStatus) {
  */
 const getOrders = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -433,6 +433,7 @@ const cancelOrder = async (req, res) => {
       websocketService?.broadcastToRole?.('darkstore', 'order:cancelled', cancelEvent);
       websocketService?.broadcastToRole?.('admin', 'order:cancelled', cancelEvent);
       websocketService?.broadcastToRole?.('finance', 'order:cancelled', cancelEvent);
+      websocketService?.broadcast?.('order:cancelled', cancelEvent);
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({

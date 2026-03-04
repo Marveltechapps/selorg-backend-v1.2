@@ -15,7 +15,7 @@ const logger = require('../../core/utils/logger');
  */
 const getInboundSummary = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
 
     // Count trucks for today
@@ -67,7 +67,7 @@ const getInboundSummary = async (req, res) => {
  */
 const getGRNList = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const truckId = req.query.truckId;
     const search = req.query.search;
@@ -423,7 +423,7 @@ const completeGRNProcessing = async (req, res) => {
  */
 const getPutawayTasks = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const grnId = req.query.grnId;
     const page = parseInt(req.query.page) || 1;
@@ -597,7 +597,7 @@ const completePutawayTask = async (req, res) => {
  */
 const getInterStoreTransfers = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -745,7 +745,7 @@ const receiveInterStoreTransfer = async (req, res) => {
  */
 const syncInterStoreTransfers = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const now = new Date().toISOString();
 
     // In a real production app, this would call a central ERP or another store's API

@@ -6,7 +6,7 @@
 const PackingOrder = require('../models/PackingOrder');
 const PackingOrderItem = require('../models/PackingOrderItem');
 
-const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
 function toQueueItem(doc) {
   if (!doc) return null;

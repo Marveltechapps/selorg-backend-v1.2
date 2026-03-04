@@ -5,7 +5,7 @@
 
 const Picker = require('../models/Picker');
 
-const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
 function toFrontendPicker(doc) {
   if (!doc) return null;

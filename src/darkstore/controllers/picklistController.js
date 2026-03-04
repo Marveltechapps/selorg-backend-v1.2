@@ -10,7 +10,7 @@ const Picker = require('../models/Picker');
 const PackingOrder = require('../models/PackingOrder');
 const PackingOrderItem = require('../models/PackingOrderItem');
 
-const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 const ZONES = ['Ambient A', 'Ambient B', 'Chiller', 'Frozen'];
 
 function toFrontendPicklist(doc, pickerDoc) {

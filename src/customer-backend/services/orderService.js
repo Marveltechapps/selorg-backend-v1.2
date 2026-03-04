@@ -3,7 +3,10 @@ const { Order } = require('../models/Order');
 const { CustomerAddress } = require('../models/CustomerAddress');
 const { Cart } = require('../models/Cart');
 const { Product } = require('../models/Product');
-const { findNearestDarkstore, resolveStoreId } = require('./storeLocator');
+const { resolveStoreId } = require('./storeLocator');
+
+/** All orders route to Adyar darkstore only */
+const ADYAR_STORE_ID = 'DS-Adyar-01';
 
 function formatOrderForApp(doc) {
   const o = doc.toObject ? doc.toObject() : doc;
@@ -147,8 +150,7 @@ async function createOrder(userId, body) {
   const orderNumber = await generateOrderNumber();
   const estimatedDelivery = new Date(Date.now() + 60 * 60 * 1000 * 24); // +1 day
 
-  const nearestStoreCode = await findNearestDarkstore(address.latitude, address.longitude);
-  const matchedStoreObjectId = await resolveStoreId(nearestStoreCode);
+  const matchedStoreObjectId = await resolveStoreId(ADYAR_STORE_ID);
 
   const resolvedMethodType = paymentMethodType || (paymentMethodId ? 'card' : 'cash');
   const paymentStatus = resolvedMethodType === 'cash' ? 'cod_pending' : 'paid';
@@ -219,9 +221,7 @@ async function createOrder(userId, body) {
         // ignore
       }
 
-    const storeId = nearestStoreCode
-      || process.env.DEFAULT_STORE_ID
-      || 'DS-DEFAULT-01';
+    const storeId = ADYAR_STORE_ID;
     const orderId = response.orderNumber || response.id || `ORD-${Date.now()}`;
       const itemCount = (response.items || []).length || 1;
       const slaMinutes = parseInt(process.env.DEFAULT_SLA_MINUTES || '15', 10);

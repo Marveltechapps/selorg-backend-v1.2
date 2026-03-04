@@ -9,7 +9,7 @@ const AuditLog = require('../../production/models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
 
-const DEFAULT_STORE_ID = process.env.DEFAULT_STORE_ID || 'DS-Brooklyn-04';
+const DEFAULT_STORE_ID = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 const REASON_CODE = 'production_output';
 
 /**
