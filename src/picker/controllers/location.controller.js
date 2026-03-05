@@ -138,6 +138,38 @@ const setUserLocation = async (req, res, next) => {
 };
 
 /**
+ * GET /stores/nearby
+ * Returns store/work location codes within radius (for geo-fenced shift availability).
+ * Query: lat, lng, radiusKm (default 3)
+ */
+const getStoresNearby = async (req, res, next) => {
+  try {
+    const lat = req.query.lat ? parseFloat(req.query.lat) : null;
+    const lng = req.query.lng ? parseFloat(req.query.lng) : null;
+    const radiusKm = req.query.radiusKm ? parseFloat(req.query.radiusKm) : 3;
+
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({
+        success: false,
+        message: 'lat and lng query params are required',
+      });
+    }
+
+    const locations = await locationService.getAllLocations(lat, lng, radiusKm);
+    const stores = (locations || []).map((l) => ({
+      locationId: l.locationId || l._id?.toString(),
+      name: l.name,
+      distance: l.distance,
+      distanceDisplay: l.distanceDisplay,
+    }));
+
+    success(res, { stores, count: stores.length });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * POST /locations/track
  * Update user's last known location
  * Body: { latitude, longitude }
@@ -169,8 +201,9 @@ const trackUserLocation = async (req, res, next) => {
 module.exports = {
   getLocations,
   getNearestLocation,
+  getStoresNearby,
   getLocationById,
   validateLocation,
   setUserLocation,
-  trackUserLocation
+  trackUserLocation,
 };

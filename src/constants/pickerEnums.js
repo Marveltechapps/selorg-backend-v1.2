@@ -49,10 +49,20 @@ const WITHDRAWAL_STATUS = {
   REJECTED: 'REJECTED',
 };
 
+/** Derived worker status from heartbeat (for Live Picker Board) */
+const WORKER_STATUS = {
+  AVAILABLE: 'AVAILABLE',
+  PICKING: 'PICKING',
+  ON_BREAK: 'ON_BREAK',
+  OFFLINE: 'OFFLINE',
+  DEVICE_IDLE: 'DEVICE_IDLE',
+};
+
 module.exports = {
   PICKER_STATUS,
   ORDER_STATUS,
   SHIFT_STATUS,
   DEVICE_STATUS,
   WITHDRAWAL_STATUS,
+  WORKER_STATUS,
 };

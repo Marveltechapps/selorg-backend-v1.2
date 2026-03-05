@@ -14,6 +14,9 @@ router.get('/locations', requireAuth, locationController.getLocations);
 // Get nearest location to user
 router.post('/locations/nearest', requireAuth, locationController.getNearestLocation);
 
+// Get stores/locations nearby (for geo-fenced shift availability)
+router.get('/stores/nearby', requireAuth, locationController.getStoresNearby);
+
 // Get specific location by ID
 router.get('/locations/:locationId', requireAuth, locationController.getLocationById);
 

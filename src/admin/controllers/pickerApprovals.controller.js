@@ -3,7 +3,7 @@
  * Workforce approval workflow for picker users.
  */
 const pickerApprovalsService = require('../services/pickerApprovals.service');
-const { getLogsByPicker } = require('../../picker/services/pickerActionLog.service');
+const { getLogsByPicker, getAllLogs } = require('../../picker/services/pickerActionLog.service');
 const logger = require('../../core/utils/logger');
 
 /**
@@ -101,9 +101,34 @@ async function getPickerActionLogs(req, res, next) {
   }
 }
 
+/**
+ * GET /admin/picker-action-logs - List all picker action logs (audit)
+ * Query: pickerId, orderId, actionType, startDate, endDate, page, limit
+ * RBAC: admin, super_admin
+ */
+async function listAllPickerActionLogs(req, res, next) {
+  try {
+    const { pickerId, orderId, actionType, startDate, endDate, page, limit } = req.query;
+    const result = await getAllLogs({
+      pickerId: pickerId || undefined,
+      orderId: orderId || undefined,
+      actionType: actionType || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 50,
+    });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    logger.error('Admin list picker action logs failed', { error: err.message });
+    next(err);
+  }
+}
+
 module.exports = {
   listPickers,
   getPickerById,
   updatePickerStatus,
   getPickerActionLogs,
+  listAllPickerActionLogs,
 };

@@ -8,9 +8,9 @@ const Picker = require('../models/Picker');
 const PickerUser = require('../../picker/models/user.model');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const pickerMetricsService = require('../services/pickerMetricsService');
+const { deriveWorkerStatus } = require('../../picker/controllers/heartbeat.controller');
 
 const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
-const ONLINE_THRESHOLD_MS = 90 * 1000; // 90 seconds
 
 function toFrontendPicker(doc) {
   if (!doc) return null;
@@ -26,23 +26,25 @@ function toFrontendPicker(doc) {
 
 /**
  * Get Live Pickers (PickerUser workforce with heartbeat data)
+ * Worker Status Engine: derivedStatus = AVAILABLE | PICKING | ON_BREAK | OFFLINE
  * GET /api/v1/darkstore/pickers/live
  */
 const getPickersLive = async (req, res) => {
   try {
     const pickers = await PickerUser.find({ status: PICKER_STATUS.ACTIVE })
-      .select('name phone lastSeenAt batteryLevel activeOrderId')
+      .select('name phone lastSeenAt batteryLevel activeOrderId onBreak')
       .lean();
 
     const now = Date.now();
     const data = pickers.map((p) => {
-      const lastSeenAt = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : null;
-      const online = lastSeenAt ? now - lastSeenAt < ONLINE_THRESHOLD_MS : false;
+      const derivedStatus = deriveWorkerStatus(p, now);
+      const online = derivedStatus !== 'OFFLINE';
 
       return {
         id: String(p._id),
         name: p.name || p.phone || 'Unknown',
         online,
+        derivedStatus,
         batteryLevel: p.batteryLevel ?? null,
         activeOrderId: p.activeOrderId || null,
         lastActivity: p.lastSeenAt || null,

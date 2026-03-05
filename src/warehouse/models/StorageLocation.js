@@ -52,6 +52,11 @@ const StorageLocationSchema = new mongoose.Schema({
   collection: 'storage_locations',
 });
 
+// Virtual: bin as alias for shelf (zone-aisle-rack-bin convention per darkstore ops plan)
+StorageLocationSchema.virtual('bin').get(function () {
+  return this.shelf != null ? this.shelf : null;
+});
+
 // Compound index for location lookup
 StorageLocationSchema.index({ aisle: 1, rack: 1, shelf: 1 }, { unique: true });
 StorageLocationSchema.index({ status: 1, zone: 1 });

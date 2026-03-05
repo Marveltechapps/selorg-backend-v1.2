@@ -10,6 +10,7 @@ const DarkstoreOrder = require('../../darkstore/models/Order');
 const { Order: CustomerOrder } = require('../../customer-backend/models/Order');
 const { triggerAutoRefundForMissingItems } = require('../../customer-backend/services/autoRefundService');
 const { ORDER_STATUS } = require('../../constants/pickerEnums');
+const { canTransition } = require('../../darkstore/utils/orderStateMachine');
 const cache = require('../../utils/cache');
 
 async function syncStatusToDarkstore(orderId, hhdStatus, payload = {}) {
@@ -22,6 +23,8 @@ async function syncStatusToDarkstore(orderId, hhdStatus, payload = {}) {
     order.version = (order.version || 0) + 1;
 
     if (hhdStatus === 'picking' || hhdStatus === 'PICKING') {
+      const { valid } = canTransition(order.status, ORDER_STATUS.PICKING);
+      if (!valid) return;
       order.status = ORDER_STATUS.PICKING;
       order.pickingData = order.pickingData || {};
       order.pickingData.startTime = order.pickingData.startTime || now;
@@ -32,6 +35,8 @@ async function syncStatusToDarkstore(orderId, hhdStatus, payload = {}) {
         updatedByRole: 'picker',
       });
     } else if (hhdStatus === 'completed' || hhdStatus === 'COMPLETED') {
+      const { valid } = canTransition(order.status, ORDER_STATUS.PICKED);
+      if (!valid) return;
       order.status = ORDER_STATUS.PICKED;
       order.pickingData = order.pickingData || {};
       order.pickingData.endTime = now;

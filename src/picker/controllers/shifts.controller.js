@@ -6,7 +6,10 @@ const { success, error } = require('../utils/response.util');
 
 const getAvailable = async (req, res, next) => {
   try {
-    const data = await shiftsService.getAvailable(req.userId);
+    const lat = req.query.lat ? parseFloat(req.query.lat) : null;
+    const lng = req.query.lng ? parseFloat(req.query.lng) : null;
+    const radiusKm = req.query.radiusKm ? parseFloat(req.query.radiusKm) : 3;
+    const data = await shiftsService.getAvailable(req.userId, { lat, lng, radiusKm });
     success(res, data);
   } catch (err) {
     next(err);

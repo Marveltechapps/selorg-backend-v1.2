@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getShelfView,
+  getProductLocation,
   getStockLevels,
   updateStockLevel,
   deleteInventoryItem,
@@ -19,6 +20,9 @@ const {
 
 // GET /api/darkstore/inventory/shelf-view
 router.get('/shelf-view', getShelfView);
+
+// GET /api/darkstore/inventory/product-location/:sku
+router.get('/product-location/:sku', getProductLocation);
 
 // GET /api/darkstore/inventory/stock-levels
 router.get('/stock-levels', getStockLevels);

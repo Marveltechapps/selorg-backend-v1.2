@@ -32,6 +32,7 @@ const utilitiesRoutes = require('./utilitiesRoutes');
 const settingsRoutes = require('./settingsRoutes');
 const pickOpsRoutes = require('./pickOpsRoutes');
 const issueRoutes = require('./issueRoutes');
+const operationsRoutes = require('./operationsRoutes');
 
 // Auth (login only) - no JWT required
 router.use('/auth', authRoutes);
@@ -58,6 +59,7 @@ protectedRouter.use('/utilities', utilitiesRoutes);
 protectedRouter.use('/settings', settingsRoutes);
 protectedRouter.use('/pick-ops', pickOpsRoutes);
 protectedRouter.use('/issues', issueRoutes);
+protectedRouter.use('/operations', operationsRoutes);
 router.use(protectedRouter);
 
 module.exports = router;

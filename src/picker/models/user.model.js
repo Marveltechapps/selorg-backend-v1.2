@@ -58,10 +58,12 @@ const userSchema = new mongoose.Schema(
       employeeId: { type: String },
       department: { type: String },
     },
-    /** Heartbeat/presence – updated by HHD device. Offline when now - lastSeenAt > 90s */
+    /** Heartbeat/presence – updated by HHD device. Offline when now - lastSeenAt > 60s */
     lastSeenAt: { type: Date },
     batteryLevel: { type: Number }, // 0-100
     activeOrderId: { type: String },
+    /** True when picker has started break (from shifts/start-break) */
+    onBreak: { type: Boolean, default: false },
     gpsLocation: {
       latitude: { type: Number },
       longitude: { type: Number },

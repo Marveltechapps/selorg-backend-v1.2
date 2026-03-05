@@ -1,5 +1,7 @@
 const Shelf = require('../models/Shelf');
 const ShelfSKU = require('../models/ShelfSKU');
+const StorageLocation = require('../../warehouse/models/StorageLocation');
+const { fromStorageLocation } = require('../utils/inventoryLocationUtil');
 const ShelfIssue = require('../models/ShelfIssue');
 const ShelfActivity = require('../models/ShelfActivity');
 const InventoryItem = require('../models/InventoryItem');
@@ -1023,8 +1025,45 @@ const createRestock = async (req, res) => {
   }
 };
 
+/**
+ * Get product location code (zone-aisle-rack-bin) by SKU
+ * GET /api/darkstore/inventory/product-location/:sku
+ * For HHD/picker pick screen to display location.
+ */
+const getProductLocation = async (req, res) => {
+  try {
+    const { sku } = req.params;
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID;
+    const loc = await StorageLocation.findOne({ sku, status: 'occupied' }).lean();
+    if (!loc) {
+      return res.status(200).json({
+        success: true,
+        sku,
+        locationCode: null,
+        message: 'No location found for this SKU',
+      });
+    }
+    const locationCode = fromStorageLocation(loc);
+    res.status(200).json({
+      success: true,
+      sku,
+      locationCode,
+      zone: loc.zone,
+      aisle: loc.aisle,
+      rack: loc.rack,
+      bin: loc.shelf,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get product location',
+    });
+  }
+};
+
 module.exports = {
   getShelfView,
+  getProductLocation,
   getStockLevels,
   updateStockLevel,
   deleteInventoryItem,

@@ -22,6 +22,7 @@ const complianceRoutes = require('./complianceRoutes');
 const applicationsRoutes = require('./applicationsRoutes');
 const customerRoutes = require('./customerRoutes');
 const pickerApprovalsRoutes = require('./pickerApprovalsRoutes');
+const pickerActionLogsRoutes = require('./pickerActionLogsRoutes');
 
 const router = express.Router();
 
@@ -52,6 +53,7 @@ protectedRouter.use('/notifications', notificationsRoutes);
 protectedRouter.use('/fraud', fraudRoutes);
 protectedRouter.use('/compliance', complianceRoutes);
 protectedRouter.use('/customers', customerRoutes);
+protectedRouter.use('/picker-action-logs', pickerActionLogsRoutes);
 protectedRouter.use('/pickers', pickerApprovalsRoutes);
 router.use(protectedRouter);
 

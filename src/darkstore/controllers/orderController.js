@@ -1,4 +1,5 @@
 const Order = require('../models/Order');
+const OperationalAlert = require('../models/OperationalAlert');
 const RTOAlert = require('../models/RTOAlert');
 const { logPickerAction, getLogsByOrder } = require('../../picker/services/pickerActionLog.service');
 const CustomerCall = require('../models/CustomerCall');
@@ -10,6 +11,8 @@ const { Order: CustomerOrder } = require('../../customer-backend/models/Order');
 const { triggerAutoRefundForMissingItems } = require('../../customer-backend/services/autoRefundService');
 const websocketService = require('../../utils/websocket');
 const { ORDER_STATUS } = require('../../constants/pickerEnums');
+const { validateTransition, canAssign, canStartPicking, canCompletePicking } = require('../utils/orderStateMachine');
+const orderAssignmentService = require('../services/orderAssignmentService');
 
 const DARKSTORE_TO_CUSTOMER_STATUS = {
   processing: 'confirmed',
@@ -353,7 +356,9 @@ const updateOrder = async (req, res) => {
     const urgencyMap = { normal: 'safe', warning: 'warning', critical: 'critical' };
 
     if (status && statusMap[status]) {
-      order.status = statusMap[status];
+      const newStatus = statusMap[status];
+      validateTransition(order.status, newStatus);
+      order.status = newStatus;
     }
     if (urgency && urgencyMap[urgency]) {
       order.sla_status = urgencyMap[urgency];
@@ -388,7 +393,8 @@ const updateOrder = async (req, res) => {
       message: 'Order updated',
     });
   } catch (error) {
-    res.status(500).json({
+    const code = error.statusCode || 500;
+    res.status(code).json({
       success: false,
       error: error.message || 'Failed to update order',
     });
@@ -412,6 +418,7 @@ const cancelOrder = async (req, res) => {
       });
     }
 
+    validateTransition(order.status, 'cancelled');
     order.status = 'cancelled';
     if (reason) order.rto_reason = reason;
     await order.save();
@@ -454,7 +461,8 @@ const cancelOrder = async (req, res) => {
       message: `Order ${orderId} cancelled`,
     });
   } catch (error) {
-    res.status(500).json({
+    const code = error.statusCode || 500;
+    res.status(code).json({
       success: false,
       error: error.message || 'Failed to cancel order',
     });
@@ -464,19 +472,38 @@ const cancelOrder = async (req, res) => {
 /**
  * Assign picker to order
  * PATCH /api/v1/darkstore/orders/:orderId/assign
- * Body: { pickerId, pickerName }
+ * Body: { pickerId, pickerName } or { autoAssign: true } to use Order Assignment Engine
  */
 const assignOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { pickerId, pickerName } = req.body || {};
+    const { pickerId, pickerName, autoAssign } = req.body || {};
     const userId = req.user?.id || '';
     const userRole = req.user?.role || '';
 
-    if (!pickerId || !pickerName) {
+    let resolvedPickerId = pickerId;
+    let resolvedPickerName = pickerName;
+
+    if (autoAssign) {
+      const order = await Order.findOne({ order_id: orderId }).lean();
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' });
+      }
+      const best = await orderAssignmentService.assignToBestPicker(orderId, order.store_id, order);
+      if (!best) {
+        return res.status(400).json({
+          success: false,
+          error: 'No available picker for auto-assign. Try manual assignment or ensure ORDER_ASSIGNMENT_STRATEGY is set.',
+        });
+      }
+      resolvedPickerId = best.id;
+      resolvedPickerName = best.name;
+    }
+
+    if (!resolvedPickerId || !resolvedPickerName) {
       return res.status(400).json({
         success: false,
-        error: 'pickerId and pickerName are required',
+        error: 'pickerId and pickerName are required (or use autoAssign: true)',
       });
     }
 
@@ -488,18 +515,25 @@ const assignOrder = async (req, res) => {
       });
     }
 
+    if (!canAssign(order.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Order cannot be assigned in current status "${order.status}". Order must be new, processing, or ready.`,
+      });
+    }
+
     const now = new Date();
-    const initials = (pickerName || '')
+    const initials = (resolvedPickerName || '')
       .split(/\s+/)
       .map((s) => s.charAt(0))
       .join('')
       .substring(0, 3)
       .toUpperCase() || 'UA';
 
-    order.assignee = { id: pickerId, name: pickerName, initials };
+    order.assignee = { id: resolvedPickerId, name: resolvedPickerName, initials };
     order.pickerAssignment = {
-      pickerId,
-      pickerName,
+      pickerId: resolvedPickerId,
+      pickerName: resolvedPickerName,
       assignedAt: now,
     };
     order.status = ORDER_STATUS.ASSIGNED;
@@ -520,9 +554,9 @@ const assignOrder = async (req, res) => {
     try {
       logPickerAction({
         actionType: 'order_assigned',
-        pickerId: String(pickerId),
+        pickerId: String(resolvedPickerId),
         orderId,
-        metadata: { pickerName },
+        metadata: { pickerName: resolvedPickerName, autoAssign: !!autoAssign },
       }).catch(() => {});
     } catch (e) { /* non-blocking */ }
     try {
@@ -537,6 +571,7 @@ const assignOrder = async (req, res) => {
       websocketService?.broadcastToRole?.('darkstore', 'order:updated', event);
       websocketService?.broadcastToRole?.('admin', 'order:updated', event);
       websocketService?.broadcast?.('ORDER_STATUS_UPDATED', event);
+      websocketService?.broadcast?.('ORDER_ASSIGNED', event);
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({
@@ -546,7 +581,7 @@ const assignOrder = async (req, res) => {
       assignee: order.assignee,
       pickerAssignment: order.pickerAssignment,
       version: order.version,
-      message: `Order ${orderId} assigned to ${pickerName}`,
+      message: `Order ${orderId} assigned to ${resolvedPickerName}`,
     });
   } catch (error) {
     res.status(500).json({
@@ -581,6 +616,13 @@ const startPicking = async (req, res) => {
         success: false,
         error: 'Order was modified. Please refresh and try again.',
         currentVersion: order.version,
+      });
+    }
+
+    if (!canStartPicking(order.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot start picking: order must be ASSIGNED. Current status: "${order.status}"`,
       });
     }
 
@@ -623,6 +665,7 @@ const startPicking = async (req, res) => {
       websocketService?.broadcastToRole?.('darkstore', 'order:updated', event);
       websocketService?.broadcastToRole?.('admin', 'order:updated', event);
       websocketService?.broadcast?.('ORDER_STATUS_UPDATED', event);
+      websocketService?.broadcast?.('PICKING_STARTED', event);
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({
@@ -667,6 +710,13 @@ const completePicking = async (req, res) => {
         success: false,
         error: 'Order was modified. Please refresh and try again.',
         currentVersion: order.version,
+      });
+    }
+
+    if (!canCompletePicking(order.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot complete picking: order must be PICKING. Current status: "${order.status}"`,
       });
     }
 
@@ -775,6 +825,32 @@ const completePicking = async (req, res) => {
       websocketService?.broadcastToRole?.('darkstore', 'order:updated', event);
       websocketService?.broadcastToRole?.('admin', 'order:updated', event);
       websocketService?.broadcast?.('ORDER_STATUS_UPDATED', event);
+      websocketService?.broadcast?.('ORDER_COMPLETED', event);
+      if (missingForRefund.length > 0) {
+        websocketService?.broadcast?.('MISSING_ITEM_REPORTED', {
+          order_id: orderId,
+          store_id: order.store_id,
+          missingItems: order.pickingData.missingItems,
+          pickerId: pickerIdForLog,
+          updated_at: now,
+        });
+        if (missingForRefund.length >= 2) {
+          try {
+            const alert = await OperationalAlert.create({
+              alertType: 'MULTIPLE_MISSING_ITEMS',
+              storeId: order.store_id,
+              orderId,
+              pickerId: pickerIdForLog || '',
+              title: `Multiple missing items: ${orderId}`,
+              description: `${missingForRefund.length} items missing in order ${orderId}`,
+              metadata: { missingItems: order.pickingData.missingItems },
+              status: 'open',
+            });
+            websocketService?.broadcastToRole?.('darkstore', 'OPERATIONAL_ALERT', alert);
+            websocketService?.broadcastToRole?.('admin', 'OPERATIONAL_ALERT', alert);
+          } catch (err) { /* non-blocking */ }
+        }
+      }
     } catch (e) { /* non-blocking */ }
 
     res.status(200).json({

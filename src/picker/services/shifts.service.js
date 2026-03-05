@@ -69,9 +69,26 @@ async function hasShiftForToday(userId, shiftId, date) {
   return selected.some((s) => s?.id === shiftIdStr || String(s?.id) === shiftIdStr);
 }
 
-const getAvailable = async (userId) => {
+const getAvailable = async (userId, geoFilter = {}) => {
   try {
-    const list = await PickerShift.find().sort({ id: 1 }).lean();
+    let query = {};
+    const { lat, lng, radiusKm = 3 } = geoFilter;
+    if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+      try {
+        const locationService = require('./location.service');
+        const nearbyLocations = await locationService.getAllLocations(lat, lng, radiusKm);
+        if (nearbyLocations && nearbyLocations.length > 0) {
+          const locationIds = nearbyLocations.map((l) => l.locationId || l._id?.toString()).filter(Boolean);
+          query.$or = [
+            { siteId: { $in: locationIds } },
+            { site: { $in: locationIds } },
+          ];
+        }
+      } catch (_) {
+        /* Fallback: no geo filter on error */
+      }
+    }
+    const list = await PickerShift.find(Object.keys(query).length ? query : {}).sort({ id: 1 }).lean();
     return list.map((s) => ({ ...s, id: s.id || s._id?.toString() }));
   } catch (_) {
     return [];
@@ -249,6 +266,10 @@ const startBreak = async (userId) => {
     await withTimeout(doc.save(), DB_TIMEOUT_MS);
 
     try {
+      await User.findByIdAndUpdate(userId, { $set: { onBreak: true } });
+    } catch (_) {}
+
+    try {
       if (websocketService?.broadcast) {
         websocketService.broadcast('attendance:BREAK_STARTED', {
           attendanceId: doc._id,
@@ -284,6 +305,10 @@ const endBreak = async (userId) => {
     doc.breaks = breaks;
     doc.status = 'ON_DUTY';
     await withTimeout(doc.save(), DB_TIMEOUT_MS);
+
+    try {
+      await User.findByIdAndUpdate(userId, { $set: { onBreak: false } });
+    } catch (_) {}
 
     try {
       if (websocketService?.broadcast) {
