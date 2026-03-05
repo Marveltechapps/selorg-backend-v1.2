@@ -182,17 +182,23 @@ const completeOrder = async (req, res) => {
 /**
  * Report Missing Item
  * POST /api/v1/darkstore/packing/orders/:orderId/report-missing
+ * Body: { sku, quantity?, reason?, replacementSku?, replacementProductName?, replacementQty? }
  */
 const reportMissingItem = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { sku, quantity = 1, reason } = req.body || {};
+    const { sku, quantity = 1, reason, replacementSku, replacementProductName, replacementQty } = req.body || {};
 
     if (!sku) return res.status(400).json({ success: false, error: 'sku is required' });
 
+    const update = { status: 'missing' };
+    if (replacementSku != null) update.replacementSku = replacementSku;
+    if (replacementProductName != null) update.replacementProductName = replacementProductName;
+    if (replacementQty != null) update.replacementQty = replacementQty;
+
     const item = await PackingOrderItem.findOneAndUpdate(
       { order_id: orderId, sku },
-      { $set: { status: 'missing' } },
+      { $set: update },
       { new: true }
     ).lean();
     if (!item) return res.status(404).json({ success: false, error: 'Item not found in order' });

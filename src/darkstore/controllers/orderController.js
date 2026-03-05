@@ -424,6 +424,20 @@ const cancelOrder = async (req, res) => {
     await order.save();
     await cache.delByPattern('dashboard:*');
 
+    try {
+      const { logAdminAction } = require('../../admin/services/adminAudit.service');
+      const adminUserId = req.user?.userId || req.user?.id;
+      await logAdminAction({
+        module: 'admin',
+        action: 'order_cancelled',
+        entityType: 'order',
+        entityId: orderId,
+        userId: adminUserId,
+        details: { storeId: order.store_id, reason: reason || '', cancelledBy: req.user?.role || 'admin' },
+        req,
+      });
+    } catch (auditErr) { /* non-blocking */ }
+
     // Propagate cancellation to the customer order so the customer app reflects it
     try {
       const customerOrder = await CustomerOrder.findOne({ orderNumber: orderId }).lean();
@@ -573,6 +587,14 @@ const assignOrder = async (req, res) => {
       websocketService?.broadcast?.('ORDER_STATUS_UPDATED', event);
       websocketService?.broadcast?.('ORDER_ASSIGNED', event);
     } catch (e) { /* non-blocking */ }
+
+    try {
+      const pickerNotificationService = require('../../picker/services/pickerNotification.service');
+      await pickerNotificationService.sendOrderAssignedPush(resolvedPickerId, orderId, {
+        orderItemCount: order.item_count,
+        storeId: order.store_id,
+      });
+    } catch (pushErr) { /* non-blocking */ }
 
     res.status(200).json({
       success: true,
@@ -733,6 +755,9 @@ const completePicking = async (req, res) => {
         orderedQty: m.orderedQty ?? 0,
         scannedQty: m.scannedQty ?? 0,
         reason: m.reason || '',
+        replacementSku: m.replacementSku || '',
+        replacementProductName: m.replacementProductName || '',
+        replacementQty: m.replacementQty ?? 0,
       }));
     } else {
       order.pickingData.missingItems = order.pickingData.missingItems || [];
@@ -812,6 +837,13 @@ const completePicking = async (req, res) => {
           metadata: { refundTriggered },
         }).catch(() => {});
       } catch (e) { /* non-blocking */ }
+
+      try {
+        const walletService = require('../../picker/services/wallet.service');
+        await walletService.creditForOrder(pickerIdForLog, orderId, undefined, { storeId: order.store_id });
+      } catch (creditErr) {
+        console.warn('[completePicking] Per-order earnings credit failed:', creditErr?.message);
+      }
     }
     try {
       const event = {

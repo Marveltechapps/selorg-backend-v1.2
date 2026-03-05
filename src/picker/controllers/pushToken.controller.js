@@ -6,7 +6,9 @@ const { success } = require('../utils/response.util');
 
 const register = async (req, res, next) => {
   try {
-    const ok = await pushTokenService.register(req.body);
+    const body = { ...req.body };
+    if (req.userId && !body.userId) body.userId = String(req.userId);
+    const ok = await pushTokenService.register(body);
     success(res, { registered: ok });
   } catch (err) {
     next(err);

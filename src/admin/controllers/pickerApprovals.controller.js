@@ -65,7 +65,7 @@ async function updatePickerStatus(req, res, next) {
       });
     }
     const approvedBy = req.user?.userId || req.user?.id;
-    const picker = await pickerApprovalsService.updatePickerStatus(id, { status, rejectedReason }, approvedBy);
+    const picker = await pickerApprovalsService.updatePickerStatus(id, { status, rejectedReason }, approvedBy, req);
     if (!picker) {
       return res.status(404).json({
         success: false,

@@ -16,6 +16,13 @@ const ACTION_MAP = {
   role_assign: 'assign_role',
   permissions_update: 'update_permissions',
   user_suspend: 'suspend_user',
+  picker_approved: 'picker_approved',
+  picker_rejected: 'picker_rejected',
+  picker_blocked: 'picker_blocked',
+  picker_unblocked: 'picker_unblocked',
+  order_cancelled: 'order_cancelled',
+  device_assigned: 'device_assigned',
+  device_returned: 'device_returned',
 };
 
 const getAccessLogs = asyncHandler(async (req, res) => {

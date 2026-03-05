@@ -292,6 +292,15 @@ if (process.env.NODE_ENV !== 'test') {
       version: process.env.API_VERSION || '1.0.0',
     });
     logger.info('WebSocket server initialized');
+
+    // Start operational alerts job (ORDER_SLA_BREACHED, PICKER_INACTIVE)
+    try {
+      const operationalAlertsJob = require('./darkstore/jobs/operationalAlertsJob');
+      operationalAlertsJob.start(90 * 1000); // every 90 seconds
+      logger.info('Operational alerts job started (interval: 90s)');
+    } catch (jobErr) {
+      logger.warn('Operational alerts job failed to start', { error: jobErr?.message });
+    }
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       logger.error('Port already in use', {

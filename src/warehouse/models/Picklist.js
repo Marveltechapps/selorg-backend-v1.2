@@ -8,6 +8,7 @@ const PicklistSchema = new mongoose.Schema({
   priority: { type: String, enum: ['high', 'medium', 'low'], default: 'medium' },
   status: { type: String, enum: ['queued', 'assigned', 'picking', 'completed'], default: 'queued' },
   picker: { type: String },
+  pickerId: { type: String, index: true },
   zone: { type: String }
 }, { timestamps: true, collection: 'warehouse_picklists' });
 

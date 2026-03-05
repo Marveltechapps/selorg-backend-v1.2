@@ -32,6 +32,20 @@ const devicesController = {
     if (!device) {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
+    if (action === 'assign' || action === 'return') {
+      try {
+        const { logAdminAction } = require('../../admin/services/adminAudit.service');
+        await logAdminAction({
+          module: 'admin',
+          action: action === 'assign' ? 'device_assigned' : 'device_returned',
+          entityType: 'device',
+          entityId: id,
+          userId: req.user?.userId || req.user?.id,
+          details: { deviceId: device.deviceId, pickerId: action === 'assign' ? pickerId : null },
+          req,
+        });
+      } catch (auditErr) { /* non-blocking */ }
+    }
     await cacheInvalidation.invalidateWarehouse().catch(() => {});
     res.status(200).json({ success: true, data: device });
   }),

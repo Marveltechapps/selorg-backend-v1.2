@@ -168,9 +168,31 @@ async function getPickerById(id) {
 }
 
 /**
- * Update picker status (approve, reject, block, unblock, request re-upload)
+ * Map status to audit action name
  */
-async function updatePickerStatus(id, { status, rejectedReason }, approvedBy) {
+function getAuditActionForStatus(status) {
+  switch (status) {
+    case PICKER_STATUS.ACTIVE:
+      return 'picker_approved';
+    case PICKER_STATUS.REJECTED:
+      return 'picker_rejected';
+    case PICKER_STATUS.BLOCKED:
+      return 'picker_blocked';
+    case PICKER_STATUS.PENDING:
+      return 'picker_unblocked';
+    default:
+      return 'picker_status_updated';
+  }
+}
+
+/**
+ * Update picker status (approve, reject, block, unblock, request re-upload)
+ * @param {string} id - Picker user ID
+ * @param {object} opts - { status, rejectedReason }
+ * @param {string} approvedBy - Admin user ID
+ * @param {object} [req] - Express request for audit (optional)
+ */
+async function updatePickerStatus(id, { status, rejectedReason }, approvedBy, req) {
   const picker = await PickerUser.findById(id);
   if (!picker) return null;
 
@@ -204,6 +226,22 @@ async function updatePickerStatus(id, { status, rejectedReason }, approvedBy) {
   }
 
   await picker.save();
+
+  try {
+    const { logAdminAction } = require('./adminAudit.service');
+    await logAdminAction({
+      module: 'admin',
+      action: getAuditActionForStatus(status),
+      entityType: 'picker',
+      entityId: id,
+      userId: approvedBy,
+      details: { pickerName: picker.name, pickerPhone: picker.phone, rejectedReason: rejectedReason || undefined },
+      req,
+    });
+  } catch (auditErr) {
+    console.warn('[pickerApprovals] Admin audit log failed:', auditErr?.message);
+  }
+
   return getPickerById(id);
 }
 

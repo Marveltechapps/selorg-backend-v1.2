@@ -25,6 +25,9 @@ const packingOrderItemSchema = new mongoose.Schema(
       enum: ['pending', 'scanned', 'missing', 'damaged'],
       default: 'pending',
     },
+    replacementSku: { type: String, default: '' },
+    replacementProductName: { type: String, default: '' },
+    replacementQty: { type: Number, default: 0 },
     order_id: {
       type: String,
       required: true,

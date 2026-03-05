@@ -126,6 +126,41 @@ const start = async (userId, body) => {
         if (!hasShift) {
           return { success: false, error: 'You are not assigned to this shift today' };
         }
+
+        // Server-side geofence: require location validation when shift has a work location
+        const shiftLocationId = shiftDoc.siteId || shiftDoc.site;
+        if (shiftLocationId) {
+          const { locationId, latitude, longitude } = body || {};
+          const locId = locationId ? String(locationId) : shiftLocationId;
+          if (latitude == null || longitude == null) {
+            return {
+              success: false,
+              error: 'Location verification required. Please ensure you are at the work location and grant location access.',
+            };
+          }
+          try {
+            const locationService = require('./location.service');
+            const validation = await locationService.validateLocation(
+              locId,
+              parseFloat(latitude),
+              parseFloat(longitude)
+            );
+            if (!validation.valid) {
+              const radiusM = validation.geofenceRadius || 500;
+              return {
+                success: false,
+                error: `Outside work location. Please move within ${radiusM}m of the store to start your shift.`,
+              };
+            }
+          } catch (locErr) {
+            console.warn('[shifts] Location validation error:', locErr?.message);
+            return {
+              success: false,
+              error: 'Unable to verify location. Please check your connection and try again.',
+            };
+          }
+        }
+
         const config = await PickerSlaConfig.getConfig();
         const tolerance = config?.lateTolerance_minutes ?? 5;
         const now = new Date();

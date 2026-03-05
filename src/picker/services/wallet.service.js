@@ -10,6 +10,7 @@ const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
 
 const BASE_PAY_PER_HOUR = 100;
 const OT_RATE_PER_HOUR = 100 * 1.25;
+const EARNINGS_PER_ORDER = parseFloat(process.env.PICKER_EARNINGS_PER_ORDER || '10', 10) || 10;
 
 const defaultBalance = { availableBalance: 0, pendingBalance: 0, totalEarnings: 0, currency: 'INR' };
 
@@ -115,6 +116,39 @@ const getTransactionById = async (userId, transactionId) => {
   }
 };
 
+/**
+ * Credit picker wallet for completing an order (per-order earnings)
+ * @param {string} userId - Picker user ID (ObjectId or string)
+ * @param {string} orderId - Order ID
+ * @param {number} [amount] - Amount to credit (default: EARNINGS_PER_ORDER)
+ * @param {object} [metadata] - Optional metadata
+ */
+async function creditForOrder(userId, orderId, amount = EARNINGS_PER_ORDER, metadata = {}) {
+  const mongoose = require('mongoose');
+  const uid = typeof userId === 'string' && mongoose.Types.ObjectId.isValid(userId)
+    ? new mongoose.Types.ObjectId(userId)
+    : userId;
+  const amt = Math.max(0, parseFloat(amount) || EARNINGS_PER_ORDER);
+
+  const wallet = await getOrCreateWallet(uid);
+  const transaction = await Transaction.create({
+    userId: uid,
+    type: 'credit',
+    amount: amt,
+    status: 'completed',
+    description: `Order completed: ${orderId}`,
+    referenceId: orderId,
+    metadata: { orderId, ...metadata },
+    completedAt: new Date(),
+  });
+
+  wallet.availableBalance = (wallet.availableBalance || 0) + amt;
+  wallet.totalEarnings = (wallet.totalEarnings || 0) + amt;
+  await wallet.save();
+
+  return { transactionId: transaction._id.toString(), amount: amt };
+}
+
 /** Current month earnings breakdown for payouts screen (from attendance + wallet). */
 const getEarningsBreakdown = async (userId) => {
   const now = new Date();
@@ -168,4 +202,5 @@ module.exports = {
   getHistory,
   getTransactionById,
   getEarningsBreakdown,
+  creditForOrder,
 };

@@ -1,12 +1,14 @@
 /**
  * Auth service – OTP flow from HHD device backend.
- * Uses utils/smsGateway (same as HHD) for sending SMS and dev/test OTP; picker/services/otp.service for create/verify.
- * DEV MODE (config/OTP_DEV_MODE): no SMS, OTP in response. PRODUCTION: send via smsGateway, store in picker_otps.
+ * Uses picker/services/sms.service (multi-provider: config → MSG91 → Fast2SMS → Twilio) for SMS.
+ * Dev/test OTP and generateOTP from utils/smsGateway. OTP storage via picker/services/otp.service.
+ * DEV MODE (config/OTP_DEV_MODE): no SMS, OTP in response. PRODUCTION: send via sms.service, store in picker_otps.
  */
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
 const { createOTP, verifyOTP } = require('./otp.service');
-const { sendOtpSms, isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../utils/smsGateway');
+const { sendOtpSms } = require('./sms.service');
+const { isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../utils/smsGateway');
 const { OTP_ERROR_CODES } = require('../config/otp.constants');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'picker-app-secret-change-in-production';
@@ -57,12 +59,12 @@ const sendOtp = async (phone) => {
 
   logPickerOtp('info', `[Picker OTP] sendOtp: sending SMS to ${trimmed} via gateway, OTP: ${otp}`);
   const smsResult = await sendOtpSms(trimmed, otp);
-  logPickerOtp('info', `[Picker OTP] sendOtp: SMS gateway result - success: ${smsResult.success}, statusCode: ${smsResult.statusCode || 'N/A'}, body: ${(smsResult.body || '').slice(0, 200)}`);
-  if (!smsResult.success) {
-    logPickerOtp('warn', `[Picker OTP] sendOtp: SMS gateway failed for ${trimmed} – statusCode=${smsResult.statusCode || ''} error=${smsResult.error || ''}`);
+  logPickerOtp('info', `[Picker OTP] sendOtp: SMS result - sent: ${smsResult.sent}, internalLog: ${smsResult.internalLog || 'N/A'}`);
+  if (!smsResult.sent) {
+    logPickerOtp('warn', `[Picker OTP] sendOtp: SMS failed for ${trimmed} – ${smsResult.userMessage || ''} ${smsResult.internalLog || ''}`);
     return {
       success: false,
-      message: 'Failed to send OTP via SMS. Please try again.',
+      message: smsResult.userMessage || 'Failed to send OTP via SMS. Please try again.',
       errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR,
     };
   }

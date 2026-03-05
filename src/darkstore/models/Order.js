@@ -16,6 +16,9 @@ const missingItemSchema = new mongoose.Schema(
     orderedQty: { type: Number, required: true },
     scannedQty: { type: Number, default: 0 },
     reason: { type: String, default: '' },
+    replacementSku: { type: String, default: '' },
+    replacementProductName: { type: String, default: '' },
+    replacementQty: { type: Number, default: 0 },
   },
   { _id: false }
 );
