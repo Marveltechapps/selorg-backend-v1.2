@@ -12,6 +12,8 @@ const adminOrWorkforce = [authenticateToken, requireRole('admin', 'super_admin',
 
 router.get('/', ...adminOrWorkforce, pickerApprovalsController.listPickers);
 router.get('/:id/action-logs', ...adminOrWorkforce, pickerApprovalsController.getPickerActionLogs);
+router.post('/:id/link-hhd', ...adminOrWorkforce, pickerApprovalsController.linkHhd);
+router.delete('/:id/link-hhd', ...adminOrWorkforce, pickerApprovalsController.unlinkHhd);
 router.get('/:id', ...adminOrWorkforce, pickerApprovalsController.getPickerById);
 router.patch('/:id', ...adminOrWorkforce, pickerApprovalsController.updatePickerStatus);
 

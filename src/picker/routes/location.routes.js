@@ -8,6 +8,9 @@ const { requireAuth } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
 
+// Get current work location for logged-in picker (hubName, hubId, address)
+router.get('/locations/current', requireAuth, locationController.getCurrentLocation);
+
 // Get all locations (with optional filtering by user coordinates)
 router.get('/locations', requireAuth, locationController.getLocations);
 

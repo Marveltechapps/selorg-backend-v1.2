@@ -164,6 +164,7 @@ async function getPickerById(id) {
     })),
     faceVerification: false, // Placeholder
     onboardingStage: getOnboardingStage(picker, docCount),
+    hhdUserId: picker.hhdUserId ? picker.hhdUserId.toString() : null,
   };
 }
 
@@ -245,8 +246,67 @@ async function updatePickerStatus(id, { status, rejectedReason }, approvedBy, re
   return getPickerById(id);
 }
 
+/**
+ * Link Picker user to HHD user (same person, shared data).
+ * @param {string} pickerId - Picker user ID
+ * @param {string} hhdUserId - HHD user ObjectId (from hhd_users collection)
+ */
+async function linkHhd(pickerId, hhdUserId) {
+  const mongoose = require('mongoose');
+  const HHDUser = require('../../hhd/models/User.model');
+
+  if (!pickerId || !mongoose.Types.ObjectId.isValid(pickerId)) {
+    throw new Error('Invalid picker ID');
+  }
+  if (!hhdUserId || !mongoose.Types.ObjectId.isValid(hhdUserId)) {
+    throw new Error('Invalid HHD user ID');
+  }
+
+  const hhdUser = await HHDUser.findById(hhdUserId).lean();
+  if (!hhdUser) {
+    throw new Error('HHD user not found');
+  }
+
+  const picker = await PickerUser.findByIdAndUpdate(
+    pickerId,
+    { $set: { hhdUserId: new mongoose.Types.ObjectId(hhdUserId) } },
+    { new: true }
+  ).lean();
+
+  if (!picker) {
+    throw new Error('Picker not found');
+  }
+
+  return getPickerById(pickerId);
+}
+
+/**
+ * Unlink Picker user from HHD user.
+ */
+async function unlinkHhd(pickerId) {
+  const mongoose = require('mongoose');
+
+  if (!pickerId || !mongoose.Types.ObjectId.isValid(pickerId)) {
+    throw new Error('Invalid picker ID');
+  }
+
+  const picker = await PickerUser.findByIdAndUpdate(
+    pickerId,
+    { $unset: { hhdUserId: 1 } },
+    { new: true }
+  ).lean();
+
+  if (!picker) {
+    throw new Error('Picker not found');
+  }
+
+  return getPickerById(pickerId);
+}
+
 module.exports = {
   listPickers,
   getPickerById,
   updatePickerStatus,
+  linkHhd,
+  unlinkHhd,
 };

@@ -28,10 +28,8 @@ const userSchema = new mongoose.Schema(
     locationType: { type: String, enum: ['warehouse', 'darkstore'] },
     selectedShifts: [{ id: String, name: String, time: String }],
     trainingProgress: {
-      video1: { type: Number, default: 0 },
-      video2: { type: Number, default: 0 },
-      video3: { type: Number, default: 0 },
-      video4: { type: Number, default: 0 },
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({ video1: 0, video2: 0, video3: 0, video4: 0 }),
     },
     trainingCompleted: { type: Boolean, default: false },
     trainingCompletedAt: { type: Date },

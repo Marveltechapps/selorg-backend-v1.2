@@ -241,6 +241,32 @@ const setUserLocation = async (userId, locationId, locationType) => {
 };
 
 /**
+ * Get current work location for a picker user (hubName, hubId, address).
+ * Used by Picker app get-started and home screens.
+ */
+const getCurrentLocationForUser = async (userId) => {
+  const user = await User.findById(userId).select('currentLocationId locationType').lean();
+  if (!user || !user.currentLocationId) {
+    return { hubId: null, hubName: null, address: null, locationType: user?.locationType || null };
+  }
+  const location = await getLocationById(user.currentLocationId).catch(() => null);
+  if (!location) {
+    return {
+      hubId: user.currentLocationId,
+      hubName: user.currentLocationId,
+      address: null,
+      locationType: user.locationType,
+    };
+  }
+  return {
+    hubId: location.locationId,
+    hubName: location.name,
+    address: location.address,
+    locationType: user.locationType,
+  };
+};
+
+/**
  * Update user's last known location (for tracking)
  */
 const updateUserLastLocation = async (userId, latitude, longitude) => {
@@ -273,9 +299,10 @@ module.exports = {
   getAllLocations,
   getNearestLocation,
   getLocationById,
+  getCurrentLocationForUser,
   validateLocation,
   setUserLocation,
   updateUserLastLocation,
   calculateDistance,
-  estimateTravelTime
+  estimateTravelTime,
 };

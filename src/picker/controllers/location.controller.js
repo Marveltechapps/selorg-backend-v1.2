@@ -170,6 +170,19 @@ const getStoresNearby = async (req, res, next) => {
 };
 
 /**
+ * GET /locations/current
+ * Get current work location for logged-in picker (hubName, hubId, address).
+ */
+const getCurrentLocation = async (req, res, next) => {
+  try {
+    const data = await locationService.getCurrentLocationForUser(req.userId);
+    success(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * POST /locations/track
  * Update user's last known location
  * Body: { latitude, longitude }
@@ -203,6 +216,7 @@ module.exports = {
   getNearestLocation,
   getStoresNearby,
   getLocationById,
+  getCurrentLocation,
   validateLocation,
   setUserLocation,
   trackUserLocation,

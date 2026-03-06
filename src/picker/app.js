@@ -30,6 +30,7 @@ const performanceRoutes = require('./routes/performance.routes');
 const devicesRoutes = require('./routes/devices.routes');
 const heartbeatRoutes = require('./routes/heartbeat.routes');
 const issueRoutes = require('./routes/issue.routes');
+const onboardingRoutes = require('./routes/onboarding.routes');
 
 const app = express();
 
@@ -67,6 +68,8 @@ app.use(cacheMiddleware(appConfig.cache.picker.default));
 
 app.use('/auth', authRoutes);
 app.get('/me', requireAuth, userController.getProfile);
+app.get('/me/link-status', requireAuth, userController.getLinkStatus);
+app.use('/onboarding', onboardingRoutes);
 app.use('/users', userRoutes);
 app.use('/documents', documentsRoutes);
 app.use('/verify', verifyRoutes);

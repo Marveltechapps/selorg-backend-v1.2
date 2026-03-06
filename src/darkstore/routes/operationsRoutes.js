@@ -7,5 +7,6 @@ router.get('/sla-monitor', operationsController.getSlaMonitor);
 router.get('/missing-items', operationsController.getMissingItems);
 router.get('/live-picking', operationsController.getLivePickingMonitor);
 router.get('/alerts', operationsController.getOperationalAlerts);
+router.get('/exception-queue', operationsController.getExceptionQueue);
 
 module.exports = router;

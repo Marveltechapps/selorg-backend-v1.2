@@ -278,9 +278,17 @@ const PORT = process.env.PORT || 5000;
 // Create HTTP server
 const httpServer = createServer(app);
 
-// Initialize WebSocket publisher (Redis Pub/Sub — actual WS server runs separately)
+// Initialize WebSocket publisher (Redis Pub/Sub)
 if (process.env.NODE_ENV !== 'test') {
   websocketService.initialize(httpServer);
+  // Initialize Socket.IO for real-time (HHD, Picker, Dashboard clients)
+  try {
+    const { initSocketIO } = require('./hhd/config/socket');
+    initSocketIO(httpServer);
+    logger.info('Socket.IO initialized at path /hhd-socket.io');
+  } catch (socketErr) {
+    logger.warn('Socket.IO init skipped', { error: socketErr?.message });
+  }
 }
 
 // Start server (only if not in test mode)

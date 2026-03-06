@@ -80,6 +80,51 @@ async function updatePickerStatus(req, res, next) {
 }
 
 /**
+ * POST /admin/pickers/:id/link-hhd - Link picker to HHD user
+ * Body: { hhdUserId: string }
+ */
+async function linkHhd(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { hhdUserId } = req.body || {};
+    if (!hhdUserId) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'hhdUserId is required' },
+      });
+    }
+    const picker = await pickerApprovalsService.linkHhd(id, hhdUserId);
+    res.json({ success: true, data: picker });
+  } catch (err) {
+    if (err.message === 'Picker not found' || err.message?.includes('not found')) {
+      return res.status(404).json({ success: false, error: { message: err.message } });
+    }
+    if (err.message?.includes('Invalid')) {
+      return res.status(400).json({ success: false, error: { message: err.message } });
+    }
+    logger.error('Admin picker link-hhd failed', { error: err.message });
+    next(err);
+  }
+}
+
+/**
+ * DELETE /admin/pickers/:id/link-hhd - Unlink picker from HHD user
+ */
+async function unlinkHhd(req, res, next) {
+  try {
+    const { id } = req.params;
+    const picker = await pickerApprovalsService.unlinkHhd(id);
+    res.json({ success: true, data: picker });
+  } catch (err) {
+    if (err.message === 'Picker not found') {
+      return res.status(404).json({ success: false, error: { message: err.message } });
+    }
+    logger.error('Admin picker unlink-hhd failed', { error: err.message });
+    next(err);
+  }
+}
+
+/**
  * GET /admin/pickers/:id/action-logs - Get picker action logs (audit)
  * Query: startDate, endDate, actionType, limit
  * RBAC: admin, super_admin
@@ -129,6 +174,8 @@ module.exports = {
   listPickers,
   getPickerById,
   updatePickerStatus,
+  linkHhd,
+  unlinkHhd,
   getPickerActionLogs,
   listAllPickerActionLogs,
 };

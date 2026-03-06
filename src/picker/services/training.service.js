@@ -23,23 +23,25 @@ const getAllVideos = async (userId) => {
 
     if (!videos || videos.length === 0) return [];
 
-    // Fetch user's watch history for all videos
-    const watchHistories = await withTimeout(
-      WatchHistory.find({ userId }).lean(),
-      DB_TIMEOUT_MS,
-      []
-    );
+    // Fetch user's watch history and training progress
+    const [watchHistories, user] = await Promise.all([
+      withTimeout(WatchHistory.find({ userId }).lean(), DB_TIMEOUT_MS, []),
+      withTimeout(User.findById(userId).select('trainingProgress').lean(), DB_TIMEOUT_MS, null)
+    ]);
 
-    // Create a map for quick lookup
     const watchHistoryMap = {};
     watchHistories.forEach(history => {
       watchHistoryMap[history.videoId] = history;
     });
 
-    // Combine video info with progress
+    const trainingProgress = (user && user.trainingProgress) || {};
+
+    // Combine video info with progress (completed = WatchHistory OR user.trainingProgress)
     return videos.map(video => {
       const history = watchHistoryMap[video.videoId] || {};
-      const completed = !!history.completedAt;
+      const fromHistory = !!history.completedAt;
+      const fromProgress = trainingProgress[video.videoId] === 100;
+      const completed = fromHistory || fromProgress;
       const progress = completed ? 100 : Math.min(99, Math.round((history.watchedSeconds || 0) / video.duration * 100));
 
       return {
@@ -258,11 +260,15 @@ const getProgress = async (userId) => {
       null
     );
     if (!user || !user.trainingProgress) return defaultProgress;
+    const tp = user.trainingProgress;
     return {
-      video1: user.trainingProgress.video1 ?? 0,
-      video2: user.trainingProgress.video2 ?? 0,
-      video3: user.trainingProgress.video3 ?? 0,
-      video4: user.trainingProgress.video4 ?? 0,
+      video1: tp.video1 ?? 0,
+      video2: tp.video2 ?? 0,
+      video3: tp.video3 ?? 0,
+      video4: tp.video4 ?? 0,
+      ...Object.fromEntries(
+        Object.entries(tp).filter(([k]) => !['video1', 'video2', 'video3', 'video4'].includes(k))
+      ),
     };
   } catch (err) {
     console.warn('[training] getProgress fallback:', err?.message);
@@ -271,14 +277,22 @@ const getProgress = async (userId) => {
 };
 
 /**
- * Legacy method - Update progress (backward compatibility)
+ * Update progress - supports video1..video4 (legacy) and dynamic videoIds (dashboard-managed videos).
  */
 const updateProgress = async (userId, body) => {
   const update = {};
-  if (typeof body?.video1 === 'number') update['trainingProgress.video1'] = Math.min(100, Math.max(0, body.video1));
-  if (typeof body?.video2 === 'number') update['trainingProgress.video2'] = Math.min(100, Math.max(0, body.video2));
-  if (typeof body?.video3 === 'number') update['trainingProgress.video3'] = Math.min(100, Math.max(0, body.video3));
-  if (typeof body?.video4 === 'number') update['trainingProgress.video4'] = Math.min(100, Math.max(0, body.video4));
+  const clamp = (v) => Math.min(100, Math.max(0, v));
+
+  for (const [key, value] of Object.entries(body || {})) {
+    if (typeof value !== 'number') continue;
+    const val = clamp(value);
+    if (['video1', 'video2', 'video3', 'video4'].includes(key)) {
+      update[`trainingProgress.${key}`] = val;
+    } else if (key && typeof key === 'string' && /^[a-zA-Z0-9_-]+$/.test(key)) {
+      update[`trainingProgress.${key}`] = val;
+    }
+  }
+
   if (Object.keys(update).length === 0) return getProgress(userId);
   try {
     await withTimeout(User.findByIdAndUpdate(userId, { $set: update }), DB_TIMEOUT_MS);

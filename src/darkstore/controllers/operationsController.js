@@ -189,4 +189,113 @@ async function getOperationalAlerts(req, res) {
   }
 }
 
-module.exports = { getSlaMonitor, getMissingItems, getLivePickingMonitor, getOperationalAlerts };
+/**
+ * GET /darkstore/operations/exception-queue
+ * Unified pick exceptions: missing_item, short_pick, wrong_item, sla_breach, cancellation, rto
+ */
+async function getExceptionQueue(req, res) {
+  try {
+    const storeId = req.query.storeId || '';
+    const type = req.query.type || ''; // missing_item | short_pick | wrong_item | sla_breach | cancellation | rto
+    const status = req.query.status || 'open'; // open | resolved
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+    const exceptions = [];
+    const query = storeId ? { store_id: storeId } : {};
+
+    if (!type || type === 'missing_item') {
+      const missingQuery = { ...query, 'pickingData.missingItems.0': { $exists: true } };
+      const orders = await Order.find(missingQuery)
+        .sort({ 'pickingData.endTime': -1 })
+        .limit(500)
+        .select('order_id store_id status pickingData assignee pickerAssignment')
+        .lean();
+      for (const o of orders) {
+        const missing = (o.pickingData && o.pickingData.missingItems) || [];
+        const pickerName = (o.assignee && o.assignee.name) || (o.pickerAssignment && o.pickerAssignment.pickerName) || '—';
+        const reportedAt = (o.pickingData && o.pickingData.endTime) || o.updatedAt || o.createdAt;
+        for (const m of missing) {
+          exceptions.push({
+            type: 'missing_item',
+            orderId: o.order_id,
+            storeId: o.store_id,
+            pickerName,
+            product: m.productName || '—',
+            reason: m.reason || 'Item not found',
+            status: 'open',
+            createdAt: reportedAt,
+          });
+        }
+      }
+    }
+
+    if (!type || type === 'sla_breach') {
+      const now = new Date();
+      const slaQuery = {
+        ...query,
+        status: { $in: ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING] },
+        sla_deadline: { $lt: now },
+      };
+      const orders = await Order.find(slaQuery)
+        .sort({ sla_deadline: 1 })
+        .limit(200)
+        .select('order_id store_id status sla_deadline assignee pickerAssignment')
+        .lean();
+      for (const o of orders) {
+        const pickerName = (o.assignee && o.assignee.name) || (o.pickerAssignment && o.pickerAssignment.pickerName) || '—';
+        exceptions.push({
+          type: 'sla_breach',
+          orderId: o.order_id,
+          storeId: o.store_id,
+          pickerName,
+          product: '—',
+          reason: 'Order past SLA deadline',
+          status: 'open',
+          createdAt: o.sla_deadline || o.updatedAt,
+        });
+      }
+    }
+
+    if (!type || type === 'cancellation' || type === 'rto') {
+      const statusQuery = { ...query };
+      if (type === 'cancellation') statusQuery.status = 'cancelled';
+      else if (type === 'rto') statusQuery.status = 'rto';
+      else statusQuery.status = { $in: ['cancelled', 'rto'] };
+
+      const orders = await Order.find(statusQuery)
+        .sort({ updatedAt: -1 })
+        .limit(200)
+        .select('order_id store_id status updatedAt assignee pickerAssignment')
+        .lean();
+      for (const o of orders) {
+        const pickerName = (o.assignee && o.assignee.name) || (o.pickerAssignment && o.pickerAssignment.pickerName) || '—';
+        exceptions.push({
+          type: o.status === 'rto' ? 'rto' : 'cancellation',
+          orderId: o.order_id,
+          storeId: o.store_id,
+          pickerName,
+          product: '—',
+          reason: o.status === 'rto' ? 'Return to origin' : 'Order cancelled',
+          status: 'open',
+          createdAt: o.updatedAt || o.createdAt,
+        });
+      }
+    }
+
+    exceptions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const total = exceptions.length;
+    const skip = (page - 1) * limit;
+    const data = exceptions.slice(skip, skip + limit);
+
+    res.status(200).json({
+      success: true,
+      data,
+      pagination: { page, limit, total },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch exception queue' });
+  }
+}
+
+module.exports = { getSlaMonitor, getMissingItems, getLivePickingMonitor, getOperationalAlerts, getExceptionQueue };
