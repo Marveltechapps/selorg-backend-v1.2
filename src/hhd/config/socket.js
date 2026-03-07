@@ -4,6 +4,13 @@ const logger = require('../../core/utils/logger');
 let io;
 
 function initSocketIO(httpServer) {
+  // Guard against double initialization (prevents "handleUpgrade called more than once"
+  // when server restarts or module is required multiple times)
+  if (io) {
+    logger.warn('Socket.IO already initialized, skipping');
+    return io;
+  }
+
   io = new SocketIOServer(httpServer, {
     path: '/hhd-socket.io',
     cors: {

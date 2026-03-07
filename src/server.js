@@ -281,6 +281,9 @@ const httpServer = createServer(app);
 // Initialize WebSocket publisher (Redis Pub/Sub)
 if (process.env.NODE_ENV !== 'test') {
   websocketService.initialize(httpServer);
+  // Clear any pre-existing upgrade listeners to prevent "handleUpgrade called more than once"
+  // (conflict when multiple WebSocket handlers attach to the same HTTP server)
+  httpServer.removeAllListeners('upgrade');
   // Initialize Socket.IO for real-time (HHD, Picker, Dashboard clients)
   try {
     const { initSocketIO } = require('./hhd/config/socket');
