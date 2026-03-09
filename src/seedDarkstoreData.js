@@ -15,6 +15,13 @@ const STORES = [
   { id: 'DS-Adyar-01', label: 'Adyar', lat: 13.0067, lng: 80.2573, radius: 10 },
 ];
 
+/** Predefined customer: 7418268091 @ Thiruvanmiyur (for testing) */
+const THIRUVANMIYUR_CUSTOMER = {
+  name: 'Thiruvanmiyur Customer',
+  phone: '+917418268091',
+  delivery_address: 'Ganesh Apartment, LB Road, Thiruvanmiyur, Chennai, Tamil Nadu 600041',
+};
+
 const CUSTOMER_NAMES = [
   'Rahul Sharma', 'Priya Patel', 'Amit Kumar', 'Sneha Gupta', 'Vikram Singh',
   'Ananya Das', 'Arjun Reddy', 'Meera Nair', 'Karan Malhotra', 'Divya Joshi',
@@ -110,8 +117,33 @@ function generateOrders(storeId) {
     };
   };
 
-  for (let i = 0; i < config.newOrders; i++) {
-    const sla = i < 2 ? 'critical' : i < 4 ? 'warning' : 'safe';
+  // First new order: predefined 7418268091 @ Thiruvanmiyur (for testing)
+  ordNum++;
+  const now = new Date();
+  const createdAgo = Math.floor(Math.random() * 10) + 1;
+  const createdAt = new Date(now.getTime() - createdAgo * 60000);
+  const deadline = new Date(createdAt.getTime() + 15 * 60000);
+  const minLeft = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 60000));
+  const secLeft = Math.max(0, Math.floor(((deadline.getTime() - now.getTime()) % 60000) / 1000));
+  orders.push({
+    order_id: `ORD-${ordNum}`,
+    id: `#ORD-${ordNum}`,
+    store_id: storeId,
+    order_type: 'Normal',
+    status: 'new',
+    item_count: 1,
+    sla_timer: `${String(minLeft).padStart(2, '0')}:${String(secLeft).padStart(2, '0')}`,
+    sla_status: 'safe',
+    sla_deadline: deadline,
+    customer_name: THIRUVANMIYUR_CUSTOMER.name,
+    customer_phone: THIRUVANMIYUR_CUSTOMER.phone,
+    delivery_address: THIRUVANMIYUR_CUSTOMER.delivery_address,
+    rto_risk: false,
+    createdAt,
+    updatedAt: now,
+  });
+  for (let i = 0; i < config.newOrders - 1; i++) {
+    const sla = i < 1 ? 'critical' : i < 3 ? 'warning' : 'safe';
     orders.push(makeOrder('new', sla));
   }
   for (let i = 0; i < config.processing; i++) {

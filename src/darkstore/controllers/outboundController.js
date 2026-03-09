@@ -7,6 +7,7 @@ const Order = require('../models/Order');
 const AuditLog = require('../models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
+const websocketService = require('../../utils/websocket');
 
 /**
  * Get Outbound Summary
@@ -280,6 +281,25 @@ const batchDispatchOrders = async (req, res) => {
         group.rider.last_update = now;
         await group.rider.save();
 
+        try {
+          websocketService?.broadcastToUser?.(group.rider.rider_id, 'order:dispatched', {
+            dispatch_id: dispatchId,
+            rider_id: group.rider.rider_id,
+            rider_name: group.rider.rider_name,
+            order_ids: group.orderIds,
+            orders_assigned: group.orderIds.length,
+            store_id: storeId,
+            assigned_at: now,
+          });
+          websocketService?.broadcastToRole?.('rider', 'order:dispatched', {
+            dispatch_id: dispatchId,
+            rider_id: group.rider.rider_id,
+            order_ids: group.orderIds,
+          });
+        } catch (wsErr) {
+          logger.warn('WebSocket order:dispatched broadcast failed (non-blocking):', wsErr?.message);
+        }
+
         // Create audit log for each dispatch
         await AuditLog.create({
           id: generateId('AUD'),
@@ -357,6 +377,25 @@ const batchDispatchOrders = async (req, res) => {
       }
       rider.last_update = now;
       await rider.save();
+
+      try {
+        websocketService?.broadcastToUser?.(rider.rider_id, 'order:dispatched', {
+          dispatch_id: dispatchId,
+          rider_id: rider.rider_id,
+          rider_name: rider.rider_name,
+          order_ids,
+          orders_assigned: ordersDispatched,
+          store_id: storeId,
+          assigned_at: now,
+        });
+        websocketService?.broadcastToRole?.('rider', 'order:dispatched', {
+          dispatch_id: dispatchId,
+          rider_id: rider.rider_id,
+          order_ids,
+        });
+      } catch (wsErr) {
+        logger.warn('WebSocket order:dispatched broadcast failed (non-blocking):', wsErr?.message);
+      }
 
       responseDispatchId = dispatchId;
       assignedRiders = 1;
@@ -619,6 +658,23 @@ const manuallyAssignRider = async (req, res) => {
     }
     rider.last_update = now;
     await rider.save();
+
+    try {
+      const dispatchEvent = {
+        dispatch_id: dispatchId,
+        rider_id: rider.rider_id,
+        rider_name: rider.rider_name,
+        order_ids: finalOrderIds,
+        orders_assigned: ordersAssigned,
+        store_id: storeId,
+        assigned_at: now,
+      };
+      websocketService?.broadcastToUser?.(rider.rider_id, 'order:dispatched', dispatchEvent);
+      websocketService?.broadcastToRole?.('rider', 'order:dispatched', dispatchEvent);
+      websocketService?.broadcast?.('order:dispatched', dispatchEvent);
+    } catch (wsErr) {
+      logger.warn('WebSocket order:dispatched broadcast failed (non-blocking):', wsErr?.message);
+    }
 
     // Create audit log
     await AuditLog.create({

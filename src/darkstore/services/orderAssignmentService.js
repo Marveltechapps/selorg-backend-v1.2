@@ -9,9 +9,9 @@ const { WORKER_STATUS } = require('../../constants/pickerEnums');
 
 const HEARTBEAT_OFFLINE_MS = 60 * 1000;
 
-/** Assignment strategy from env or default */
+/** Assignment strategy from env or default. Use AUTO_ASSIGN for auto-assign on new orders. */
 function getStrategy() {
-  return (process.env.ORDER_ASSIGNMENT_STRATEGY || 'MANUAL_ASSIGN').toUpperCase();
+  return (process.env.ORDER_ASSIGNMENT_STRATEGY || 'AUTO_ASSIGN').toUpperCase();
 }
 
 /**
@@ -57,7 +57,10 @@ async function assignToBestPicker(orderId, storeId, order = {}) {
   if (pickers.length === 0) return null;
 
   if (strategy === 'ROUND_ROBIN' || strategy === 'AUTO_ASSIGN') {
-    return pickers[0];
+    // Prefer free (no active order) pickers
+    const free = pickers.filter((p) => !p.activeOrderId);
+    const preferred = free.length > 0 ? free : pickers;
+    return preferred[0];
   }
 
   if (strategy === 'PICKER_CAPACITY') {

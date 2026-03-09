@@ -1,5 +1,66 @@
 const mongoose = require('mongoose');
 const { CustomerAddress } = require('../models/CustomerAddress');
+const { geocodeAddress, reverseGeocode } = require('./geocodingService');
+
+/**
+ * Enrich address data using Google Maps Geocoding API.
+ * - If lat/lng provided but address incomplete → reverse geocode
+ * - If address provided but no lat/lng → geocode
+ */
+async function enrichWithGeocoding(body) {
+  const { line1, line2, city, state, pincode, latitude, longitude, address: addressField } = body;
+  const hasLatLng = latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude));
+  const hasAddress = [line1, city, addressField].some((v) => v && String(v).trim());
+  const addressStr = addressField?.trim()
+    || [line1, line2, city, state, pincode].filter(Boolean).map(String).join(', ');
+
+  if (hasLatLng && !hasAddress) {
+    const geo = await reverseGeocode(Number(latitude), Number(longitude));
+    if (geo) {
+      return {
+        line1: geo.line1,
+        line2: geo.line2 || '',
+        city: geo.city || '',
+        state: geo.state || '',
+        pincode: geo.pincode || '',
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+      };
+    }
+  }
+
+  if (hasAddress && !hasLatLng && addressStr.trim()) {
+    const geo = await geocodeAddress(addressStr);
+    if (geo) {
+      return {
+        line1: geo.line1 || line1 || '',
+        line2: geo.line2 || line2 || '',
+        city: geo.city || city || '',
+        state: geo.state || state || '',
+        pincode: geo.pincode || pincode || '',
+        latitude: geo.latitude,
+        longitude: geo.longitude,
+      };
+    }
+  }
+
+  if (hasLatLng && hasAddress) {
+    const geo = await reverseGeocode(Number(latitude), Number(longitude));
+    if (geo) {
+      return {
+        line1: geo.line1 || line1 || '',
+        line2: geo.line2 || line2 || '',
+        city: geo.city || city || '',
+        state: geo.state || state || '',
+        pincode: geo.pincode || pincode || '',
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+      };
+    }
+  }
+
+  return null;
+}
 
 /**
  * List all addresses for a user, ordered by order then createdAt.
@@ -24,11 +85,17 @@ async function getDefaultAddress(userId) {
 
 /**
  * Create a new address for a user.
+ * Uses Google Maps Geocoding API to obtain lat/lng from address or exact address from lat/lng.
  * If an address with the same label already exists, update it instead (upsert).
  * Returns { address, wasUpdated } so the caller can distinguish create vs update.
  */
 async function createAddress(userId, body) {
-  const { label, line1, line2, city, state, pincode, latitude, longitude, isDefault } = body;
+  const enriched = await enrichWithGeocoding(body);
+  const merged = enriched
+    ? { ...body, ...enriched }
+    : body;
+
+  const { label, line1, line2, city, state, pincode, latitude, longitude, isDefault } = merged;
   const normalizedLabel = (label || 'Home').trim();
 
   const existing = await CustomerAddress.findOne({
@@ -84,17 +151,28 @@ async function createAddress(userId, body) {
 
 /**
  * Update an address. Only the owning user can update.
+ * Uses Google Maps Geocoding to enrich lat/lng or address when provided.
  */
 async function updateAddress(userId, addressId, body) {
   const address = await CustomerAddress.findOne({ _id: addressId, userId });
   if (!address) return null;
-  const { label, line1, line2, city, state, pincode, isDefault } = body;
+
+  const mergeBody = {
+    ...address.toObject(),
+    ...body,
+  };
+  const enriched = await enrichWithGeocoding(mergeBody);
+  const merged = enriched ? { ...body, ...enriched } : body;
+
+  const { label, line1, line2, city, state, pincode, latitude, longitude, isDefault } = merged;
   if (label !== undefined) address.label = label;
   if (line1 !== undefined) address.line1 = line1;
   if (line2 !== undefined) address.line2 = line2;
   if (city !== undefined) address.city = city;
   if (state !== undefined) address.state = state;
   if (pincode !== undefined) address.pincode = pincode;
+  if (latitude !== undefined) address.latitude = latitude;
+  if (longitude !== undefined) address.longitude = longitude;
   if (isDefault !== undefined) {
     address.isDefault = Boolean(isDefault);
     if (address.isDefault) {

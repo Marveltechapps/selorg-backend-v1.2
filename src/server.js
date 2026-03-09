@@ -98,18 +98,12 @@ app.get('/health/ready', readinessCheck);
 app.get('/health/db', databaseHealthCheck);
 
 // Security middleware - Helmet (sets various HTTP headers)
+// CSP disabled for API server - API responses are JSON, not HTML; mobile apps don't apply CSP
 app.use(
   helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
-        imgSrc: ["'self'", 'data:', 'https:'],
-      },
-    },
-    crossOriginEmbedderPolicy: false, // Disable for API
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: false, // API returns JSON; CSP is for HTML documents
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false, // Allow API to be called from any origin (mobile, web)
   })
 );
 
@@ -177,7 +171,13 @@ const strictCors = cors({
   preflightContinue: false,
 });
 
-const customerCors = cors({ origin: true, credentials: true });
+// Customer app: allow all origins (mobile apps often send no Origin or LAN IP)
+const customerCors = cors({
+  origin: true, // Reflect request origin or allow no-origin
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Site-Id'],
+});
 
 app.use((req, res, next) => {
   const isCustomerPath = req.path.startsWith('/api/v1/customer');
@@ -273,7 +273,8 @@ app.use(errorHandler);
 // Export app for testing (after all routes are configured)
 module.exports = app;
 
-const PORT = process.env.PORT || 5000;
+// Default 5001: macOS AirPlay uses port 5000 and returns 403 for API requests
+const PORT = process.env.PORT || 5001;
 
 // Create HTTP server
 const httpServer = createServer(app);
@@ -295,9 +296,12 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Start server (only if not in test mode)
+// Bind to 0.0.0.0 so mobile devices on LAN (e.g. 192.168.x.x) can reach the API
 if (process.env.NODE_ENV !== 'test') {
-  httpServer.listen(PORT, () => {
+  const HOST = process.env.HOST || '0.0.0.0';
+  httpServer.listen(PORT, HOST, () => {
     logger.info('Server started', {
+      host: HOST,
       port: PORT,
       nodeEnv: process.env.NODE_ENV || 'development',
       version: process.env.API_VERSION || '1.0.0',

@@ -13,6 +13,7 @@ const websocketService = require('../../utils/websocket');
 const { ORDER_STATUS } = require('../../constants/pickerEnums');
 const { validateTransition, canAssign, canStartPicking, canCompletePicking } = require('../utils/orderStateMachine');
 const orderAssignmentService = require('../services/orderAssignmentService');
+const orderAssignService = require('../services/orderAssignService');
 
 const DARKSTORE_TO_CUSTOMER_STATUS = {
   processing: 'confirmed',
@@ -536,73 +537,27 @@ const assignOrder = async (req, res) => {
       });
     }
 
-    const now = new Date();
-    const initials = (resolvedPickerName || '')
-      .split(/\s+/)
-      .map((s) => s.charAt(0))
-      .join('')
-      .substring(0, 3)
-      .toUpperCase() || 'UA';
+    const updatedOrder = await orderAssignService.performOrderAssignment(
+      orderId,
+      resolvedPickerId,
+      resolvedPickerName,
+      { userId, userRole, autoAssign: !!autoAssign }
+    );
 
-    order.assignee = { id: resolvedPickerId, name: resolvedPickerName, initials };
-    order.pickerAssignment = {
-      pickerId: resolvedPickerId,
-      pickerName: resolvedPickerName,
-      assignedAt: now,
-    };
-    order.status = ORDER_STATUS.ASSIGNED;
-    order.version = (order.version || 0) + 1;
-    order.timeline = order.timeline || [];
-    order.timeline.push({
-      status: ORDER_STATUS.ASSIGNED,
-      timestamp: now,
-      updatedBy: userId,
-      updatedByRole: userRole || 'picker',
-    });
-    await order.save();
-    await cache.delByPattern('dashboard:*');
-    await cache.delByPattern('darkstore:*');
-
-    propagateToCustomerOrder(orderId, order.status);
-
-    try {
-      logPickerAction({
-        actionType: 'order_assigned',
-        pickerId: String(resolvedPickerId),
-        orderId,
-        metadata: { pickerName: resolvedPickerName, autoAssign: !!autoAssign },
-      }).catch(() => {});
-    } catch (e) { /* non-blocking */ }
-    try {
-      const event = {
-        order_id: orderId,
-        store_id: order.store_id,
-        status: order.status,
-        assignee: order.assignee,
-        pickerAssignment: order.pickerAssignment,
-        updated_at: now,
-      };
-      websocketService?.broadcastToRole?.('darkstore', 'order:updated', event);
-      websocketService?.broadcastToRole?.('admin', 'order:updated', event);
-      websocketService?.broadcast?.('ORDER_STATUS_UPDATED', event);
-      websocketService?.broadcast?.('ORDER_ASSIGNED', event);
-    } catch (e) { /* non-blocking */ }
-
-    try {
-      const pickerNotificationService = require('../../picker/services/pickerNotification.service');
-      await pickerNotificationService.sendOrderAssignedPush(resolvedPickerId, orderId, {
-        orderItemCount: order.item_count,
-        storeId: order.store_id,
+    if (!updatedOrder) {
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to perform assignment',
       });
-    } catch (pushErr) { /* non-blocking */ }
+    }
 
     res.status(200).json({
       success: true,
       order_id: orderId,
-      status: order.status,
-      assignee: order.assignee,
-      pickerAssignment: order.pickerAssignment,
-      version: order.version,
+      status: updatedOrder.status,
+      assignee: updatedOrder.assignee,
+      pickerAssignment: updatedOrder.pickerAssignment,
+      version: updatedOrder.version,
       message: `Order ${orderId} assigned to ${resolvedPickerName}`,
     });
   } catch (error) {

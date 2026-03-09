@@ -188,12 +188,99 @@ const getRTOAlerts = async (req, res) => {
 };
 
 /**
- * Get Live Orders
+ * Fetch live orders data (used by HTTP handler and WebSocket snapshot).
+ * @param {string} storeId - Store ID
+ * @param {string} status - 'all' | 'new' | 'processing' | 'ready'
+ * @param {number} limit - Max orders to return
+ * @returns {Promise<{orders: object[]}>}
+ */
+async function fetchLiveOrdersData(storeId, status = 'all', limit = 50) {
+  const effectiveStoreId = storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+  const allActiveStatuses = ['new', 'queued', 'processing', 'ready', 'ASSIGNED', 'PICKING', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'];
+  const query = { store_id: effectiveStoreId, status: { $in: allActiveStatuses } };
+  if (status !== 'all') {
+    const statusMap = {
+      new: ['new', 'queued'],
+      processing: ['processing', 'ASSIGNED', 'PICKING'],
+      ready: ['ready', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'],
+    };
+    query.status = { $in: statusMap[status] || allActiveStatuses };
+  }
+  const orders = await Order.find(query).sort({ createdAt: -1 }).limit(limit).lean();
+
+  const ordersMissingItems = orders.filter((o) => !o.items || o.items.length === 0);
+  let customerItemsMap = {};
+  if (ordersMissingItems.length > 0) {
+    try {
+      const { Order: CustomerOrder } = require('../../customer-backend/models/Order');
+      const ids = ordersMissingItems.map((o) => o.order_id);
+      const custOrders = await CustomerOrder.find({ orderNumber: { $in: ids } }, { orderNumber: 1, items: 1 }).lean();
+      for (const co of custOrders) {
+        customerItemsMap[co.orderNumber] = (co.items || []).map((it) => ({
+          productName: it.productName || 'Item',
+          quantity: it.quantity || 1,
+          price: it.price || 0,
+          image: it.image || '',
+          variantSize: it.variantSize || '',
+        }));
+      }
+    } catch (_) { /* non-blocking fallback */ }
+  }
+
+  const formattedOrders = orders.map((order) => {
+    const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
+    const slaDeadline = order.sla_deadline
+      ? new Date(order.sla_deadline)
+      : new Date(createdAt.getTime() + 15 * 60 * 1000);
+    const rawPhone = order.customer_phone || '';
+    const maskedPhone = rawPhone.length >= 8
+      ? rawPhone.slice(0, 2) + '******' + rawPhone.slice(-2)
+      : rawPhone ? '******' : '';
+
+    return {
+      order_id: order.order_id,
+      status: order.status,
+      bagId: order.bagId || '',
+      rackLocation: order.rackLocation || '',
+      assignee: order.assignee || { id: '', name: 'Unassigned', initials: 'UA' },
+      pickerAssignment: order.pickerAssignment || {},
+      timeline: order.timeline || [],
+      pickingData: order.pickingData || {},
+      missingItems: order.pickingData?.missingItems || [],
+      order_type: order.order_type,
+      item_count: order.item_count,
+      items: (order.items && order.items.length > 0)
+        ? order.items.map((it) => ({
+            productName: it.productName || 'Item',
+            quantity: it.quantity || 1,
+            price: it.price || 0,
+            image: it.image || '',
+            variantSize: it.variantSize || '',
+          }))
+        : (customerItemsMap[order.order_id] || []),
+      customer_name: order.customer_name || 'Customer',
+      customer_phone: maskedPhone,
+      delivery_address: order.delivery_address || '',
+      delivery_notes: order.delivery_notes || '',
+      sla_timer: calculateSLATimer(slaDeadline),
+      sla_status: getSLAStatus(slaDeadline),
+      sla_deadline: slaDeadline.toISOString(),
+      created_at: createdAt.toISOString(),
+      payment_status: order.payment_status || 'pending',
+      payment_method: order.payment_method || 'cash',
+      total_bill: order.total_bill || 0,
+    };
+  });
+  return { orders: formattedOrders };
+}
+
+/**
+ * Get Live Orders (HTTP handler)
  * GET /api/darkstore/dashboard/live-orders
  */
 const getLiveOrders = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || '';
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const status = req.query.status || 'all';
     let limit = parseInt(req.query.limit) || 50;
     if (limit > 100) limit = 100;
@@ -202,80 +289,7 @@ const getLiveOrders = async (req, res) => {
     const { value: data } = await getCachedOrCompute(
       cacheKey,
       appConfig.cache.dashboard,
-      async () => {
-        const allActiveStatuses = ['new', 'processing', 'ready', 'ASSIGNED', 'PICKING', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'];
-        const query = { store_id: storeId, status: { $in: allActiveStatuses } };
-        if (status !== 'all') {
-          const statusMap = { new: ['new'], processing: ['processing', 'ASSIGNED', 'PICKING'], ready: ['ready', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'] };
-          query.status = { $in: statusMap[status] || allActiveStatuses };
-        }
-        const orders = await Order.find(query).sort({ createdAt: -1 }).limit(limit).lean();
-
-        const ordersMissingItems = orders.filter((o) => !o.items || o.items.length === 0);
-        let customerItemsMap = {};
-        if (ordersMissingItems.length > 0) {
-          try {
-            const { Order: CustomerOrder } = require('../../customer-backend/models/Order');
-            const ids = ordersMissingItems.map((o) => o.order_id);
-            const custOrders = await CustomerOrder.find({ orderNumber: { $in: ids } }, { orderNumber: 1, items: 1 }).lean();
-            for (const co of custOrders) {
-              customerItemsMap[co.orderNumber] = (co.items || []).map((it) => ({
-                productName: it.productName || 'Item',
-                quantity: it.quantity || 1,
-                price: it.price || 0,
-                image: it.image || '',
-                variantSize: it.variantSize || '',
-              }));
-            }
-          } catch (_) { /* non-blocking fallback */ }
-        }
-
-        const formattedOrders = orders.map((order) => {
-          const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
-          const slaDeadline = order.sla_deadline
-            ? new Date(order.sla_deadline)
-            : new Date(createdAt.getTime() + 15 * 60 * 1000);
-          const rawPhone = order.customer_phone || '';
-          const maskedPhone = rawPhone.length >= 8
-            ? rawPhone.slice(0, 2) + '******' + rawPhone.slice(-2)
-            : rawPhone ? '******' : '';
-
-          return {
-            order_id: order.order_id,
-            status: order.status,
-            bagId: order.bagId || '',
-            rackLocation: order.rackLocation || '',
-            assignee: order.assignee || { id: '', name: 'Unassigned', initials: 'UA' },
-            pickerAssignment: order.pickerAssignment || {},
-            timeline: order.timeline || [],
-            pickingData: order.pickingData || {},
-            missingItems: order.pickingData?.missingItems || [],
-            order_type: order.order_type,
-            item_count: order.item_count,
-            items: (order.items && order.items.length > 0)
-              ? order.items.map((it) => ({
-                  productName: it.productName || 'Item',
-                  quantity: it.quantity || 1,
-                  price: it.price || 0,
-                  image: it.image || '',
-                  variantSize: it.variantSize || '',
-                }))
-              : (customerItemsMap[order.order_id] || []),
-            customer_name: order.customer_name || 'Customer',
-            customer_phone: maskedPhone,
-            delivery_address: order.delivery_address || '',
-            delivery_notes: order.delivery_notes || '',
-            sla_timer: calculateSLATimer(slaDeadline),
-            sla_status: getSLAStatus(slaDeadline),
-            sla_deadline: slaDeadline.toISOString(),
-            created_at: createdAt.toISOString(),
-            payment_status: order.payment_status || 'pending',
-            payment_method: order.payment_method || 'cash',
-            total_bill: order.total_bill || 0,
-          };
-        });
-        return { orders: formattedOrders };
-      },
+      () => fetchLiveOrdersData(storeId, status, limit),
       res
     );
     res.status(200).json(data);
@@ -316,5 +330,6 @@ module.exports = {
   getRTOAlerts,
   getLiveOrders,
   refreshDashboard,
+  fetchLiveOrdersData,
 };
 

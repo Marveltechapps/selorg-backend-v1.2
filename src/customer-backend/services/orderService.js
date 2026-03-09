@@ -244,6 +244,7 @@ async function createOrder(userId, body) {
         variantSize: it.variantSize || '',
       }));
 
+      const slaTimerStr = `${String(slaMinutes).padStart(2, '0')}:00`;
       try {
         await DarkstoreOrder.create({
           order_id: orderId,
@@ -253,7 +254,7 @@ async function createOrder(userId, body) {
           status: 'new',
           item_count: itemCount,
           items: dsItems,
-          sla_timer: `${String(slaMinutes).padStart(2, '0')}:00`,
+          sla_timer: slaTimerStr,
           sla_status: 'safe',
           sla_deadline: slaDeadline,
           assignee: {},
@@ -266,6 +267,43 @@ async function createOrder(userId, body) {
           payment_method: resolvedMethodType,
           total_bill: totalBill,
         });
+        // Emit order:created immediately so dashboard receives new orders in real-time
+        try {
+          const ph = String(phoneNumber || '');
+          const maskedPhone = ph.length >= 8
+            ? ph.slice(0, 2) + '******' + ph.slice(-2)
+            : ph ? '******' : '';
+          const orderEvent = {
+            order_id: orderId,
+            item_count: itemCount,
+            items: dsItems,
+            customer_name: customerName,
+            customer_phone: maskedPhone,
+            delivery_address: deliveryAddrStr,
+            store_id: storeId,
+            sla_deadline: slaDeadline,
+            sla_timer: slaTimerStr,
+            sla_status: 'safe',
+            status: 'new',
+            order_type: 'Normal',
+            createdAt: new Date(),
+            payment_status: paymentStatus,
+            payment_method: resolvedMethodType,
+            total_bill: totalBill,
+          };
+          websocketService?.broadcastToRole?.('darkstore', 'order:created', orderEvent);
+          websocketService?.broadcastToRole?.('admin', 'order:created', orderEvent);
+          websocketService?.broadcastToRole?.('finance', 'order:created', orderEvent);
+          websocketService?.broadcastToRole?.('picker', 'order:created', orderEvent);
+          websocketService?.broadcast?.('order:created', orderEvent);
+        } catch (wsErr) {
+          console.warn('Websocket order:created broadcast failed (non-blocking):', wsErr?.message);
+        }
+        // Auto-assign to a free, active picker when ORDER_ASSIGNMENT_STRATEGY is not MANUAL_ASSIGN
+        try {
+          const orderAssignService = require('../../darkstore/services/orderAssignService');
+          orderAssignService.tryAutoAssignNewOrder(orderId).catch(() => {});
+        } catch (_) { /* non-blocking */ }
       } catch (err) {
         console.warn('Darkstore order create failed (non-blocking):', err.message);
       }
@@ -361,37 +399,6 @@ async function createOrder(userId, body) {
         websocketService?.broadcastToRole?.('darkstore', 'payment:created', paymentEvent);
       } catch (err) {
         console.warn('Payment integration failed (non-blocking):', err.message);
-      }
-
-      // Emit order created events (same payload to all relevant rooms)
-      try {
-        const ph = String(phoneNumber || '');
-        const maskedPhone = ph.length >= 8
-          ? ph.slice(0, 2) + '******' + ph.slice(-2)
-          : ph ? '******' : '';
-
-        const orderEvent = {
-          order_id: orderId,
-          item_count: itemCount,
-          items: dsItems,
-          customer_name: customerName,
-          customer_phone: maskedPhone,
-          delivery_address: deliveryAddrStr,
-          store_id: storeId,
-          sla_deadline: slaDeadline,
-          sla_status: 'safe',
-          status: 'new',
-          order_type: 'Normal',
-          createdAt: new Date(),
-          payment_status: paymentStatus,
-          payment_method: resolvedMethodType,
-          total_bill: totalBill,
-        };
-        websocketService?.broadcastToRole?.('darkstore', 'order:created', orderEvent);
-        websocketService?.broadcastToRole?.('admin', 'order:created', orderEvent);
-        websocketService?.broadcastToRole?.('finance', 'order:created', orderEvent);
-      } catch (err) {
-        console.warn('Websocket broadcast failed (non-blocking):', err.message);
       }
   } catch (err) {
     console.warn('Post-order integrations failed (non-blocking):', err.message);

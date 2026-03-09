@@ -1,62 +1,28 @@
 /**
- * WebSocket Service — Redis Pub/Sub Publisher
+ * WebSocket Service — Pub/Sub Publisher
  *
- * Instead of managing Socket.IO connections directly, this service
- * publishes events to Redis channels. A standalone ws-server process
- * subscribes and relays them to connected dashboard/app clients.
- *
- * The public API (broadcastToRole, broadcastToUser, broadcastToRoom,
- * broadcast) is unchanged so callers require zero modifications.
+ * Uses shared pubsub (in-memory by default, Redis when available).
+ * Real-time events work as soon as the backend runs — no separate Redis required.
  */
 
-const Redis = require('ioredis');
+const pubsub = require('./pubsub');
 const logger = require('../core/utils/logger');
 
 class WebSocketService {
   constructor() {
-    this.pub = null;
-    this._ready = false;
+    this._ready = true;
   }
 
-  /**
-   * Initialise the Redis publisher. Called once from server.js on startup.
-   * The `httpServer` param is accepted for backward-compat but ignored —
-   * Socket.IO now lives in the separate ws-server process.
-   */
   initialize(_httpServer) {
-    const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-
-    this.pub = new Redis(redisUrl);
-
-    this.pub.on('connect', () => {
-      this._ready = true;
-      logger.info('WebSocket service: Redis publisher connected', { redisUrl });
-    });
-
-    this.pub.on('error', (err) => {
-      logger.error('WebSocket service: Redis publisher error', { error: err.message });
-    });
-
-    this.pub.on('close', () => {
-      this._ready = false;
-      logger.warn('WebSocket service: Redis publisher disconnected');
-    });
-
-    logger.info('WebSocket service initialized (Redis Pub/Sub mode)');
+    pubsub.tryUseRedis();
+    logger.info('WebSocket service initialized (in-memory or Redis)');
   }
 
   _publish(channel, payload) {
-    if (!this.pub) {
-      logger.warn('WebSocket service: publish called before initialize');
-      return;
-    }
     try {
-      this.pub.publish(channel, JSON.stringify(payload));
+      pubsub.publish(channel, payload);
     } catch (err) {
-      logger.error('WebSocket service: publish failed', {
-        channel,
-        error: err.message,
-      });
+      logger.warn('WebSocket service: publish failed', { channel, error: err.message });
     }
   }
 

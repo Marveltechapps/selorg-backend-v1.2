@@ -479,9 +479,27 @@ async function getSlaConfig(cityId = DEFAULT_CITY_ID) {
 }
 
 /**
+ * Seed minimal zone data for heatmap when none exist
+ */
+async function ensureZonesExist() {
+  const count = await Zone.countDocuments({ isVisible: true });
+  if (count > 0) return;
+
+  const defaultZones = [
+    { name: 'Indiranagar', type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#10B981' },
+    { name: 'Whitefield', type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#3B82F6' },
+    { name: 'Koramangala', type: 'premium', status: 'active', isVisible: true, city: 'Bangalore', color: '#8B5CF6' },
+    { name: 'HSR Layout', type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#F59E0B' },
+  ];
+  await Zone.insertMany(defaultZones);
+}
+
+/**
  * Seed minimal test data for Citywide Control
  */
 async function seedCitywideData(cityId = DEFAULT_CITY_ID) {
+  await ensureZonesExist();
+
   await OpsIntegrationHealth.deleteMany({ cityId });
   await OpsIntegrationHealth.insertMany([
     { serviceKey: 'payment_razorpay', displayName: 'Razorpay', provider: 'Payment Gateway', status: 'stable', cityId },
