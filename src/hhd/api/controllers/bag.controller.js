@@ -23,7 +23,7 @@ async function scanBag(req, res, next) {
     const existingBag = await HHDBag.findOne({ bagId });
     if (existingBag) {
       throw new ErrorResponse(
-        `Bag ${bagId} has already been scanned for order ${existingHHDBag.orderId}. Please scan a different bag.`,
+        `Bag ${bagId} has already been scanned for order ${existingBag.orderId}. Please scan a different bag.`,
         409
       );
     }

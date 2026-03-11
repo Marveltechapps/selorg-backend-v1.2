@@ -7,7 +7,33 @@ async function getProfile(req, res, next) {
   try {
     const user = await HHDUser.findById(req.user?.id).select('-password');
     if (!user) throw new ErrorResponse('User not found', 404);
-    res.status(200).json({ success: true, data: user });
+
+    const linkedPicker = await PickerUser.findOne({ hhdUserId: new mongoose.Types.ObjectId(req.user?.id) })
+      .select('name phone photoUri employment')
+      .lean();
+
+    const profile = user.toObject();
+    if (linkedPicker) {
+      profile.linkedPickerProfile = {
+        name: linkedPicker.name,
+        phone: linkedPicker.phone,
+        photoUri: linkedPicker.photoUri,
+      };
+
+      if (!profile.name && linkedPicker.name) {
+        profile.name = linkedPicker.name;
+      }
+
+      if (!profile.mobile && linkedPicker.phone) {
+        profile.mobile = linkedPicker.phone;
+      }
+
+      if (!profile.department && linkedPicker.employment?.department) {
+        profile.department = linkedPicker.employment.department;
+      }
+    }
+
+    res.status(200).json({ success: true, data: profile });
   } catch (error) {
     next(error);
   }
@@ -71,4 +97,38 @@ async function getLinkedPickerProfile(req, res, next) {
   }
 }
 
-module.exports = { getProfile, updateProfile, getContract, getEmployment, getLinkedPickerProfile };
+/**
+ * HHD Heartbeat - updates linked PickerUser.lastSeenAt so the picker appears AVAILABLE
+ * for auto-assignment when new orders are placed. Call periodically (e.g. every 30s) from
+ * OrderReceivedScreen when the picker is ready for orders.
+ */
+async function postHeartbeat(req, res, next) {
+  try {
+    const hhdUserId = req.user?.id;
+    if (!hhdUserId) throw new ErrorResponse('Unauthorized', 401);
+
+    const pickerUser = await PickerUser.findOne({
+      hhdUserId: new mongoose.Types.ObjectId(hhdUserId),
+    });
+    if (!pickerUser) {
+      return res.status(200).json({
+        success: true,
+        data: { lastSeenAt: null, linked: false },
+        message: 'No linked picker; heartbeat recorded but will not affect auto-assign',
+      });
+    }
+
+    const now = new Date();
+    pickerUser.lastSeenAt = now;
+    await pickerUser.save();
+
+    res.status(200).json({
+      success: true,
+      data: { lastSeenAt: now },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { getProfile, updateProfile, getContract, getEmployment, getLinkedPickerProfile, postHeartbeat };

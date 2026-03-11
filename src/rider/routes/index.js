@@ -13,11 +13,11 @@ router.get('/health', (_req, res) => {
   res.status(200).json({ ok: true, service: 'rider', timestamp: new Date().toISOString() });
 });
 
-// Overview summary (before rider routes to avoid :riderId matching "summary")
+// Overview summary (keep before other routes)
 router.get('/summary', overviewController.getSummary);
 
-// Rider routes
-router.use('/', riderRoutes);
+// Mount sub-routers with fixed prefixes BEFORE the catch-all rider routes.
+// This avoids paths like "/orders" or "/fleet" being treated as a ":riderId" parameter.
 
 // Fleet routes
 router.use('/fleet', fleetRoutes);
@@ -30,5 +30,9 @@ router.use('/hr', hrRoutes);
 
 // Orders (list, assign, alert) - rider dashboard
 router.use('/orders', orderRoutes);
+
+// Rider routes ("/", "/:riderId", etc.) mounted last so they don't shadow
+// more specific prefixes like /fleet, /dispatch, /hr, /orders.
+router.use('/', riderRoutes);
 
 module.exports = router;

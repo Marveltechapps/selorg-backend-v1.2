@@ -2,6 +2,7 @@ const { Server: SocketIOServer } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const pubsub = require('../../utils/pubsub');
 const logger = require('../../core/utils/logger');
+const { createCorsOriginHandler } = require('../../config/corsOrigins');
 
 let io;
 let unsubscribe = null;
@@ -19,9 +20,9 @@ function initSocketIO(httpServer) {
   io = new SocketIOServer(httpServer, {
     path: '/hhd-socket.io',
     cors: {
-      origin: process.env.NODE_ENV === 'production'
-        ? (process.env.CORS_ORIGIN && process.env.CORS_ORIGIN.split(',')) || ['http://localhost:3000']
-        : true,
+      origin: createCorsOriginHandler((origin, allowedOrigins) => {
+        logger.warn('Socket.IO CORS blocked origin', { origin, allowedOrigins });
+      }),
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -51,6 +52,20 @@ function initSocketIO(httpServer) {
     socket.on('unsubscribe', (room) => { socket.leave(room); });
     socket.on('join:user', (userId) => { socket.join(`user:${userId}`); });
     socket.on('join:order', (orderId) => { socket.join(`order:${orderId}`); });
+    socket.on('get:live_orders', async (params) => {
+      const storeId = params?.storeId || socket.primaryStoreId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+      const status = params?.status || 'all';
+      const limit = params?.limit || 100;
+      logger.info(`Handling get:live_orders via socket: storeId=${storeId}, status=${status}, limit=${limit}`);
+      try {
+        const { fetchLiveOrdersData } = require('../../darkstore/controllers/dashboardController');
+        const { orders } = await fetchLiveOrdersData(storeId, status, limit);
+        logger.info(`Sending live_orders:snapshot via socket: ${orders.length} orders`);
+        socket.emit('live_orders:snapshot', { store_id: storeId, status, orders });
+      } catch (err) {
+        logger.warn('Failed to fetch live orders via socket', { error: err.message });
+      }
+    });
     socket.on('order:update', (data) => {
       if (data?.orderId) io.to(`order:${data.orderId}`).emit('order:updated', data);
     });
@@ -62,8 +77,8 @@ function initSocketIO(httpServer) {
     if (role === 'darkstore' && storeId) {
       try {
         const { fetchLiveOrdersData } = require('../../darkstore/controllers/dashboardController');
-        const { orders } = await fetchLiveOrdersData(storeId, 'all', 5);
-        socket.emit('live_orders:snapshot', { store_id: storeId, orders });
+        const { orders } = await fetchLiveOrdersData(storeId, 'all', 100);
+        socket.emit('live_orders:snapshot', { store_id: storeId, status: 'all', orders });
       } catch (err) {
         logger.warn('Failed to emit live_orders:snapshot', { error: err.message });
       }
@@ -75,8 +90,33 @@ function initSocketIO(httpServer) {
     unsubscribe = pubsub.subscribe((channel, message) => {
       try {
         const payload = JSON.parse(message);
-        const { target, event, data } = payload;
+        const { target, event, data, socketId, role } = payload;
+        logger.info(`Relaying pubsub event: channel=${channel}, event=${event}, target=${target}`);
         switch (channel) {
+          case 'ws:request':
+            if (event === 'get:live_orders') {
+              const { fetchLiveOrdersData } = require('../../darkstore/controllers/dashboardController');
+              const storeId = data?.storeId || process.env.DEFAULT_STORE_ID || '';
+              const status = data?.status || 'all';
+              const limit = data?.limit || 100;
+              fetchLiveOrdersData(storeId, status, limit)
+                .then(({ orders }) => {
+                  const snapshot = { store_id: storeId, status, orders };
+                  if (socketId) {
+                    // Send directly back to the requesting socket if specified (via ws:user room used as alias for socketId in some setups or custom room)
+                    // Standalone ws-server listens to ws:role, ws:user etc.
+                    // We'll broadcast to the role for simplicity, or use a specific room if ws-server supported it.
+                    // ws-server relays ws:role to role room. Darkstore users are in role:darkstore.
+                    const websocketService = require('../../utils/websocket');
+                    websocketService.broadcastToRole(role || 'darkstore', 'live_orders:snapshot', snapshot);
+                  } else {
+                    const websocketService = require('../../utils/websocket');
+                    websocketService.broadcastToRole('darkstore', 'live_orders:snapshot', snapshot);
+                  }
+                })
+                .catch(err => logger.warn('Failed to process ws:request for live orders', { error: err.message }));
+            }
+            break;
           case 'ws:role':
             io.to(`role:${String(target || '').toLowerCase()}`).emit(event, data);
             break;

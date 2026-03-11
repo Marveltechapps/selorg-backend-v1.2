@@ -927,8 +927,22 @@ const getTransferSLASummary = async (req, res) => {
       ? Math.round((onTimeTransfers.length / completedTransfers.length) * 100)
       : 0;
 
-    // Calculate average prep time (simplified - in production would use actual timestamps)
-    const averagePrepTime = '18m';
+    // Calculate average prep time based on actual timestamps
+    let totalPrepMinutes = 0;
+    let prepSamples = 0;
+    for (const t of completedTransfers) {
+      if (t.requested_at && t.updated_at) {
+        const requested = new Date(t.requested_at);
+        const updated = new Date(t.updated_at);
+        if (!Number.isNaN(requested.getTime()) && !Number.isNaN(updated.getTime()) && updated > requested) {
+          const diffMinutes = (updated.getTime() - requested.getTime()) / 60000;
+          totalPrepMinutes += diffMinutes;
+          prepSamples += 1;
+        }
+      }
+    }
+    const averagePrepTime =
+      prepSamples > 0 ? `${Math.round(totalPrepMinutes / prepSamples)}m` : '0m';
 
     res.status(200).json({
       success: true,

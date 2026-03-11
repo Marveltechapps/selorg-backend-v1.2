@@ -10,6 +10,14 @@ const documentSchema = new mongoose.Schema(
     docType: { type: String, enum: ['aadhar', 'pan'], required: true },
     side: { type: String, enum: ['front', 'back'], required: true },
     url: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    rejectionReason: { type: String, default: null },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
   },
   { timestamps: true }
 );

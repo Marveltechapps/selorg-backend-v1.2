@@ -54,6 +54,26 @@ const getStats = async (userId) => {
   }
   todayIncentives = Math.round(todayOrders * 2.5) || 0;
 
+  // Determine if there is an active shift right now (punched in but not yet completed).
+  // Treat ON_DUTY and ON_BREAK as active; fallback to punchOut === null for legacy records.
+  let isShiftActive = false;
+  let activeShiftStartTime = null;
+  if (todayRecords.length) {
+    const activeRecord =
+      todayRecords.find(
+        (a) =>
+          !a.punchOut ||
+          a.status === 'ON_DUTY' ||
+          a.status === 'ON_BREAK'
+      ) || null;
+    if (activeRecord) {
+      isShiftActive = true;
+      activeShiftStartTime = activeRecord.punchIn instanceof Date
+        ? activeRecord.punchIn.getTime()
+        : new Date(activeRecord.punchIn).getTime();
+    }
+  }
+
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const weeklyEarnings = [];
   for (let i = 6; i >= 0; i--) {
@@ -85,6 +105,8 @@ const getStats = async (userId) => {
     : null;
 
   return {
+    isShiftActive,
+    activeShiftStartTime,
     todayOrders,
     todayEarnings: Math.round(todayEarnings),
     todayIncentives,

@@ -5,7 +5,15 @@
 const mongoose = require('mongoose');
 const User = require('../models/user.model');
 const HHDUser = require('../../hhd/models/User.model');
+const Document = require('../models/document.model');
+const BankAccount = require('../models/bankAccount.model');
+const PickerDevice = require('../models/device.model');
+const SupportTicket = require('../models/supportTicket.model');
+const Notification = require('../models/notification.model');
+const TrainingVideo = require('../models/trainingVideo.model');
+const WatchHistory = require('../models/watchHistory.model');
 const { uploadPickerProfileImage } = require('../../utils/s3Upload');
+const { buildDocumentPayload } = require('./documents.service');
 
 const updateProfile = async (userId, body) => {
   const set = {};
@@ -95,11 +103,118 @@ const getProfile = async (userId) => {
   };
   if (user.hhdUserId) {
     try {
-      const hhd = await HHDUser.findById(user.hhdUserId).select('name mobile').lean();
-      if (hhd) profile.linkedHhdProfile = { name: hhd.name, mobile: hhd.mobile };
+      const hhd = await HHDUser.findById(user.hhdUserId).select('name mobile role isActive').lean();
+      if (hhd) {
+        profile.linkedHhdProfile = {
+          name: hhd.name,
+          mobile: hhd.mobile,
+          role: hhd.role,
+          isActive: hhd.isActive,
+        };
+        if (!profile.name && hhd.name) {
+          profile.name = hhd.name;
+        }
+        if (!profile.phone && hhd.mobile) {
+          profile.phone = hhd.mobile;
+        }
+      }
     } catch (_) {}
   }
   return profile;
+};
+
+const getProfileOverview = async (userId) => {
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return null;
+
+  const [user, documentRecords, bankAccounts, assignedDevice, openTicketsCount, unreadNotificationsCount, activeVideos, watchHistory] =
+    await Promise.all([
+      User.findById(userId).lean(),
+      Document.find({ userId }).lean(),
+      BankAccount.find({ userId }).sort({ isDefault: -1, createdAt: -1 }).lean(),
+      PickerDevice.findOne({ assignedPickerId: userId }).lean(),
+      SupportTicket.countDocuments({ userId, status: { $in: ['open', 'in_progress'] } }),
+      Notification.countDocuments({ userId, isRead: false }),
+      TrainingVideo.find({ isActive: true }).sort({ order: 1 }).lean(),
+      WatchHistory.find({ userId }).lean(),
+    ]);
+
+  if (!user) return null;
+
+  const profile = await getProfile(userId);
+  const documentPayload = buildDocumentPayload(documentRecords || []);
+
+  const defaultBankAccount = (bankAccounts || []).find((account) => account.isDefault) || bankAccounts?.[0] || null;
+  const verifiedBankAccount = (bankAccounts || []).find((account) => account.isVerified) || null;
+
+  const watchHistoryMap = new Map((watchHistory || []).map((entry) => [entry.videoId, entry]));
+  const totalTrainingVideos = activeVideos?.length || 0;
+  let completedTrainingVideos = 0;
+  let totalProgressPercent = 0;
+
+  for (const video of activeVideos || []) {
+    const history = watchHistoryMap.get(video.videoId);
+    const completed = !!history?.completedAt || user?.trainingProgress?.[video.videoId] === 100;
+    if (completed) {
+      completedTrainingVideos += 1;
+      totalProgressPercent += 100;
+      continue;
+    }
+
+    const watchedSeconds = Math.max(0, history?.watchedSeconds || 0);
+    const progressPercent = video.duration > 0 ? Math.min(99, Math.round((watchedSeconds / video.duration) * 100)) : 0;
+    totalProgressPercent += progressPercent;
+  }
+
+  const trainingProgressPercent =
+    totalTrainingVideos > 0 ? Math.round(totalProgressPercent / totalTrainingVideos) : 0;
+
+  const bankSummary = {
+    hasAnyAccount: bankAccounts.length > 0,
+    hasVerifiedAccount: !!verifiedBankAccount,
+    defaultAccountId: defaultBankAccount?._id?.toString() || null,
+    defaultAccountMasked: defaultBankAccount?.accountNumber
+      ? `****${String(defaultBankAccount.accountNumber).slice(-4)}`
+      : null,
+    defaultBankName: defaultBankAccount?.bankName || null,
+    upiId: profile?.upiId || null,
+    upiName: profile?.upiName || null,
+  };
+
+  return {
+    picker: {
+      id: profile.id,
+      name: profile.name || null,
+      phone: profile.phone || null,
+      email: profile.email || null,
+      photoUri: profile.photoUri || null,
+      joinedAt: profile.createdAt || null,
+      status: profile.status || null,
+      role: user?.employment?.role || null,
+      locationType: profile.locationType || null,
+    },
+    documents: documentPayload.summary,
+    documentDetails: documentPayload.details,
+    bank: bankSummary,
+    training: {
+      totalVideos: totalTrainingVideos,
+      completedVideos: completedTrainingVideos,
+      progressPercent: trainingProgressPercent,
+      completed: totalTrainingVideos > 0 && completedTrainingVideos === totalTrainingVideos,
+    },
+    device: {
+      assigned: !!assignedDevice,
+      deviceId: assignedDevice?.deviceId || null,
+      serial: assignedDevice?.serial || null,
+      status: assignedDevice?.status || null,
+      assignedAt: assignedDevice?.assignedAt ? new Date(assignedDevice.assignedAt).toISOString() : null,
+    },
+    support: {
+      openTicketsCount,
+    },
+    notifications: {
+      unreadCount: unreadNotificationsCount,
+    },
+  };
 };
 
 /** Link status for same-person context (Picker ↔ HHD). */
@@ -150,6 +265,7 @@ module.exports = {
   setUpi,
   getById,
   getProfile,
+  getProfileOverview,
   getLinkStatus,
   getContract,
   updateContract,

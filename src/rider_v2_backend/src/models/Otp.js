@@ -30,4 +30,4 @@ var OtpSchema = new _mongoose.Schema({
 }, {
   timestamps: true
 });
-var Otp = exports.Otp = _mongoose["default"].model("Otp", OtpSchema);
+var Otp = exports.Otp = _mongoose["default"].models.Otp || _mongoose["default"].model("Otp", OtpSchema);

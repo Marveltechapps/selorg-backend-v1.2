@@ -10,6 +10,67 @@ const logger = require('../../core/utils/logger');
 const websocketService = require('../../utils/websocket');
 
 /**
+ * Get Ready-for-Dispatch Orders (picking completed, bag + rack assigned)
+ * GET /api/darkstore/outbound/ready-orders
+ */
+const getReadyForDispatchOrders = async (req, res) => {
+  try {
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    // Orders that are fully picked, bagged, and placed in rack awaiting rider dispatch
+    const query = {
+      store_id: storeId,
+      status: { $in: ['READY_FOR_DISPATCH', 'ready'] },
+      bagId: { $ne: '' },
+      rackLocation: { $ne: '' },
+    };
+
+    const totalItems = await Order.countDocuments(query);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    const orders = await Order.find(query)
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const readyOrders = orders.map((o) => ({
+      order_id: o.order_id,
+      status: o.status,
+      bag_id: o.bagId,
+      rack_location: o.rackLocation,
+      items_count: o.item_count,
+      order_type: o.order_type,
+      customer_name: o.customer_name || 'Customer',
+      sla_status: o.sla_status,
+      sla_deadline: o.sla_deadline,
+      created_at: o.createdAt,
+      updated_at: o.updatedAt,
+    }));
+
+    res.status(200).json({
+      success: true,
+      ready_orders: readyOrders,
+      pagination: {
+        current_page: page,
+        total_pages: totalPages,
+        total_items: totalItems,
+        items_per_page: limit,
+      },
+    });
+  } catch (error) {
+    logger.error('Get ready-for-dispatch orders error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch ready-for-dispatch orders',
+    });
+  }
+};
+
+/**
  * Get Outbound Summary
  * GET /api/darkstore/outbound/summary
  */
@@ -160,12 +221,16 @@ const batchDispatchOrders = async (req, res) => {
 
     // Production-grade logic: if no orders provided, auto-select ready orders
     if (finalOrderIds.length === 0 && auto_assign) {
-      const readyOrders = await Order.find({ 
-        store_id: storeId, 
-        status: 'ready' 
-      }).limit(5).select('order_id');
-      
-      finalOrderIds = readyOrders.map(o => o.order_id);
+      const readyOrders = await Order.find({
+        store_id: storeId,
+        status: { $in: ['ready', 'READY_FOR_DISPATCH'] },
+        bagId: { $ne: '' },
+        rackLocation: { $ne: '' },
+      })
+        .limit(5)
+        .select('order_id');
+
+      finalOrderIds = readyOrders.map((o) => o.order_id);
     }
 
     if (finalOrderIds.length === 0) {
@@ -207,8 +272,8 @@ const batchDispatchOrders = async (req, res) => {
           logger.warn(`Order ${orderId} not found for store ${storeId}`);
           continue;
         }
-        if (order.status !== 'ready') {
-          logger.warn(`Order ${orderId} is not ready (status: ${order.status})`);
+        if (!['ready', 'READY_FOR_DISPATCH'].includes(order.status)) {
+          logger.warn(`Order ${orderId} is not ready for dispatch (status: ${order.status})`);
           continue;
         }
         // Check if order is already dispatched
@@ -355,7 +420,7 @@ const batchDispatchOrders = async (req, res) => {
       // Create dispatch order records
       for (const orderId of order_ids) {
         const order = await Order.findOne({ order_id: orderId, store_id: storeId });
-        if (order && order.status === 'ready') {
+        if (order && ['ready', 'READY_FOR_DISPATCH'].includes(order.status)) {
           await DispatchOrder.create({
             dispatch_id: dispatchId,
             order_id: orderId,
@@ -473,6 +538,20 @@ const batchDispatchOrders = async (req, res) => {
       });
     }
 
+    try {
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:dispatch_updated', {
+        store_id: storeId,
+      });
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:riders_updated', {
+        store_id: storeId,
+      });
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:summary_updated', {
+        store_id: storeId,
+      });
+    } catch (wsErr) {
+      logger.warn('WebSocket outbound dispatch update broadcast failed (non-blocking):', wsErr?.message);
+    }
+
     res.status(200).json({
       success: true,
       dispatch_id: responseDispatchId,
@@ -500,13 +579,15 @@ const manuallyAssignRider = async (req, res) => {
 
     let finalOrderIds = [...order_ids];
 
-    // If no orders provided, auto-select one ready order
+    // If no orders provided, auto-select one ready-for-dispatch order
     if (finalOrderIds.length === 0) {
-      const readyOrder = await Order.findOne({ 
-        store_id: storeId, 
-        status: 'ready' 
+      const readyOrder = await Order.findOne({
+        store_id: storeId,
+        status: { $in: ['ready', 'READY_FOR_DISPATCH'] },
+        bagId: { $ne: '' },
+        rackLocation: { $ne: '' },
       }).select('order_id');
-      
+
       if (readyOrder) {
         finalOrderIds = [readyOrder.order_id];
       }
@@ -579,7 +660,7 @@ const manuallyAssignRider = async (req, res) => {
         continue;
       }
       
-      if (order.status !== 'ready' && !override_sla) {
+      if (!['ready', 'READY_FOR_DISPATCH'].includes(order.status) && !override_sla) {
         orderStatuses.push({ 
           order_id: orderId, 
           status: order.status, 
@@ -604,10 +685,10 @@ const manuallyAssignRider = async (req, res) => {
 
     if (ordersAssigned === 0) {
       // Provide detailed error message
-      const readyOrdersCount = await Order.countDocuments({ 
-        store_id: storeId, 
-        status: 'ready',
-        order_id: { $in: order_ids }
+      const readyOrdersCount = await Order.countDocuments({
+        store_id: storeId,
+        status: { $in: ['ready', 'READY_FOR_DISPATCH'] },
+        order_id: { $in: order_ids },
       });
       
       const alreadyDispatched = await DispatchOrder.countDocuments({ 
@@ -674,6 +755,20 @@ const manuallyAssignRider = async (req, res) => {
       websocketService?.broadcast?.('order:dispatched', dispatchEvent);
     } catch (wsErr) {
       logger.warn('WebSocket order:dispatched broadcast failed (non-blocking):', wsErr?.message);
+    }
+
+    try {
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:dispatch_updated', {
+        store_id: storeId,
+      });
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:riders_updated', {
+        store_id: storeId,
+      });
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:summary_updated', {
+        store_id: storeId,
+      });
+    } catch (wsErr) {
+      logger.warn('WebSocket outbound manual assign update broadcast failed (non-blocking):', wsErr?.message);
     }
 
     // Create audit log
@@ -825,6 +920,18 @@ const approveTransferRequest = async (req, res) => {
       store_id: transferRequest.from_store,
     });
 
+    try {
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:transfers_updated', {
+        store_id: transferRequest.from_store,
+        request_id: requestId,
+      });
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:summary_updated', {
+        store_id: transferRequest.from_store,
+      });
+    } catch (wsErr) {
+      logger.warn('WebSocket outbound approve transfer broadcast failed (non-blocking):', wsErr?.message);
+    }
+
     res.status(200).json({
       success: true,
       request_id: requestId,
@@ -890,6 +997,18 @@ const rejectTransferRequest = async (req, res) => {
       },
       store_id: transferRequest.from_store,
     });
+
+    try {
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:transfers_updated', {
+        store_id: transferRequest.from_store,
+        request_id: requestId,
+      });
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:summary_updated', {
+        store_id: transferRequest.from_store,
+      });
+    } catch (wsErr) {
+      logger.warn('WebSocket outbound reject transfer broadcast failed (non-blocking):', wsErr?.message);
+    }
 
     res.status(200).json({
       success: true,
@@ -983,8 +1102,22 @@ const getTransferSLASummary = async (req, res) => {
       ? Math.round((onTimeTransfers.length / completedTransfers.length) * 100)
       : 0;
 
-    // Calculate average prep time (simplified - in production would use actual timestamps)
-    const averagePrepTime = '18m';
+    // Calculate average prep time based on actual timestamps
+    let totalPrepMinutes = 0;
+    let prepSamples = 0;
+    for (const t of completedTransfers) {
+      if (t.requested_at && t.updated_at) {
+        const requested = new Date(t.requested_at);
+        const updated = new Date(t.updated_at);
+        if (!Number.isNaN(requested.getTime()) && !Number.isNaN(updated.getTime()) && updated > requested) {
+          const diffMinutes = (updated.getTime() - requested.getTime()) / 60000;
+          totalPrepMinutes += diffMinutes;
+          prepSamples += 1;
+        }
+      }
+    }
+    const averagePrepTime =
+      prepSamples > 0 ? `${Math.round(totalPrepMinutes / prepSamples)}m` : '0m';
 
     res.status(200).json({
       success: true,
@@ -1005,6 +1138,7 @@ const getTransferSLASummary = async (req, res) => {
 
 module.exports = {
   getOutboundSummary,
+  getReadyForDispatchOrders,
   getDispatchQueue,
   getActiveRiders,
   batchDispatchOrders,

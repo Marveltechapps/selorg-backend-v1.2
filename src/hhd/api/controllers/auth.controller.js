@@ -4,6 +4,30 @@ const { createOTP, verifyOTP } = require('../../services/otp.service');
 const { logger } = require('../../utils/logger');
 const db = require('../../../config/db');
 const { sendOtpSms, isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../../utils/smsGateway');
+const PickerUser = require('../../../picker/models/user.model');
+
+async function linkPickerAccountByMobile(hhdUser) {
+  try {
+    if (!hhdUser?.mobile) {
+      return null;
+    }
+
+    const pickerUser = await PickerUser.findOne({ phone: hhdUser.mobile });
+    if (!pickerUser) {
+      return null;
+    }
+
+    if (!pickerUser.hhdUserId || pickerUser.hhdUserId.toString() !== hhdUser._id.toString()) {
+      pickerUser.hhdUserId = hhdUser._id;
+      await pickerUser.save();
+    }
+
+    return pickerUser;
+  } catch (error) {
+    logger.warn(`[Verify OTP] Failed to link picker account for ${hhdUser?.mobile}: ${error.message}`);
+    return null;
+  }
+}
 
 async function sendOTP(req, res, next) {
   const { mobile, mobileNumber } = req.body;
@@ -98,8 +122,15 @@ async function verifyOTPHandler(req, res, next) {
     if (!otpParam) {
       return res.status(400).json({ success: false, message: 'Please provide OTP', error: 'OTP is required' });
     }
-    const normalizedMobile = String(mobileParam).trim();
+    const normalizedMobile = String(mobileParam).replace(/\D/g, '').slice(-10);
     const normalizedOtp = String(otpParam).trim();
+    if (normalizedMobile.length !== 10 || /^0+$/.test(normalizedMobile)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid 10-digit mobile number',
+        error: 'Invalid mobile number format',
+      });
+    }
     if (!/^\d{4}$/.test(normalizedOtp)) {
       return res.status(400).json({
         success: false,
@@ -144,6 +175,7 @@ async function verifyOTPHandler(req, res, next) {
     }
     user.lastLogin = new Date();
     await user.save().catch(() => {});
+    await linkPickerAccountByMobile(user);
 
     const token = user.getSignedJwtToken();
     return res.status(200).json({

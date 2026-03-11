@@ -239,28 +239,7 @@ async function main() {
   await Staff.deleteMany({ store_id: { $in: storeIds } });
   await StockAlert.deleteMany({ store_id: { $in: storeIds } });
   await RTOAlert.deleteMany({ store_id: { $in: storeIds } });
-  console.log('Cleaned existing data.');
-
-  for (const store of STORES) {
-    console.log(`\n=== Seeding ${store.label} (${store.id}) ===`);
-
-    const orders = generateOrders(store.id);
-    await Order.insertMany(orders);
-    console.log(`  Orders: ${orders.length} (new: ${orders.filter(o=>o.status==='new').length}, processing: ${orders.filter(o=>o.status==='processing').length}, ready: ${orders.filter(o=>o.status==='ready').length})`);
-
-    const staff = generateStaff(store.id);
-    await Staff.insertMany(staff);
-    const activeStaff = staff.filter(s => s.is_active);
-    console.log(`  Staff: ${staff.length} total (${activeStaff.length} active) - Pickers: ${staff.filter(s=>s.role==='Picker').length}, Packers: ${staff.filter(s=>s.role==='Packer').length}`);
-
-    const stockAlerts = generateStockAlerts(store.id);
-    await StockAlert.insertMany(stockAlerts);
-    console.log(`  Stock Alerts: ${stockAlerts.length} (critical: ${stockAlerts.filter(a=>a.severity==='critical').length}, warning: ${stockAlerts.filter(a=>a.severity==='warning').length})`);
-
-    const rtoAlerts = generateRTOAlerts(store.id);
-    await RTOAlert.insertMany(rtoAlerts);
-    console.log(`  RTO Alerts: ${rtoAlerts.length}`);
-  }
+  console.log('Cleaned existing data. Demo seeding for orders/staff/alerts has been disabled to enforce real data only.');
 
   console.log('\n--- Verification ---');
   for (const store of STORES) {

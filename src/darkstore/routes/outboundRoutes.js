@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getOutboundSummary,
+  getReadyForDispatchOrders,
   getDispatchQueue,
   getActiveRiders,
   batchDispatchOrders,
@@ -15,6 +16,9 @@ const {
 
 // GET /api/darkstore/outbound/summary
 router.get('/summary', getOutboundSummary);
+
+// GET /api/darkstore/outbound/ready-orders
+router.get('/ready-orders', getReadyForDispatchOrders);
 
 // GET /api/darkstore/outbound/dispatch
 router.get('/dispatch', getDispatchQueue);

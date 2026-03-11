@@ -193,4 +193,4 @@ RiderSchema.index({
   availability: 1,
   status: 1
 });
-var Rider = exports.Rider = _mongoose["default"].model("Rider", RiderSchema);
+var Rider = exports.Rider = _mongoose["default"].models.Rider || _mongoose["default"].model("Rider", RiderSchema);

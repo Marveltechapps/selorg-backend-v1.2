@@ -4,7 +4,6 @@
  */
 
 const mongoose = require('mongoose');
-const Picker = require('../models/Picker');
 const PickerUser = require('../../picker/models/user.model');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const pickerMetricsService = require('../services/pickerMetricsService');
@@ -61,17 +60,32 @@ const getPickersLive = async (req, res) => {
 };
 
 /**
- * Get Available Pickers
+ * Get Available Pickers (for manual assign in Live Orders / dashboard)
+ * Uses PickerUser (HHD/Picker workforce) - same pool as auto-assign.
+ * Returns all ACTIVE pickers so admin can assign to anyone; pickers will see order when they open HHD.
  * GET /api/v1/darkstore/pickers/available
  */
 const getAvailablePickers = async (req, res) => {
   try {
-    const storeId = req.query.storeId || DEFAULT_STORE;
-    const query = { status: 'available' };
-    if (storeId) query.store_id = storeId;
+    const storeId = req.query.storeId || null;
+    const query = { status: PICKER_STATUS.ACTIVE };
+    if (storeId) query.currentLocationId = storeId;
 
-    const pickers = await Picker.find(query).lean();
-    const data = pickers.map(toFrontendPicker);
+    const pickers = await PickerUser.find(query)
+      .select('name phone lastSeenAt activeOrderId')
+      .lean();
+
+    const now = Date.now();
+    const data = pickers.map((p) => {
+      const derivedStatus = deriveWorkerStatus(p, now);
+      const online = derivedStatus !== 'OFFLINE';
+      return {
+        id: String(p._id),
+        name: p.name || p.phone || 'Unknown',
+        avatar: (p.name || p.phone || '?').slice(0, 2).toUpperCase(),
+        status: online ? (p.activeOrderId ? 'busy' : 'available') : 'offline',
+      };
+    });
 
     res.status(200).json({
       success: true,

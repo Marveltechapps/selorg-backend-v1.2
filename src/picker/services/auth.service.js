@@ -6,6 +6,7 @@
  */
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
+const HHDUser = require('../../hhd/models/User.model');
 const { createOTP, verifyOTP } = require('./otp.service');
 const { sendOtpSms } = require('./sms.service');
 const { isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../utils/smsGateway');
@@ -29,6 +30,24 @@ function logPickerOtp(level, msg) {
   } catch (_) {
     console.log(`[Picker OTP] ${msg}`);
   }
+}
+
+async function ensureLinkedHhdUser(pickerUser, normalizedPhone) {
+  if (!pickerUser || !/^[6-9]\d{9}$/.test(normalizedPhone)) {
+    return null;
+  }
+
+  let hhdUser = await HHDUser.findOne({ mobile: normalizedPhone });
+  if (!hhdUser) {
+    hhdUser = await HHDUser.create({ mobile: normalizedPhone, isActive: true });
+  }
+
+  if (!pickerUser.hhdUserId || pickerUser.hhdUserId.toString() !== hhdUser._id.toString()) {
+    pickerUser.hhdUserId = hhdUser._id;
+    await pickerUser.save();
+  }
+
+  return hhdUser;
 }
 
 /**
@@ -120,7 +139,9 @@ const verifyOtp = async (phone, otp) => {
   }
 
   let user = await User.findOne({ phone: trimmed });
+  const isNewUser = !user;
   if (!user) user = await User.create({ phone: trimmed });
+  await ensureLinkedHhdUser(user, trimmed);
 
   const token = jwt.sign(
     { sub: user._id.toString(), userId: user._id.toString() },
@@ -132,6 +153,7 @@ const verifyOtp = async (phone, otp) => {
     success: true,
     message: 'OTP verified',
     token,
+    isNewUser,
     user: { phone: user.phone, id: user._id.toString() },
   };
 };

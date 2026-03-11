@@ -13,6 +13,7 @@ router.get('/profile/contract', requireAuth, userController.getContract);
 router.put('/profile/contract', requireAuth, userController.updateContract);
 router.get('/profile/employment', requireAuth, userController.getEmployment);
 router.put('/profile/employment', requireAuth, userController.updateEmployment);
+router.get('/profile/overview', requireAuth, userController.getProfileOverview);
 router.get('/profile', requireAuth, userController.getProfile);
 router.put('/profile', requireAuth, userController.updateProfile);
 router.put('/location-type', requireAuth, userController.setLocationType);

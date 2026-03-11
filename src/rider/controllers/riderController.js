@@ -2,6 +2,7 @@ const riderService = require('../services/riderService');
 const cache = require('../../utils/cache');
 const { getCachedOrCompute } = require('../../utils/cacheHelper');
 const appConfig = require('../../config/app');
+const websocketService = require('../../utils/websocket');
 
 const listRiders = async (req, res, next) => {
   try {
@@ -49,7 +50,20 @@ const updateRider = async (req, res, next) => {
     await cache.del(`rider:location:${riderId}`);
     await cache.delByPattern('riders:*'); // Clear all list riders cache entries
     await cache.del('distribution'); // Clear distribution cache
-    
+
+    try {
+      websocketService?.broadcastToRole?.('darkstore', 'outbound:riders_updated', {
+        rider_id: rider.id || rider.rider_id || riderId,
+        store_id: rider.store_id,
+        status: rider.status,
+        location: rider.location || null,
+        updated_at: rider.updatedAt || new Date().toISOString(),
+      });
+    } catch (wsErr) {
+      // Non-blocking: log but don't fail the request
+      console.warn('WebSocket outbound:riders_updated broadcast failed (non-blocking):', wsErr?.message);
+    }
+
     res.status(200).json(rider);
   } catch (error) {
     next(error);

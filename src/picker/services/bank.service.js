@@ -1,7 +1,6 @@
 /**
  * Bank service – from frontend YAML (bank.service.ts).
- * Verify (mock), list/create/update/setDefault/delete accounts.
- * REAL-TIME: list returns [] if DB slow; verify is sync (no external gateway).
+ * Verify validates submitted bank data and persists only real saved accounts.
  */
 const BankAccount = require('../models/bankAccount.model');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
@@ -24,27 +23,21 @@ const verify = async (body) => {
   return {
     success: true,
     verified: true,
-    bankName: body.bankName || 'Bank',
-    branch: body.branch || '',
+    bankName: body.bankName || undefined,
+    branch: body.branch || undefined,
   };
 };
 
 const listByUser = async (userId) => {
-  try {
-    const list = await withTimeout(
-      BankAccount.find({ userId }).lean().sort({ isDefault: -1, createdAt: -1 }),
-      DB_TIMEOUT_MS,
-      []
-    );
-    return (list || []).map((doc) => ({
-      ...doc,
-      id: doc._id.toString(),
-      accountNumber: maskAccountNumber(doc.accountNumber),
-    }));
-  } catch (err) {
-    console.warn('[bank] listByUser fallback:', err?.message);
-    return [];
-  }
+  const list = await withTimeout(
+    BankAccount.find({ userId }).lean().sort({ isDefault: -1, createdAt: -1 }),
+    DB_TIMEOUT_MS
+  );
+  return (list || []).map((doc) => ({
+    ...doc,
+    id: doc._id.toString(),
+    accountNumber: maskAccountNumber(doc.accountNumber),
+  }));
 };
 
 const create = async (userId, body) => {

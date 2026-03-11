@@ -14,6 +14,16 @@ const getProfile = async (req, res, next) => {
   }
 };
 
+const getProfileOverview = async (req, res, next) => {
+  try {
+    const data = await userService.getProfileOverview(req.userId);
+    if (!data) return error(res, 'User not found', 404);
+    success(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const updateProfile = async (req, res, next) => {
   try {
     const data = await userService.updateProfile(req.userId, req.body);
@@ -105,6 +115,7 @@ const updateEmployment = async (req, res, next) => {
 
 module.exports = {
   getProfile,
+  getProfileOverview,
   updateProfile,
   setLocationType,
   setSelectedShifts,

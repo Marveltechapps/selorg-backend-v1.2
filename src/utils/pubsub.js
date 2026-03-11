@@ -8,7 +8,7 @@
 const { EventEmitter } = require('events');
 const logger = require('../core/utils/logger');
 
-const CHANNELS = ['ws:role', 'ws:user', 'ws:room', 'ws:broadcast', 'ws:hhd'];
+const CHANNELS = ['ws:role', 'ws:user', 'ws:room', 'ws:broadcast', 'ws:hhd', 'ws:request'];
 
 const bus = new EventEmitter();
 bus.setMaxListeners(50);

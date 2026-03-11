@@ -37,12 +37,15 @@ async function performOrderAssignment(orderId, pickerId, pickerName, opts = {}) 
   if (!canAssign(order.status)) return null;
 
   const now = new Date();
-  const initials = (pickerName || '')
+  let initials = (pickerName || '')
     .split(/\s+/)
     .map((s) => s.charAt(0))
     .join('')
     .substring(0, 3)
-    .toUpperCase() || 'UA';
+    .toUpperCase();
+  // Schema requires 1–3 uppercase A–Z; fallback when name is phone/numeric
+  const validInitials = (initials || '').replace(/[^A-Z]/g, '').slice(0, 3);
+  initials = validInitials.length > 0 ? validInitials : 'UA';
 
   order.assignee = { id: pickerId, name: pickerName, initials };
   order.pickerAssignment = {

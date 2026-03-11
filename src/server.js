@@ -18,6 +18,7 @@ const { requestIdMiddleware, errorHandler, validateJWTSecret } = require('./core
 const { requestLoggerMiddleware } = require('./core/middleware/requestLogger.middleware');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const validateEnvironment = require('./config/validateEnv');
+const { createCorsOriginHandler } = require('./config/corsOrigins');
 const logger = require('./core/utils/logger');
 
 // Import dashboard routes
@@ -30,6 +31,7 @@ const financeRoutes = require('./finance/routes');
 const warehouseRoutes = require('./warehouse/routes');
 const sharedRoutes = require('./shared/routes');
 const staffRoutes = require('./staff/routes/staffRoutes');
+const riderAuthRoutes = require('./rider/routes/authRoutes');
 const hhdApp = require('./hhd/app');
 const pickerApp = require('./picker/app');
 const customerApp = require('./customer-backend/app');
@@ -60,11 +62,29 @@ function tryRequire(relPath) {
     return null;
   }
 }
-const v2OrderRouter = tryRequire('./rider_v2_backend/src/modules/orders/order.router.js');
-const v2PayoutRouter = tryRequire('./rider_v2_backend/src/modules/payouts/payout.router.js');
-const v2IncidentRouter = tryRequire('./rider_v2_backend/src/modules/incidents/incident.router.js');
-const v2AuthRouter = tryRequire('./rider_v2_backend/src/modules/auth/auth.router.js');
-const v2SigninRouter = tryRequire('./rider_v2_backend/src/modules/auth/signin.router.js');
+const v2OrderRouterModule = tryRequire('./rider_v2_backend/src/modules/orders/order.router.js');
+const v2PayoutRouterModule = tryRequire('./rider_v2_backend/src/modules/payouts/payout.router.js');
+const v2IncidentRouterModule = tryRequire('./rider_v2_backend/src/modules/incidents/incident.router.js');
+const v2OrderRouter = v2OrderRouterModule?.orderRouter || v2OrderRouterModule?.default || v2OrderRouterModule;
+const v2PayoutRouter = v2PayoutRouterModule?.payoutRouter || v2PayoutRouterModule?.default || v2PayoutRouterModule;
+const v2IncidentRouter = v2IncidentRouterModule?.incidentRouter || v2IncidentRouterModule?.default || v2IncidentRouterModule;
+let v2AuthRouter = null;
+try {
+  // Load explicitly so auth route failures are visible instead of being swallowed by tryRequire().
+  const v2AuthModule = require('./rider_v2_backend/src/modules/auth/auth.router.js');
+  v2AuthRouter = v2AuthModule?.authRouter ?? v2AuthModule;
+} catch (err) {
+  logger.warn('Unable to load rider v2 auth router', { error: err?.message });
+}
+
+let v2SigninRouter = null;
+try {
+  // Rider OTP flow depends on this router, so surface any load issue clearly.
+  const v2SigninModule = require('./rider_v2_backend/src/modules/auth/signin.router.js');
+  v2SigninRouter = v2SigninModule?.signinRouter ?? v2SigninModule;
+} catch (err) {
+  logger.warn('Unable to load rider v2 signin router', { error: err?.message });
+}
 
 // Validate critical environment variables on startup (skip in test mode)
 if (process.env.NODE_ENV !== 'test') {
@@ -124,45 +144,10 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// CORS configuration - allow mobile apps (Expo, React Native) and dashboard
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:8081',
-      'http://localhost:19006',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:8081',
-      'http://127.0.0.1:19006',
-    ];
-
-// Allow any localhost/127.0.0.1/0.0.0.0 origin (any port) so Expo/Metro/customer app always work
-const isLocalOrigin = (o) =>
-  typeof o === 'string' &&
-  /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(o.trim());
-
-// Expo / React Native can send exp:// or http(s) with LAN IP; allow so customer app never gets 403
-const isExpoOrMobileOrigin = (o) =>
-  typeof o === 'string' &&
-  (o.trim().startsWith('exp://') ||
-    /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/i.test(o.trim()));
-
 const strictCors = cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, curl, etc.)
-    if (!origin || origin === 'null' || origin === '') return callback(null, true);
-    // Allow any localhost/127.0.0.1/0.0.0.0 with any port (Expo web, Metro, customer app)
-    if (isLocalOrigin(origin)) return callback(null, true);
-    // Allow Expo (exp://) and common mobile dev origins (LAN IP + 172.16-31) so customer app works even if NODE_ENV=production
-    if (isExpoOrMobileOrigin(origin)) return callback(null, true);
-    // In non-production (including NODE_ENV unset), allow any origin
-    if (process.env.NODE_ENV !== 'production') return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
+  origin: createCorsOriginHandler((origin, allowedOrigins) => {
     logger.warn('CORS blocked origin', { origin, allowedOrigins });
-    callback(new Error('Not allowed by CORS'));
-  },
+  }),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
@@ -209,14 +194,22 @@ if (v2IncidentRouter) {
 if (v2AuthRouter) {
   app.use('/api/v1/auth', v2AuthRouter);
   logger.info('Mounted rider_v2 auth router at /api/v1/auth');
+} else {
+  logger.warn('Rider v2 auth router unavailable; /api/v1/auth routes not mounted');
 }
 
 // Rider signin OTP (send-otp, verify-otp, resend-otp) — used by Rider mobile app
-const signinRouter = v2SigninRouter?.signinRouter ?? v2SigninRouter;
+const signinRouter = v2SigninRouter;
 if (signinRouter) {
   app.use('/api/signin', signinRouter);
   logger.info('Mounted rider_v2 signin router at /api/signin');
+} else {
+  logger.warn('Rider v2 signin router unavailable; /api/signin routes not mounted');
 }
+
+// Rider dashboard auth is email/password based and lives in the legacy rider module.
+// Keep it mounted even when the rider operational APIs come from the v2 stack.
+app.use('/api/v1/rider/auth', riderAuthRoutes);
 
 // Rider wrapper: health route + main router (v2 exports riderRouter, legacy exports router)
 const riderMain = riderRoutes.riderRouter || riderRoutes;
