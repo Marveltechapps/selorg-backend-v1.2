@@ -27,6 +27,9 @@ const DEFAULTS = {
   websocketReconnectionAttempts: 3,
   websocketReconnectionDelayMs: 5000,
   websocketReconnectionDelayMaxMs: 15000,
+
+  // Display (when hub not yet selected)
+  defaultHubName: 'Downtown Hub',
 };
 
 /**
