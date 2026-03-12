@@ -5,6 +5,7 @@ const homeAdminController = require('../../controllers/admin/homeAdminController
 const router = Router();
 const adminAuth = [authenticateToken, requireRole('admin', 'super_admin')];
 
+router.get('/preview', adminAuth, homeAdminController.getBootstrapPreview);
 router.get('/categories', adminAuth, homeAdminController.listCategories);
 router.post('/categories', adminAuth, homeAdminController.createCategory);
 router.put('/categories/:id', adminAuth, homeAdminController.updateCategory);

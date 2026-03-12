@@ -2,6 +2,11 @@ const Order = require('../models/Order');
 const Staff = require('../models/Staff');
 const StockAlert = require('../models/StockAlert');
 const RTOAlert = require('../models/RTOAlert');
+const mongoose = require('mongoose');
+const PickerUser = require('../../picker/models/user.model');
+const { PICKER_STATUS } = require('../../constants/pickerEnums');
+const { getPickerIdsInActiveShift } = require('../services/activeShiftHelper');
+const { deriveWorkerStatus } = require('../../picker/controllers/heartbeat.controller');
 const { calculateSLATimer, getSLAStatus, formatWaitTime, calculatePeakTime, generateLastHourData } = require('../../utils/helpers');
 const { getCachedOrCompute } = require('../../utils/cacheHelper');
 const cache = require('../../utils/cache');
@@ -83,6 +88,8 @@ const getDashboardSummary = async (req, res) => {
 /**
  * Get Staff Load Metrics
  * GET /api/darkstore/dashboard/staff-load
+ * Pickers: HHD-based – only counts pickers in active shift (punched in). Active = in shift + online (heartbeat).
+ * Packers: Staff-based (unchanged).
  */
 const getStaffLoad = async (req, res) => {
   try {
@@ -92,14 +99,38 @@ const getStaffLoad = async (req, res) => {
       cacheKey,
       appConfig.cache.staff,
       async () => {
-        const pickers = await Staff.find({ store_id: storeId, role: 'Picker' }).lean();
-        const packers = await Staff.find({ store_id: storeId, role: 'Packer' }).lean();
-        const activePickers = pickers.filter((p) => p.is_active);
+        const [inShiftIds, packers] = await Promise.all([
+          getPickerIdsInActiveShift(),
+          Staff.find({ store_id: storeId, role: 'Packer' }).lean(),
+        ]);
+
+        // HHD pickers: only those in active shift (punched in)
+        const pickerIds = [...inShiftIds];
+        const pickerQuery =
+          pickerIds.length > 0
+            ? {
+                status: PICKER_STATUS.ACTIVE,
+                _id: { $in: pickerIds.filter((id) => mongoose.Types.ObjectId.isValid(id)).map((id) => new mongoose.Types.ObjectId(id)) },
+              }
+            : { status: PICKER_STATUS.ACTIVE, _id: { $in: [] } };
+        const pickerUsers = await PickerUser.find(pickerQuery)
+          .select('lastSeenAt activeOrderId onBreak')
+          .lean();
+
+        const now = Date.now();
+        const activePickersHhd = pickerUsers.filter((p) => deriveWorkerStatus(p, now) !== 'OFFLINE').length;
+        const totalPickersHhd = pickerUsers.length;
+        const pickerLoadPercentage = totalPickersHhd > 0 ? Math.round((activePickersHhd / totalPickersHhd) * 100) : 0;
+
         const activePackers = packers.filter((p) => p.is_active);
-        const pickerLoadPercentage = pickers.length > 0 ? Math.round((activePickers.length / pickers.length) * 100) : 0;
         const packerLoadPercentage = packers.length > 0 ? Math.round((activePackers.length / packers.length) * 100) : 0;
+
         return {
-          pickers: { active: activePickers.length, total: pickers.length, load_percentage: pickerLoadPercentage },
+          pickers: {
+            active: activePickersHhd,
+            total: totalPickersHhd,
+            load_percentage: pickerLoadPercentage,
+          },
           packers: { active: activePackers.length, total: packers.length, load_percentage: packerLoadPercentage },
         };
       },

@@ -13,6 +13,17 @@ const { PromoBlock } = require('../../models/PromoBlock');
 const { Product } = require('../../models/Product');
 const { ProductAttribute } = require('../../models/ProductAttribute');
 const { uploadProductImage: uploadProductImageToS3 } = require('../../../utils/s3Upload');
+const { getBootstrapPreviewForAdmin } = require('../../services/bootstrapService');
+
+exports.getBootstrapPreview = async (req, res) => {
+  try {
+    const data = await getBootstrapPreviewForAdmin(req);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('getBootstrapPreview error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
 
 exports.listCategories = async (req, res) => {
   const items = await Category.find().sort({ order: 1 }).lean();
@@ -443,9 +454,9 @@ exports.uploadProductImage = async (req, res) => {
 };
 
 const PRODUCT_UPDATE_KEYS = [
-  'name', 'sku', 'description', 'brand', 'price', 'costPrice', 'originalPrice',
+  'name', 'sku', 'description', 'brand', 'price', 'costPrice', 'originalPrice', 'gstRate',
   'stockQuantity', 'lowStockThreshold', 'imageUrl', 'images', 'status', 'featured',
-  'attributes', 'tags', 'categoryId', 'subcategoryId', 'variants', 'order',
+  'attributes', 'tags', 'categoryId', 'subcategoryId', 'variants', 'order', 'quantity', 'discount',
 ];
 exports.updateProduct = async (req, res) => {
   const body = {};

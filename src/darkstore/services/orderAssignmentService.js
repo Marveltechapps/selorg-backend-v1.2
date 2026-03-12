@@ -6,6 +6,7 @@ const PickerUser = require('../../picker/models/user.model');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const { deriveWorkerStatus } = require('../../picker/controllers/heartbeat.controller');
 const { WORKER_STATUS } = require('../../constants/pickerEnums');
+const { getPickerIdsInActiveShift } = require('./activeShiftHelper');
 
 const HEARTBEAT_OFFLINE_MS = 60 * 1000;
 
@@ -15,7 +16,8 @@ function getStrategy() {
 }
 
 /**
- * Get available pickers (ACTIVE, online, AVAILABLE or PICKING with capacity)
+ * Get available pickers (ACTIVE, in active shift, online, AVAILABLE or PICKING with capacity)
+ * Only includes pickers who have punched in (active shift).
  * @param {string} storeId - optional store filter
  * @returns {Promise<Array<{id, name, activeOrderId, lastSeenAt}>>}
  */
@@ -23,12 +25,16 @@ async function getAvailablePickers(storeId = null) {
   const query = { status: PICKER_STATUS.ACTIVE };
   if (storeId) query.currentLocationId = storeId;
 
-  const pickers = await PickerUser.find(query)
-    .select('name phone lastSeenAt activeOrderId onBreak currentLocationId')
-    .lean();
+  const [pickers, inShiftIds] = await Promise.all([
+    PickerUser.find(query)
+      .select('name phone lastSeenAt activeOrderId onBreak currentLocationId')
+      .lean(),
+    getPickerIdsInActiveShift(),
+  ]);
 
   const now = Date.now();
   return pickers
+    .filter((p) => inShiftIds.has(String(p._id)))
     .filter((p) => {
       const status = deriveWorkerStatus(p, now);
       return status === WORKER_STATUS.AVAILABLE || status === WORKER_STATUS.PICKING;

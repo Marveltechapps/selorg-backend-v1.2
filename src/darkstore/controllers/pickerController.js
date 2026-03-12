@@ -8,6 +8,7 @@ const PickerUser = require('../../picker/models/user.model');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const pickerMetricsService = require('../services/pickerMetricsService');
 const { deriveWorkerStatus } = require('../../picker/controllers/heartbeat.controller');
+const { getPickerIdsInActiveShift } = require('../services/activeShiftHelper');
 
 const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
@@ -26,29 +27,35 @@ function toFrontendPicker(doc) {
 /**
  * Get Live Pickers (PickerUser workforce with heartbeat data)
  * Worker Status Engine: derivedStatus = AVAILABLE | PICKING | ON_BREAK | OFFLINE
+ * Only includes pickers who are in an active shift (punched in).
  * GET /api/v1/darkstore/pickers/live
  */
 const getPickersLive = async (req, res) => {
   try {
-    const pickers = await PickerUser.find({ status: PICKER_STATUS.ACTIVE })
-      .select('name phone lastSeenAt batteryLevel activeOrderId onBreak')
-      .lean();
+    const [pickers, inShiftIds] = await Promise.all([
+      PickerUser.find({ status: PICKER_STATUS.ACTIVE })
+        .select('name phone lastSeenAt batteryLevel activeOrderId onBreak')
+        .lean(),
+      getPickerIdsInActiveShift(),
+    ]);
 
     const now = Date.now();
-    const data = pickers.map((p) => {
-      const derivedStatus = deriveWorkerStatus(p, now);
-      const online = derivedStatus !== 'OFFLINE';
+    const data = pickers
+      .filter((p) => inShiftIds.has(String(p._id)))
+      .map((p) => {
+        const derivedStatus = deriveWorkerStatus(p, now);
+        const online = derivedStatus !== 'OFFLINE';
 
-      return {
-        id: String(p._id),
-        name: p.name || p.phone || 'Unknown',
-        online,
-        derivedStatus,
-        batteryLevel: p.batteryLevel ?? null,
-        activeOrderId: p.activeOrderId || null,
-        lastActivity: p.lastSeenAt || null,
-      };
-    });
+        return {
+          id: String(p._id),
+          name: p.name || p.phone || 'Unknown',
+          online,
+          derivedStatus,
+          batteryLevel: p.batteryLevel ?? null,
+          activeOrderId: p.activeOrderId || null,
+          lastActivity: p.lastSeenAt || null,
+        };
+      });
 
     return res.status(200).json({ success: true, data });
   } catch (error) {
@@ -62,7 +69,7 @@ const getPickersLive = async (req, res) => {
 /**
  * Get Available Pickers (for manual assign in Live Orders / dashboard)
  * Uses PickerUser (HHD/Picker workforce) - same pool as auto-assign.
- * Returns all ACTIVE pickers so admin can assign to anyone; pickers will see order when they open HHD.
+ * Only returns pickers who are in an active shift (punched in).
  * GET /api/v1/darkstore/pickers/available
  */
 const getAvailablePickers = async (req, res) => {
@@ -71,21 +78,26 @@ const getAvailablePickers = async (req, res) => {
     const query = { status: PICKER_STATUS.ACTIVE };
     if (storeId) query.currentLocationId = storeId;
 
-    const pickers = await PickerUser.find(query)
-      .select('name phone lastSeenAt activeOrderId')
-      .lean();
+    const [pickers, inShiftIds] = await Promise.all([
+      PickerUser.find(query)
+        .select('name phone lastSeenAt activeOrderId')
+        .lean(),
+      getPickerIdsInActiveShift(),
+    ]);
 
     const now = Date.now();
-    const data = pickers.map((p) => {
-      const derivedStatus = deriveWorkerStatus(p, now);
-      const online = derivedStatus !== 'OFFLINE';
-      return {
-        id: String(p._id),
-        name: p.name || p.phone || 'Unknown',
-        avatar: (p.name || p.phone || '?').slice(0, 2).toUpperCase(),
-        status: online ? (p.activeOrderId ? 'busy' : 'available') : 'offline',
-      };
-    });
+    const data = pickers
+      .filter((p) => inShiftIds.has(String(p._id)))
+      .map((p) => {
+        const derivedStatus = deriveWorkerStatus(p, now);
+        const online = derivedStatus !== 'OFFLINE';
+        return {
+          id: String(p._id),
+          name: p.name || p.phone || 'Unknown',
+          avatar: (p.name || p.phone || '?').slice(0, 2).toUpperCase(),
+          status: online ? (p.activeOrderId ? 'busy' : 'available') : 'offline',
+        };
+      });
 
     res.status(200).json({
       success: true,

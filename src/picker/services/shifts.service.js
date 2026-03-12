@@ -201,6 +201,10 @@ const start = async (userId, body) => {
       }
     } catch (_) {}
     try {
+      const cache = require('../../utils/cache');
+      await cache.delByPattern('dashboard:staff-load:*');
+    } catch (_) {}
+    try {
       const { logPickerAction } = require('./pickerActionLog.service');
       await logPickerAction({ actionType: 'punch_in', pickerId: String(userId), metadata: { shiftId, lateByMinutes } });
     } catch (_) {}
@@ -271,6 +275,10 @@ const end = async (userId) => {
           overtimeMinutes,
         });
       }
+    } catch (_) {}
+    try {
+      const cache = require('../../utils/cache');
+      await cache.delByPattern('dashboard:staff-load:*');
     } catch (_) {}
     try {
       const { logPickerAction } = require('./pickerActionLog.service');

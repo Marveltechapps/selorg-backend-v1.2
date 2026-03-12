@@ -25,16 +25,24 @@ function filterBannersBySchedule(banners) {
   });
 }
 
+function applyMaxItems(arr, maxItems) {
+  if (!Array.isArray(arr)) return arr;
+  if (maxItems == null || typeof maxItems !== 'number' || maxItems <= 0) return arr;
+  return arr.slice(0, maxItems);
+}
+
 async function resolveBlockData(block, siteId = null) {
   const data = {};
   const type = block.type;
+  const config = block.config || {};
+  const maxItems = config.maxItems;
 
   if (type === 'heroBanner' || type === 'bannerCarousel') {
     const slot = type === 'heroBanner' ? 'hero' : 'mid';
     let query = { slot, isActive: true };
     if (siteId) query.siteId = siteId;
     const banners = await Banner.find(query).sort({ order: 1 }).lean();
-    data.banners = filterBannersBySchedule(banners);
+    data.banners = applyMaxItems(filterBannersBySchedule(banners), maxItems ?? (type === 'heroBanner' ? 5 : 5));
   } else if (type === 'categoryGrid') {
     const categoryIds = block.dataSource?.categoryIds;
     if (Array.isArray(categoryIds) && categoryIds.length > 0) {
@@ -55,20 +63,32 @@ async function resolveBlockData(block, siteId = null) {
           .lean();
       }
     }
+    data.categories = applyMaxItems(data.categories, maxItems ?? 6);
   } else if (type === 'productCarousel' || type === 'collectionCarousel') {
     const collId = block.dataSource?.collectionId;
     if (collId) {
-      data.products = await resolveCollectionProducts(collId);
+      const products = await resolveCollectionProducts(collId);
+      data.products = applyMaxItems(products, maxItems ?? 8);
     } else {
       data.products = [];
     }
   } else if (type === 'lifestyleGrid') {
-    data.items = await LifestyleItem.find({ isActive: true }).sort({ order: 1 }).lean();
+    const items = await LifestyleItem.find({ isActive: true }).sort({ order: 1 }).lean();
+    data.items = applyMaxItems(items, maxItems ?? 5).map((i) => ({
+      ...i,
+      redirectType: i.redirectType || null,
+      redirectValue: i.redirectValue || null,
+    }));
   } else if (type === 'promoImage') {
     const promoBlocks = await PromoBlock.find({ isActive: true }).lean();
     data.promoBlocks = {};
     for (const p of promoBlocks) {
-      data.promoBlocks[p.blockKey] = { imageUrl: p.imageUrl, link: p.link };
+      data.promoBlocks[p.blockKey] = {
+        imageUrl: p.imageUrl,
+        link: p.link,
+        redirectType: p.redirectType || null,
+        redirectValue: p.redirectValue || null,
+      };
     }
   }
 

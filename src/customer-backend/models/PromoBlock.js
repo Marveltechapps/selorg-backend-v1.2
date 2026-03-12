@@ -1,6 +1,14 @@
 const mongoose = require('mongoose');
 const promoBlockSchema = new mongoose.Schema(
-  { blockKey: { type: String, required: true, unique: true }, imageUrl: { type: String, required: true }, link: String, order: { type: Number, default: 0 }, isActive: { type: Boolean, default: true } },
+  {
+    blockKey: { type: String, required: true, unique: true },
+    imageUrl: { type: String, required: true },
+    link: String,
+    redirectType: { type: String, enum: ['product', 'category', 'collection', 'page', 'url', 'screen'], default: null },
+    redirectValue: String,
+    order: { type: Number, default: 0 },
+    isActive: { type: Boolean, default: true },
+  },
   { timestamps: true }
 );
 promoBlockSchema.index({ blockKey: 1 });

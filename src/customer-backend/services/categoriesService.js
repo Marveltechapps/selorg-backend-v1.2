@@ -67,6 +67,8 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
       id: String(b._id),
       imageUrl: b.imageUrl,
       link: b.link || null,
+      redirectType: b.redirectType || null,
+      redirectValue: b.redirectValue || null,
       title: b.title || null,
     })),
     products: products.map((p) => ({
