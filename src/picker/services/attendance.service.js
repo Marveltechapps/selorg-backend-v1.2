@@ -1,11 +1,11 @@
 /**
  * Attendance service – from backend-workflow.yaml (attendance_summary).
+ * Pay rates from picker config (dashboard-managed).
  */
 const Attendance = require('../models/attendance.model');
 const User = require('../models/user.model');
-
-const BASE_PAY_PER_HOUR = 100;
-const OT_RATE_PER_HOUR = 100 * 1.25;
+const pickerConfigService = require('./pickerConfig.service');
+const locationService = require('./location.service');
 
 const getSummary = async (userId, month, year) => {
   const m = month != null ? parseInt(month, 10) : new Date().getMonth();
@@ -34,6 +34,9 @@ const getSummary = async (userId, month, year) => {
 
 /** Dashboard stats: today's orders/earnings/incentives, weekly earnings series, performance */
 const getStats = async (userId) => {
+  const { basePayPerHour, overtimeMultiplier } = await pickerConfigService.getPayRates();
+  const otRatePerHour = basePayPerHour * overtimeMultiplier;
+
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
@@ -48,8 +51,8 @@ const getStats = async (userId) => {
   let todayIncentives = 0;
   for (const a of todayRecords) {
     todayOrders += a.ordersCompleted ?? 0;
-    const reg = (a.regularHours ?? 0) * BASE_PAY_PER_HOUR;
-    const ot = (a.overtimeHours ?? 0) * OT_RATE_PER_HOUR;
+    const reg = (a.regularHours ?? 0) * basePayPerHour;
+    const ot = (a.overtimeHours ?? 0) * otRatePerHour;
     todayEarnings += reg + ot;
   }
   todayIncentives = Math.round(todayOrders * 2.5) || 0;
@@ -87,7 +90,7 @@ const getStats = async (userId) => {
     }).lean();
     let value = 0;
     for (const a of dayRecords) {
-      value += (a.regularHours ?? 0) * BASE_PAY_PER_HOUR + (a.overtimeHours ?? 0) * OT_RATE_PER_HOUR;
+      value += (a.regularHours ?? 0) * basePayPerHour + (a.overtimeHours ?? 0) * otRatePerHour;
     }
     weeklyEarnings.push({ day: dayNames[d.getDay()], value: Math.round(value) });
   }
@@ -98,11 +101,23 @@ const getStats = async (userId) => {
     topPercent: todayRecords.length ? 10 : 0,
   };
 
-  const user = await User.findById(userId).select('locationType').lean();
-  const loc = user?.locationType;
-  const hubName = todayRecords.length
-    ? (loc === 'darkstore' ? 'Dark store' : 'Warehouse')
-    : null;
+  // Hub name from user's current location (Master Data), fallback to location type labels
+  let hubName = null;
+  if (todayRecords.length) {
+    try {
+      const locData = await locationService.getCurrentLocationForUser(userId);
+      hubName = locData?.hubName?.trim() || null;
+      if (!hubName) {
+        const user = await User.findById(userId).select('locationType').lean();
+        const loc = user?.locationType;
+        hubName = loc === 'darkstore' ? 'Dark store' : 'Warehouse';
+      }
+    } catch {
+      const user = await User.findById(userId).select('locationType').lean();
+      const loc = user?.locationType;
+      hubName = loc === 'darkstore' ? 'Dark store' : 'Warehouse';
+    }
+  }
 
   return {
     isShiftActive,

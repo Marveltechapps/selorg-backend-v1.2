@@ -31,6 +31,7 @@ const devicesRoutes = require('./routes/devices.routes');
 const heartbeatRoutes = require('./routes/heartbeat.routes');
 const issueRoutes = require('./routes/issue.routes');
 const onboardingRoutes = require('./routes/onboarding.routes');
+const configRoutes = require('./routes/config.routes');
 
 const app = express();
 
@@ -89,6 +90,7 @@ app.use('/performance', performanceRoutes);
 app.use('/devices', devicesRoutes);
 app.use('/heartbeat', heartbeatRoutes);
 app.use('/issues', issueRoutes);
+app.use('/config', configRoutes);
 
 app.use(errorHandler);
 

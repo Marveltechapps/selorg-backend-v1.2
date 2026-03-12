@@ -19,3 +19,16 @@ async function getFaqByKey(key, locale = "en") {
 }
 
 exports.getFaqByKey = getFaqByKey;
+
+async function getContentByKey(key, locale = "en") {
+  const doc = await Content.findOne({ key, locale }).lean();
+  if (!doc) return null;
+  const items = doc.items || [];
+  const body = items[0]?.answer || "";
+  return {
+    title: doc.title || "",
+    body,
+  };
+}
+
+exports.getContentByKey = getContentByKey;

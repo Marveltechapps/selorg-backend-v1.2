@@ -23,4 +23,19 @@ router.get("/faq/:key", async (req, res) => {
   }
 });
 
+router.get("/page/:key", async (req, res) => {
+  try {
+    const { key } = req.params;
+    const locale = req.query.locale || "en";
+    const data = await contentService.getContentByKey(key, locale);
+    if (!data) {
+      return res.status(404).json({ error: "Content not found", code: "NOT_FOUND" });
+    }
+    return res.json(data);
+  } catch (err) {
+    console.error("[Content] getPage:", err);
+    return res.status(500).json({ error: "Failed to fetch content", code: "INTERNAL_ERROR" });
+  }
+});
+
 exports.contentRouter = router;

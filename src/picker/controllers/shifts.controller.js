@@ -1,14 +1,19 @@
 /**
  * Shifts controller – from backend-workflow.yaml (shifts_available, shifts_select, shift_start, shift_end).
+ * radiusKm from query or picker config (dashboard-managed).
  */
 const shiftsService = require('../services/shifts.service');
+const pickerConfigService = require('../services/pickerConfig.service');
 const { success, error } = require('../utils/response.util');
 
 const getAvailable = async (req, res, next) => {
   try {
     const lat = req.query.lat ? parseFloat(req.query.lat) : null;
     const lng = req.query.lng ? parseFloat(req.query.lng) : null;
-    const radiusKm = req.query.radiusKm ? parseFloat(req.query.radiusKm) : 3;
+    let radiusKm = req.query.radiusKm ? parseFloat(req.query.radiusKm) : null;
+    if (radiusKm == null || isNaN(radiusKm)) {
+      radiusKm = await pickerConfigService.getShiftGeoRadiusKm();
+    }
     const data = await shiftsService.getAvailable(req.userId, { lat, lng, radiusKm });
     success(res, data);
   } catch (err) {
