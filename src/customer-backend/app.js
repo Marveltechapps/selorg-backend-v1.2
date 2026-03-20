@@ -8,9 +8,12 @@ const cors = require('cors');
 const onboardingRoutes = require('./routes/onboardingRoutes');
 const authRoutes = require('./routes/authRoutes');
 const homeRoutes = require('./routes/homeRoutes');
+const bannersRoutes = require('./routes/bannersRoutes');
 const bootstrapRoutes = require('./routes/bootstrapRoutes');
 const pagesRoutes = require('./routes/pagesRoutes');
 const collectionsRoutes = require('./routes/collectionsRoutes');
+const sectionsRoutes = require('./routes/sectionsRoutes');
+const searchRoutes = require('./routes/searchRoutes');
 const productsRoutes = require('./routes/productsRoutes');
 const categoriesRoutes = require('./routes/categoriesRoutes');
 const adminHomeRoutes = require('./routes/admin/homeAdminRoutes');
@@ -42,17 +45,21 @@ app.use(express.json());
 
 const { cacheMiddleware } = require('../core/middleware');
 const appConfig = require('../config/app');
-app.use(cacheMiddleware(appConfig.cache.customer.default));
+app.use(cacheMiddleware(appConfig.cache.customer.default, { skipPaths: ['/bootstrap'] }));
 
 app.use('/onboarding', onboardingRoutes);
 app.use('/auth', authRoutes);
 app.use('/home', homeRoutes);
+app.use('/banners', bannersRoutes);
 app.use('/bootstrap', bootstrapRoutes);
 app.use('/pages', pagesRoutes);
 app.use('/collections', collectionsRoutes);
+app.use('/sections', sectionsRoutes);
+app.use('/search', searchRoutes);
 app.use('/products', productsRoutes);
 app.use('/categories', categoriesRoutes);
 app.use('/admin/home', adminHomeRoutes);
+app.use('/admin', adminHomeRoutes); // Alias for spec-compatible admin endpoint base
 app.use('/admin/cms', cmsAdminRoutes);
 app.use('/admin/onboarding-pages', adminOnboardingRoutes);
 app.use('/admin/app-config', adminAppConfigRoutes);

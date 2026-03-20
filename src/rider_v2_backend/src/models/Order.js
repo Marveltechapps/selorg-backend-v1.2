@@ -19,9 +19,14 @@ var OrderSchema = new _mongoose.Schema({
     required: true,
     index: true
   },
+  darkstoreCode: {
+    type: String,
+    required: false,
+    index: true
+  },
   warehouseCode: {
     type: String,
-    required: true,
+    required: false,
     index: true
   },
   items: [{

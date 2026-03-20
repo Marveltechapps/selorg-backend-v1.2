@@ -228,10 +228,28 @@ const searchRiders = async (query, limit = 10) => {
 const createRider = async (riderData) => {
   const { name, email, phone, zone, location, capacity, status } = riderData;
 
-  // Generate unique rider ID
-  const lastRider = await Rider.findOne().sort({ id: -1 }).lean();
-  const lastId = lastRider ? parseInt(lastRider.id.split('-')[1]) : 0;
-  const newId = `RIDER-${String(lastId + 1).padStart(4, '0')}`;
+  // Pro tip: RDR-[Store]-[YYMM]-[Sequence]
+  const now = new Date();
+  const yearMonth = now.getFullYear().toString().slice(-2) + (now.getMonth() + 1).toString().padStart(2, '0');
+  const storeId = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+  let storeCode = 'GEN';
+  const parts = storeId.split('-');
+  if (parts.length >= 2) {
+    storeCode = parts[1].slice(0, 3).toUpperCase();
+  }
+  const prefix = `RDR-${storeCode}-${yearMonth}-`;
+  
+  // Find last rider with this prefix to increment sequence
+  const lastRider = await Rider.findOne({
+    id: new RegExp(`^${prefix}`)
+  }).sort({ id: -1 }).lean();
+  
+  let lastSequence = 0;
+  if (lastRider && lastRider.id) {
+    const sequencePart = lastRider.id.split('-').pop();
+    lastSequence = parseInt(sequencePart) || 0;
+  }
+  const newId = `${prefix}${String(lastSequence + 1).padStart(3, '0')}`;
 
   // Generate avatar initials from name
   const nameParts = name.trim().split(/\s+/);

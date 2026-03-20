@@ -21,8 +21,12 @@ const scheduleSchema = new mongoose.Schema(
 
 const pageBlockSchema = new mongoose.Schema(
   {
+    blockType: { type: String }, // Compatibility for CMS spec naming
     type: { type: String, enum: BLOCK_TYPES, required: true },
     order: { type: Number, default: 0 },
+    maxItems: { type: Number, default: 0 },
+    styleJson: { type: mongoose.Schema.Types.Mixed, default: {} },
+    referenceId: { type: mongoose.Schema.Types.ObjectId, default: null },
     config: { type: mongoose.Schema.Types.Mixed, default: {} },
     dataSource: {
       collectionId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerCollection' },
@@ -39,7 +43,7 @@ const pageSchema = new mongoose.Schema(
     siteId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerSite', default: null },
     slug: { type: String, required: true },
     title: { type: String, default: '' },
-    status: { type: String, enum: ['draft', 'published'], default: 'draft' },
+    status: { type: String, enum: ['draft', 'published'], default: 'draft', index: true },
     blocks: [pageBlockSchema],
     version: { type: Number, default: 1 },
     previousVersionId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerPage', default: null },

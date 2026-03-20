@@ -13,6 +13,13 @@ const conditionalValidateAutoAssign = appConfig.nodeEnv === 'development'
 // Unassigned Orders Endpoints
 router.get('/unassigned-orders', dispatchController.listUnassignedOrders);
 router.get('/unassigned-orders/count', dispatchController.getUnassignedOrdersCount);
+router.get('/group-delivery', dispatchController.groupOrders);
+
+// Cluster Management
+router.get('/clusters', dispatchController.listClusters);
+router.post('/clusters', dispatchController.saveClusters);
+router.delete('/clusters/:clusterId', dispatchController.deleteCluster);
+router.post('/clusters/:clusterId/assign', dispatchController.assignCluster);
 
 // Map Data Endpoints
 router.get('/map-data', dispatchController.getMapData);

@@ -1,5 +1,6 @@
 const Order = require('../../warehouse/models/Order');
 const Rider = require('../models/Rider');
+const Cluster = require('../models/Cluster');
 const AutoAssignRule = require('../models/AutoAssignRule');
 const { calculateDistance } = require('../../utils/distanceCalculator');
 const logger = require('../../core/utils/logger');
@@ -431,8 +432,14 @@ const getRecommendedRiders = async (orderId, filters = {}) => {
       throw new Error('Order not found');
     }
 
-    // Get available riders
+    // Get available riders:
+    // - Must be online/idle (actively working and not offline)
+    // - Must currently have no active order (free)
+    // - Must have zero load and be under capacity
     let ridersQuery = {
+      status: { $in: ['online', 'idle'] },
+      currentOrderId: null,
+      'capacity.currentLoad': { $eq: 0 },
       $expr: { $lt: ['$capacity.currentLoad', '$capacity.maxLoad'] },
     };
 
@@ -1039,6 +1046,230 @@ const updateAutoAssignRule = async (rule) => {
   }
 };
 
+/**
+ * Group orders into clusters based on distance
+ */
+const groupOrders = async (filters = {}) => {
+  try {
+    const {
+      status, // Can be a string or array of strings
+      radius = 2,
+      minSize = 2,
+      maxSize = 10,
+    } = filters;
+
+    // Define live statuses for deliverable orders
+    const liveStatuses = [
+      'pending', 'assigned', 'delayed', 'picked_up', 'in_transit',
+      'new', 'processing', 'ready', 'picking', 'picked', 'packed', 'ready_for_dispatch',
+      'ASSIGNED', 'PICKED'
+    ];
+
+    const query = {};
+    if (status) {
+      if (Array.isArray(status)) {
+        query.status = { $in: status };
+      } else if (status !== 'all') {
+        query.status = status;
+      } else {
+        query.status = { $in: liveStatuses };
+      }
+    } else {
+      query.status = { $in: liveStatuses };
+    }
+
+    const orders = await Order.find(query).lean();
+
+    if (orders.length === 0) {
+      return { clusters: [], unclustered: [] };
+    }
+
+    // Process orders to ensure they have coordinates
+    const processedOrders = orders.map(order => {
+      let coords = order.delivery?.address?.coordinates;
+      if (!coords) {
+        // Fallback to extraction from string address
+        coords = extractCoordinates(order.dropLocation || order.delivery_address || '');
+      }
+      return { ...order, coordinates: coords };
+    });
+
+    const unassigned = [...processedOrders];
+    // Sort by coordinates for deterministic results
+    unassigned.sort((a, b) => (a.coordinates.lat - b.coordinates.lat) || (a.coordinates.lng - b.coordinates.lng));
+    
+    const clusters = [];
+    let clusterIdCounter = 1;
+
+    while (unassigned.length > 0) {
+      const seed = unassigned.shift();
+      const clusterOrders = [seed];
+      
+      // Find neighbors within threshold, up to max size
+      for (let i = 0; i < unassigned.length && clusterOrders.length < maxSize; i++) {
+        const other = unassigned[i];
+        const dist = calculateDistance(
+          seed.coordinates.lat,
+          seed.coordinates.lng,
+          other.coordinates.lat,
+          other.coordinates.lng
+        );
+        
+        if (dist <= radius) {
+          clusterOrders.push(other);
+          unassigned.splice(i, 1);
+          i--;
+        }
+      }
+
+      if (clusterOrders.length >= minSize) {
+        const avgLat = clusterOrders.reduce((sum, o) => sum + o.coordinates.lat, 0) / clusterOrders.length;
+        const avgLng = clusterOrders.reduce((sum, o) => sum + o.coordinates.lng, 0) / clusterOrders.length;
+        
+        clusters.push({
+          id: `cluster-${Date.now()}-${clusterIdCounter++}`,
+          orders: clusterOrders,
+          center: { lat: avgLat, lng: avgLng },
+          orderCount: clusterOrders.length,
+        });
+      }
+    }
+
+    // Any order not in a cluster is unclustered
+    const clusteredOrderIds = new Set(clusters.flatMap(c => c.orders.map(o => o.id)));
+    const unclustered = processedOrders.filter(o => !clusteredOrderIds.has(o.id));
+
+    return {
+      clusters,
+      unclustered,
+      totalOrders: processedOrders.length,
+      clusteredCount: clusteredOrderIds.size,
+      unclusteredCount: unclustered.length,
+    };
+  } catch (error) {
+    logger.error('Error grouping orders:', error);
+    throw error;
+  }
+};
+
+/**
+ * Save clusters to backend
+ */
+const saveClusters = async (clustersData) => {
+  try {
+    const savedClusters = [];
+    
+    for (const data of clustersData) {
+      const clusterId = data.id || `CL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      
+      const cluster = new Cluster({
+        clusterId,
+        orderIds: data.orders.map(o => o.id),
+        center: data.center,
+        color: data.color || '#F97316',
+        zone: data.orders[0]?.zone || null,
+        status: 'active',
+      });
+      
+      await cluster.save();
+      savedClusters.push(cluster);
+    }
+    
+    return savedClusters;
+  } catch (error) {
+    logger.error('Error saving clusters:', error);
+    throw error;
+  }
+};
+
+/**
+ * List active clusters
+ */
+const listClusters = async (filters = {}) => {
+  try {
+    const query = { status: filters.status || 'active' };
+    if (filters.zone) query.zone = filters.zone;
+    
+    const clusters = await Cluster.find(query).sort({ createdAt: -1 }).lean();
+    
+    // Populate order details for each cluster
+    const result = await Promise.all(clusters.map(async (cluster) => {
+      const orders = await Order.find({ id: { $in: cluster.orderIds } }).lean();
+      
+      // Add coordinates to orders
+      const processedOrders = orders.map(order => {
+        let coords = order.delivery?.address?.coordinates;
+        if (!coords) {
+          coords = extractCoordinates(order.dropLocation || order.delivery_address || '');
+        }
+        return { ...order, coordinates: coords };
+      });
+      
+      return {
+        ...cluster,
+        orders: processedOrders,
+      };
+    }));
+    
+    return result;
+  } catch (error) {
+    logger.error('Error listing clusters:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete a cluster
+ */
+const deleteCluster = async (clusterId) => {
+  try {
+    const result = await Cluster.deleteOne({ clusterId });
+    return result.deletedCount > 0;
+  } catch (error) {
+    logger.error('Error deleting cluster:', error);
+    throw error;
+  }
+};
+
+/**
+ * Assign a cluster to a rider
+ */
+const assignClusterToRider = async (clusterId, riderId) => {
+  try {
+    const cluster = await Cluster.findOne({ clusterId });
+    if (!cluster) throw new Error('Cluster not found');
+    
+    const rider = await Rider.findOne({ id: riderId });
+    if (!rider) throw new Error('Rider not found');
+    
+    // Assign each order in the cluster to the rider
+    const results = [];
+    for (const orderId of cluster.orderIds) {
+      try {
+        const res = await assignOrder(orderId, riderId, true);
+        results.push(res);
+      } catch (err) {
+        logger.warn(`Failed to assign order ${orderId} in cluster ${clusterId}:`, err.message);
+      }
+    }
+    
+    // Update cluster status
+    cluster.status = 'assigned';
+    cluster.riderId = riderId;
+    await cluster.save();
+    
+    return {
+      clusterId,
+      riderId,
+      results,
+      success: true,
+    };
+  } catch (error) {
+    logger.error('Error assigning cluster to rider:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   listUnassignedOrders,
   getUnassignedOrdersCount,
@@ -1053,4 +1284,9 @@ module.exports = {
   createManualOrder,
   getAutoAssignRules,
   updateAutoAssignRule,
+  groupOrders,
+  saveClusters,
+  listClusters,
+  deleteCluster,
+  assignClusterToRider,
 };

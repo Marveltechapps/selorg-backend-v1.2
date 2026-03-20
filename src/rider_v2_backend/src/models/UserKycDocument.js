@@ -16,6 +16,7 @@ const UserKycDocumentSchema = new mongoose.Schema(
     },
     rejectedReason: { type: String },
     fileUrl: { type: String },
+    documentNumber: { type: String },
     uploadedAt: { type: Date },
     verifiedAt: { type: Date },
   },
@@ -24,5 +25,5 @@ const UserKycDocumentSchema = new mongoose.Schema(
 
 UserKycDocumentSchema.index({ userId: 1, documentTypeCode: 1 }, { unique: true });
 
-const UserKycDocument = mongoose.model("UserKycDocument", UserKycDocumentSchema);
+const UserKycDocument = mongoose.model("UserKycDocument", UserKycDocumentSchema, "user_kyc_documents");
 exports.UserKycDocument = UserKycDocument;

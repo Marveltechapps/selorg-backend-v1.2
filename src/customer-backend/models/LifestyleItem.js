@@ -2,11 +2,16 @@ const mongoose = require('mongoose');
 const lifestyleItemSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
+    title: { type: String, default: '' },
     imageUrl: String,
     link: String,
-    redirectType: { type: String, enum: ['product', 'category', 'collection', 'page', 'url', 'screen'], default: null },
+    redirectType: {
+      type: String,
+      enum: ['url', 'category', 'subcategory', 'collection', 'section', 'product', 'search', 'none', 'page', 'screen'],
+      default: null,
+    },
     redirectValue: String,
-    blockKey: String,
+    blockKey: { type: String, unique: true, sparse: true },
     order: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },

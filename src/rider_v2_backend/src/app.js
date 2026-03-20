@@ -259,8 +259,8 @@ var createApp = exports.createApp = function createApp() {
             if (req.query.status) {
               filters.status = req.query.status;
             }
-            if (req.query.warehouseCode) {
-              filters.warehouseCode = req.query.warehouseCode;
+            if (req.query.darkstoreCode) {
+              filters.darkstoreCode = req.query.darkstoreCode;
             }
             limit = req.query.limit ? parseInt(req.query.limit) : 50;
             _context3.n = 2;

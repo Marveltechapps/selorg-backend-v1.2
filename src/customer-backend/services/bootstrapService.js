@@ -1,10 +1,11 @@
 const { getHomePayload } = require('./homeService');
-const { getHomePagePayload, buildHomePageFromLegacy } = require('./cms/pageService');
+const { buildHomePageFromLegacy } = require('./cms/pageService');
 const { FeatureFlag } = require('../models/FeatureFlag');
 const { FlowConfig } = require('../models/FlowConfig');
 const { PromotionRule } = require('../models/PromotionRule');
 const { getDefaultAddress } = require('./addressService');
 const { HomeConfig } = require('../models/HomeConfig');
+const { AppConfig, DEFAULT_APP_CONFIG } = require('../models/AppConfig');
 
 const now = new Date();
 
@@ -20,14 +21,10 @@ function isPromotionActive(rule) {
 
 /**
  * Get v2 bootstrap payload.
- * If Page with slug 'home' exists and is published, use block-based payload.
- * Otherwise fall back to legacy home payload structure for backward compatibility.
+ * Section list (HomeSectionDefinition) is the single source of truth for home content.
+ * No fallback to CMS page or hardcoded defaults. Empty section list = empty home.
  */
 async function getBootstrapPayload(req = {}) {
-  const siteId = req?.query?.siteId || req?.headers?.['x-site-id'] || null;
-
-  const homePage = await getHomePagePayload(siteId);
-
   const featureFlagsList = await FeatureFlag.find({ isActive: true }).lean();
   const featureFlags = {};
   for (const f of featureFlagsList) {
@@ -72,18 +69,12 @@ async function getBootstrapPayload(req = {}) {
       }
     : null;
 
-  if (homePage) {
-    return {
-      pages: {
-        home: homePage,
-      },
-      homeConfig,
-      featureFlags,
-      flowConfig,
-      activePromotions,
-      defaultAddress,
-    };
+  let appConfigDoc = await AppConfig.findOne({ key: 'default' }).lean();
+  if (!appConfigDoc) {
+    const created = await AppConfig.create(DEFAULT_APP_CONFIG);
+    appConfigDoc = created ? created.toObject() : DEFAULT_APP_CONFIG;
   }
+  const appConfig = appConfigDoc || DEFAULT_APP_CONFIG;
 
   const legacy = await getHomePayload(req);
   const homeFromLegacy = buildHomePageFromLegacy(legacy);
@@ -93,6 +84,7 @@ async function getBootstrapPayload(req = {}) {
     },
     legacy: legacy,
     homeConfig,
+    appConfig,
     featureFlags,
     flowConfig,
     activePromotions,

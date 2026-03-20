@@ -3,6 +3,7 @@ const Rider = require('../models/Rider');
 const Training = require('../models/Training');
 const Compliance = require('../models/Compliance');
 const Contract = require('../models/Contract');
+const { Rider: RiderV2 } = require('../../rider_v2_backend/src/models/Rider');
 const logger = require('../../core/utils/logger');
 
 const listRiders = async (filters = {}, pagination = {}) => {
@@ -34,29 +35,60 @@ const listRiders = async (filters = {}, pagination = {}) => {
       query.appAccess = appAccess;
     }
 
+    // Fetch from RiderHR
+    const ridersHR = await RiderHR.find(query).lean();
+
+    // Fetch from RiderV2 and normalize
+    const ridersV2 = await RiderV2.find({}).lean();
+    const normalizedV2 = ridersV2.map(r => ({
+      id: r.riderId,
+      name: r.name,
+      phone: r.phoneNumber,
+      email: r.email,
+      status: r.status === 'active' ? 'active' : (r.status === 'suspended' ? 'suspended' : 'onboarding'),
+      onboardingStatus: r.status === 'approved' || r.status === 'active' ? 'approved' : 'docs_pending',
+      trainingStatus: 'not_started', // Default for V2
+      appAccess: r.status === 'active' ? 'enabled' : 'disabled',
+      deviceAssigned: false,
+      createdAt: r.createdAt,
+      contract: {
+        startDate: r.createdAt,
+        endDate: new Date(new Date(r.createdAt).setFullYear(new Date(r.createdAt).getFullYear() + 1)),
+        renewalDue: false,
+      },
+      compliance: {
+        isCompliant: true,
+        lastAuditDate: new Date(),
+        policyViolationsCount: 0,
+      }
+    }));
+
+    // Combine
+    let allRiders = [...ridersHR, ...normalizedV2];
+    
+    // Filter combined results if needed (though we should ideally do it in query)
+    if (status) allRiders = allRiders.filter(r => r.status === status);
+    if (onboardingStatus) allRiders = allRiders.filter(r => r.onboardingStatus === onboardingStatus);
+
+    allRiders.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    const total = allRiders.length;
     const skip = (page - 1) * limit;
-    const total = await RiderHR.countDocuments(query);
+    const paginatedRiders = allRiders.slice(skip, skip + limit);
 
-    const riders = await RiderHR.find(query)
-      .sort({ name: 1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    // Get contract statuses from Contract collection
-    const riderIds = riders.map(r => r.id);
+    // Get contract statuses from Contract collection for all
+    const riderIds = paginatedRiders.map(r => r.id);
     const contracts = await Contract.find({ riderId: { $in: riderIds } }).lean();
     const contractMap = new Map(contracts.map(c => [c.riderId, c]));
 
-    // Format dates
-    const formattedRiders = riders.map(r => {
+    // Format dates and final merge
+    const formattedRiders = paginatedRiders.map(r => {
       const contract = contractMap.get(r.id);
-      // Determine contract status: prefer Contract collection status, fallback to calculated status
       let contractStatus = contract?.status;
       if (!contractStatus) {
         const now = new Date();
         const endDate = r.contract?.endDate;
-        if (endDate && endDate < now) {
+        if (endDate && new Date(endDate) < now) {
           contractStatus = 'expired';
         } else if (r.contract?.renewalDue) {
           contractStatus = 'pending_renewal';
@@ -65,34 +97,24 @@ const listRiders = async (filters = {}, pagination = {}) => {
         }
       }
       return {
-        id: r.id,
-        name: r.name,
-        phone: r.phone,
-        email: r.email,
-        status: r.status,
-        onboardingStatus: r.onboardingStatus,
-        trainingStatus: r.trainingStatus,
-        appAccess: r.appAccess,
-        deviceAssigned: r.deviceAssigned,
-        deviceId: r.deviceId || null,
-        deviceType: r.deviceType || null,
-        createdAt: r.createdAt ? r.createdAt.toISOString() : null,
+        ...r,
+        createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
         contract: {
-          startDate: r.contract?.startDate ? r.contract.startDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          endDate: r.contract?.endDate ? r.contract.endDate.toISOString().split('T')[0] : new Date(Date.now() + 31536000000).toISOString().split('T')[0],
+          startDate: r.contract?.startDate ? new Date(r.contract.startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          endDate: r.contract?.endDate ? new Date(r.contract.endDate).toISOString().split('T')[0] : new Date(Date.now() + 31536000000).toISOString().split('T')[0],
           renewalDue: r.contract?.renewalDue || false,
           status: contractStatus,
         },
         compliance: {
           isCompliant: r.compliance?.isCompliant ?? true,
-          lastAuditDate: r.compliance?.lastAuditDate ? r.compliance.lastAuditDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          lastAuditDate: r.compliance?.lastAuditDate ? new Date(r.compliance.lastAuditDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           policyViolationsCount: r.compliance?.policyViolationsCount || 0,
           lastViolationReason: r.compliance?.lastViolationReason || null,
         },
         suspension: r.suspension ? {
           isSuspended: r.suspension.isSuspended,
           reason: r.suspension.reason || null,
-          since: r.suspension.since ? r.suspension.since.toISOString() : null,
+          since: r.suspension.since ? new Date(r.suspension.since).toISOString() : null,
         } : null,
       };
     });
@@ -112,7 +134,36 @@ const listRiders = async (filters = {}, pagination = {}) => {
 
 const getRiderDetails = async (riderId) => {
   try {
-    const rider = await RiderHR.findOne({ id: riderId }).lean();
+    let rider = await RiderHR.findOne({ id: riderId }).lean();
+
+    if (!rider) {
+      // Try RiderV2
+      const rV2 = await RiderV2.findOne({ riderId }).lean();
+      if (rV2) {
+        rider = {
+          id: rV2.riderId,
+          name: rV2.name,
+          phone: rV2.phoneNumber,
+          email: rV2.email,
+          status: rV2.status === 'active' ? 'active' : (rV2.status === 'suspended' ? 'suspended' : 'onboarding'),
+          onboardingStatus: rV2.status === 'approved' || rV2.status === 'active' ? 'approved' : 'docs_pending',
+          trainingStatus: 'not_started',
+          appAccess: rV2.status === 'active' ? 'enabled' : 'disabled',
+          deviceAssigned: false,
+          createdAt: rV2.createdAt,
+          contract: {
+            startDate: rV2.createdAt,
+            endDate: new Date(new Date(rV2.createdAt).setFullYear(new Date(rV2.createdAt).getFullYear() + 1)),
+            renewalDue: false,
+          },
+          compliance: {
+            isCompliant: true,
+            lastAuditDate: new Date(),
+            policyViolationsCount: 0,
+          }
+        };
+      }
+    }
 
     if (!rider) {
       const error = new Error('Rider not found');
@@ -178,10 +229,28 @@ const onboardRider = async (riderData) => {
   try {
     const { name, phone, email, contract } = riderData;
 
-    // Generate rider ID
-    const lastRider = await RiderHR.findOne().sort({ id: -1 }).lean();
-    const lastId = lastRider ? parseInt(lastRider.id.split('-')[1]) : 0;
-    const newId = `RIDER-${String(lastId + 1).padStart(4, '0')}`;
+    // Pro tip: RDR-[Store]-[YYMM]-[Sequence]
+    const now = new Date();
+    const yearMonth = now.getFullYear().toString().slice(-2) + (now.getMonth() + 1).toString().padStart(2, '0');
+    const storeId = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    let storeCode = 'GEN';
+    const parts = storeId.split('-');
+    if (parts.length >= 2) {
+      storeCode = parts[1].slice(0, 3).toUpperCase();
+    }
+    const prefix = `RDR-${storeCode}-${yearMonth}-`;
+    
+    // Find last rider with this prefix to increment sequence
+    const lastRider = await RiderHR.findOne({
+      id: new RegExp(`^${prefix}`)
+    }).sort({ id: -1 }).lean();
+    
+    let lastSequence = 0;
+    if (lastRider && lastRider.id) {
+      const sequencePart = lastRider.id.split('-').pop();
+      lastSequence = parseInt(sequencePart) || 0;
+    }
+    const newId = `${prefix}${String(lastSequence + 1).padStart(3, '0')}`;
 
     // Set default contract dates
     const startDate = contract?.startDate ? new Date(contract.startDate) : new Date();

@@ -48,18 +48,21 @@ router.post(
       if (!documentTypeCode) {
         return res.status(400).json({ error: "documentTypeCode is required", code: "MISSING_TYPE" });
       }
+      const documentNumber = req.body.documentNumber || req.body.number;
       const userId = req.user.id;
       const result = await kycService.upsertUserDocument(
         userId,
         documentTypeCode,
         req.file.buffer,
         req.file.mimetype,
-        req.file.originalname
+        req.file.originalname,
+        documentNumber
       );
       return res.json({
         documentTypeCode: result.documentTypeCode,
         status: result.status,
         uploadedLink: result.uploadedLink || result.fileUrl || null,
+        documentNumber: result.documentNumber,
         rejectedReason: result.rejectedReason,
         uploadedAt: result.uploadedAt,
         verifiedAt: result.verifiedAt,

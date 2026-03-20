@@ -137,4 +137,4 @@ PayoutSchema.index({
   periodStart: 1,
   periodEnd: 1
 });
-var Payout = exports.Payout = _mongoose["default"].model("Payout", PayoutSchema);
+var Payout = exports.Payout = _mongoose["default"].models.Payout || _mongoose["default"].model("Payout", PayoutSchema);

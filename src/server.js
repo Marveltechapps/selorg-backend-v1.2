@@ -57,17 +57,29 @@ if (process.env.USE_LEGACY_RIDER === '1' || process.env.USE_LEGACY_RIDER === 'tr
 function tryRequire(relPath) {
   try {
     // eslint-disable-next-line global-require, import/no-dynamic-require
-    return require(relPath);
+    const mod = require(relPath);
+    return mod;
   } catch (e) {
+    logger.error('tryRequire failed', { path: relPath, error: e.message, stack: e.stack });
     return null;
   }
 }
 const v2OrderRouterModule = tryRequire('./rider_v2_backend/src/modules/orders/order.router.js');
 const v2PayoutRouterModule = tryRequire('./rider_v2_backend/src/modules/payouts/payout.router.js');
 const v2IncidentRouterModule = tryRequire('./rider_v2_backend/src/modules/incidents/incident.router.js');
+const v2RiderRouterModule = tryRequire('./rider_v2_backend/src/modules/delivery/rider.router.js');
 const v2OrderRouter = v2OrderRouterModule?.orderRouter || v2OrderRouterModule?.default || v2OrderRouterModule;
 const v2PayoutRouter = v2PayoutRouterModule?.payoutRouter || v2PayoutRouterModule?.default || v2PayoutRouterModule;
 const v2IncidentRouter = v2IncidentRouterModule?.incidentRouter || v2IncidentRouterModule?.default || v2IncidentRouterModule;
+const v2RiderRouter = v2RiderRouterModule?.riderRouter || v2RiderRouterModule?.default || v2RiderRouterModule;
+const v2OperationsRouterModule = tryRequire('./rider_v2_backend/src/modules/operations/operations.router.js');
+const v2OperationsRouter = v2OperationsRouterModule?.operationsRouter || v2OperationsRouterModule?.default || v2OperationsRouterModule;
+const v2ConfigRouterModule = tryRequire('./rider_v2_backend/src/modules/config/config.router.js');
+const v2ConfigRouter = v2ConfigRouterModule?.configRouter || v2ConfigRouterModule?.default || v2ConfigRouterModule;
+const v2ContentRouterModule = tryRequire('./rider_v2_backend/src/modules/content/content.router.js');
+const v2ContentRouter = v2ContentRouterModule?.contentRouter || v2ContentRouterModule?.default || v2ContentRouterModule;
+const v2KycRouterModule = tryRequire('./rider_v2_backend/src/modules/kyc/kyc.router.js');
+const v2KycRouter = v2KycRouterModule?.kycRouter || v2KycRouterModule?.default || v2KycRouterModule;
 let v2AuthRouter = null;
 try {
   // Load explicitly so auth route failures are visible instead of being swallowed by tryRequire().
@@ -103,6 +115,11 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 const app = express();
+
+app.use((req, res, next) => {
+  console.log(`[GLOBAL LOG] ${req.method} ${req.path}`);
+  next();
+});
 
 // Request ID middleware (must be first to track all requests)
 app.use(requestIdMiddleware);
@@ -191,6 +208,22 @@ if (v2IncidentRouter) {
   app.use('/api/v1/incidents', v2IncidentRouter);
   logger.info('Mounted rider_v2 incidents router at /api/v1/incidents');
 }
+if (v2OperationsRouter) {
+  app.use('/api/v1/operations', v2OperationsRouter);
+  logger.info('Mounted rider_v2 operations router at /api/v1/operations');
+}
+if (v2ConfigRouter) {
+  app.use('/api/v1/config', v2ConfigRouter);
+  logger.info('Mounted rider_v2 config router at /api/v1/config');
+}
+if (v2ContentRouter) {
+  app.use('/api/v1/content', v2ContentRouter);
+  logger.info('Mounted rider_v2 content router at /api/v1/content');
+}
+if (v2KycRouter) {
+  app.use('/api/v1/kyc', v2KycRouter);
+  logger.info('Mounted rider_v2 kyc router at /api/v1/kyc');
+}
 if (v2AuthRouter) {
   app.use('/api/v1/auth', v2AuthRouter);
   logger.info('Mounted rider_v2 auth router at /api/v1/auth');
@@ -211,6 +244,20 @@ if (signinRouter) {
 // Keep it mounted even when the rider operational APIs come from the v2 stack.
 app.use('/api/v1/rider/auth', riderAuthRoutes);
 
+// Explicitly mount kit and hr routes for dashboard and rider app access.
+// These legacy routes are needed when USE_LEGACY_RIDER is not set, as v2 modules
+// may not yet implement all administrative or onboarding features.
+const riderHrRoutes = require('./rider/routes/hrRoutes');
+const riderKitRoutes = require('./rider/routes/kitRoutes');
+app.use('/api/v1/rider/hr', riderHrRoutes);
+app.use('/api/v1/rider/kit', riderKitRoutes);
+
+// CRITICAL: Mount legacy rider orders (list, assign, alert) BEFORE main rider router.
+// This ensures /api/v1/rider/orders/:orderId/assign always uses warehouse orderService
+// with RiderOperational (string id), not ProductionRider/DarkstoreRider (ObjectId _id).
+const riderOrderRoutes = require('./rider/routes/orderRoutes');
+app.use('/api/v1/rider/orders', riderOrderRoutes);
+
 // Rider wrapper: health route + main router (v2 exports riderRouter, legacy exports router)
 const riderMain = riderRoutes.riderRouter || riderRoutes;
 const riderWithHealth = express.Router();
@@ -219,7 +266,15 @@ riderWithHealth.get('/health', (_req, res) =>
 );
 riderWithHealth.use('/', riderMain);
 app.use('/api/v1/rider', riderWithHealth);
-app.use('/api/v1/delivery', riderWithHealth);
+
+// Delivery wrapper: prefers V2 delivery router for mobile apps
+const deliveryRouter = v2RiderRouter || riderMain;
+const deliveryWithHealth = express.Router();
+deliveryWithHealth.get('/health', (_req, res) =>
+  res.status(200).json({ ok: true, service: 'delivery', timestamp: new Date().toISOString() })
+);
+deliveryWithHealth.use('/', deliveryRouter);
+app.use('/api/v1/delivery', deliveryWithHealth);
 
 app.use('/api/v1/finance', financeRoutes);
 app.use('/api/v1/vendor', vendorRoutes);
@@ -285,6 +340,14 @@ if (process.env.NODE_ENV !== 'test') {
     logger.info('Socket.IO initialized at path /hhd-socket.io');
   } catch (socketErr) {
     logger.warn('Socket.IO init skipped', { error: socketErr?.message });
+  }
+  // Rider app WebSocket at /ws for real-time order assignment updates
+  try {
+    const { webSocketServer } = require('./rider_v2_backend/src/modules/websocket/websocket.server.js');
+    webSocketServer.initialize(httpServer);
+    logger.info('Rider WebSocket initialized at /ws');
+  } catch (wsErr) {
+    logger.warn('Rider WebSocket init skipped', { error: wsErr?.message });
   }
 }
 

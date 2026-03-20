@@ -23,6 +23,7 @@ function formatCartResponse(cart) {
     quantity: it.quantity,
     price: it.price,
     originalPrice: it.originalPrice,
+    gstRate: it.gstRate || 0,
     image: it.image || '',
   }));
   const itemTotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
@@ -76,6 +77,7 @@ async function addItem(userId, body) {
       quantity,
       price,
       originalPrice,
+      gstRate: product.gstRate || 0,
       productName: product.name,
       image,
     });

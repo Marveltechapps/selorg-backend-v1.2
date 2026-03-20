@@ -16,8 +16,8 @@ const validate = (req, res, next) => {
 // Rider ID validation
 const validateRiderId = [
   param('riderId')
-    .matches(/^RIDER-\d+$/)
-    .withMessage('Rider ID must match format RIDER-{number}'),
+    .matches(/^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/)
+    .withMessage('Rider ID must match format RIDER-{number} or RDR-{STORE}-{YYMM}-{SEQ}'),
   validate,
 ];
 
@@ -97,8 +97,8 @@ const validateUpdateRider = [
 // Assign Order validation
 const validateAssignOrder = [
   body('riderId')
-    .matches(/^RIDER-\d+$/)
-    .withMessage('Rider ID must match format RIDER-{number}'),
+    .matches(/^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/)
+    .withMessage('Rider ID must match format RIDER-{number} or RDR-{STORE}-{YYMM}-{SEQ}'),
   body('overrideSla')
     .optional()
     .isBoolean()

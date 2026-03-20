@@ -13,9 +13,11 @@ const appConfig = require('../../config/app');
  * Respects DISABLE_CACHE env; skips caching for health/metrics.
  *
  * @param {number} ttlSeconds - Time to live in seconds (default: 3600)
+ * @param {{ skipPaths?: string[] }} [options] - Optional. skipPaths: paths to skip caching (e.g. ['/bootstrap'])
  * @returns {Function} Express middleware function
  */
-const cacheMiddleware = (ttlSeconds = 3600) => {
+const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
+  const { skipPaths = [] } = typeof options === 'object' ? options : {};
   return async (req, res, next) => {
     // Only cache GET requests
     if (req.method !== 'GET') {
@@ -28,6 +30,10 @@ const cacheMiddleware = (ttlSeconds = 3600) => {
 
     // Skip cache for health checks and metrics
     if (req.path.startsWith('/health') || req.path === '/metrics') {
+      return next();
+    }
+
+    if (skipPaths.some((p) => req.path === p || req.path.startsWith(p + '/'))) {
       return next();
     }
 

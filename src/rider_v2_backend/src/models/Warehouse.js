@@ -70,4 +70,4 @@ WarehouseSchema.index({
   region: 1,
   isActive: 1
 });
-var Warehouse = exports.Warehouse = _mongoose["default"].model("Warehouse", WarehouseSchema);
+var Warehouse = exports.Warehouse = _mongoose["default"].models.Warehouse || _mongoose["default"].model("Warehouse", WarehouseSchema);

@@ -78,4 +78,4 @@ IncidentSchema.index({
 IncidentSchema.index({
   reportedAt: -1
 });
-var Incident = exports.Incident = _mongoose["default"].model("Incident", IncidentSchema);
+var Incident = exports.Incident = _mongoose["default"].models.Incident || _mongoose["default"].model("Incident", IncidentSchema);

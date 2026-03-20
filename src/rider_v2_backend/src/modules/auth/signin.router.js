@@ -14,7 +14,9 @@ var signinRouter = exports.signinRouter = (0, _express.Router)();
 function validateMobileNumber(mobileNumber) {
   var s = mobileNumber != null ? String(mobileNumber).trim() : "";
   var digits = s.replace(/\D/g, "");
-  if (digits.length !== 10) return { valid: false, error: "mobileNumber must be exactly 10 digits" };
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length !== 10) return { valid: false, error: "mobileNumber must be 10 digits (or 12 with 91)" };
   if (/^0+$/.test(digits)) return { valid: false, error: "mobileNumber cannot be all zeros" };
   return { valid: true, mobile: digits };
 }

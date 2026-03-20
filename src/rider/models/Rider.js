@@ -35,7 +35,7 @@ const RiderSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    match: /^RIDER-\d+$/,
+    match: /^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/,
     index: true,
   },
   name: {
@@ -61,7 +61,7 @@ const RiderSchema = new mongoose.Schema({
   currentOrderId: {
     type: String,
     default: null,
-    match: /^ORD-\d+$/,
+    match: /^ORD-[\d-]+$/, // Match warehouse Order id format (e.g. ORD-20260312-00072)
   },
   location: {
     type: LocationSchema,
@@ -92,6 +92,7 @@ const RiderSchema = new mongoose.Schema({
 }, {
   timestamps: true,
   collection: 'riders',
+  id: false, // Disable automatic id virtual to avoid conflict with our 'id' field
 });
 
 // Validation: currentLoad cannot exceed maxLoad
@@ -107,5 +108,5 @@ RiderSchema.index({ status: 1, zone: 1 });
 RiderSchema.index({ name: 'text' });
 
 
-module.exports = mongoose.models.Rider || mongoose.model('Rider', RiderSchema);
+module.exports = mongoose.models.RiderOperational || mongoose.model('RiderOperational', RiderSchema);
 

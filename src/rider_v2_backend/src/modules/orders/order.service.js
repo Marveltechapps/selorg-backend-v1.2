@@ -62,7 +62,7 @@ var listOrders = exports.listOrders = /*#__PURE__*/function () {
       while (1) switch (_context2.n) {
         case 0:
           riderId = (filters === null || filters === void 0 ? void 0 : filters.riderId) || "";
-          queryHash = [filters === null || filters === void 0 ? void 0 : filters.status, filters === null || filters === void 0 ? void 0 : filters.warehouseCode, (filters === null || filters === void 0 ? void 0 : filters.limit) || 50].join(":");
+          queryHash = [filters === null || filters === void 0 ? void 0 : filters.status, filters === null || filters === void 0 ? void 0 : filters.darkstoreCode, (filters === null || filters === void 0 ? void 0 : filters.limit) || 50].join(":");
           key = "rider:orders:".concat(riderId, ":").concat(queryHash);
           compute = /*#__PURE__*/function () {
             var _ref2in = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee2in() {
@@ -72,7 +72,7 @@ var listOrders = exports.listOrders = /*#__PURE__*/function () {
                   case 0:
                     query = {};
                     if (filters !== null && filters !== void 0 && filters.status) query.status = filters.status;
-                    if (filters !== null && filters !== void 0 && filters.warehouseCode) query.warehouseCode = filters.warehouseCode;
+                    if (filters !== null && filters !== void 0 && filters.darkstoreCode) query.darkstoreCode = filters.darkstoreCode;
                     if (filters !== null && filters !== void 0 && filters.riderId) query["riderAssignment.riderId"] = filters.riderId;
                     if (filters !== null && filters !== void 0 && filters.customerPhoneNumber) query.customerPhoneNumber = filters.customerPhoneNumber;
                     limit = (filters === null || filters === void 0 ? void 0 : filters.limit) || 50;
@@ -224,6 +224,15 @@ var markOrderDelivered = exports.markOrderDelivered = /*#__PURE__*/function () {
             timestamp: new Date(),
             note: proofOfDelivery ? "Delivered with ".concat(proofOfDelivery.type, " verification") : "Order delivered successfully"
           });
+
+          // Persist proof-of-delivery reference (otp/signature/photo url)
+          // Stored in metadata to avoid schema changes & migrations.
+          if (proofOfDelivery) {
+            order.metadata = order.metadata || {};
+            order.metadata.proofOfDelivery = _objectSpread({
+              capturedAt: new Date()
+            }, proofOfDelivery);
+          }
 
           // Update payment status for COD
           if (order.payment.method === "cod" && order.payment.status === "pending") {

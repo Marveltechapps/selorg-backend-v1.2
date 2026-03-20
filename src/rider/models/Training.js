@@ -25,7 +25,7 @@ const TrainingSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    match: /^RIDER-\d+$/,
+    match: /^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/,
     index: true,
   },
   riderName: {

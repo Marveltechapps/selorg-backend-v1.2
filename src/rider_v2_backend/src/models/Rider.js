@@ -29,34 +29,60 @@ var RiderSchema = new _mongoose.Schema({
   documents: {
     aadhar: {
       number: String,
-      verified: {
-        type: Boolean,
-        "default": false
+      status: {
+        type: String,
+        enum: ["not_started", "pending", "verified", "failed"],
+        default: "not_started"
       },
-      documentUrl: String
+      documentUrl: String,
+      uploadedAt: Date
+    },
+    pan: {
+      number: String,
+      status: {
+        type: String,
+        enum: ["not_started", "pending", "verified", "failed"],
+        default: "not_started"
+      },
+      documentUrl: String,
+      uploadedAt: Date
     },
     drivingLicense: {
       number: String,
-      verified: {
-        type: Boolean,
-        "default": false
+      status: {
+        type: String,
+        enum: ["not_started", "pending", "verified", "failed"],
+        default: "not_started"
       },
       documentUrl: String,
-      expiryDate: Date
+      expiryDate: Date,
+      uploadedAt: Date
     },
     vehicleRC: {
       number: String,
-      verified: {
-        type: Boolean,
-        "default": false
+      status: {
+        type: String,
+        enum: ["not_started", "pending", "verified", "failed"],
+        default: "not_started"
       },
-      documentUrl: String
+      documentUrl: String,
+      uploadedAt: Date
+    },
+    vehicleInsurance: {
+      number: String,
+      status: {
+        type: String,
+        enum: ["not_started", "pending", "verified", "failed"],
+        default: "not_started"
+      },
+      documentUrl: String,
+      uploadedAt: Date
     }
   },
   vehicle: {
     type: {
       type: String,
-      "enum": ["bike", "scooter", "bicycle"],
+      "enum": ["bike", "scooter", "cycle", "ev"],
       required: true
     },
     registrationNumber: String,
@@ -182,7 +208,19 @@ var RiderSchema = new _mongoose.Schema({
     userAgent: String,
     createdAt: Date,
     lastActivity: Date
-  }]
+  }],
+  trainingCompleted: {
+    type: Boolean,
+    default: false
+  },
+  checkedKitItems: {
+    type: [String],
+    default: []
+  },
+  checkedKitItemLabels: {
+    type: [String],
+    default: []
+  }
 }, {
   timestamps: true
 });
@@ -193,4 +231,4 @@ RiderSchema.index({
   availability: 1,
   status: 1
 });
-var Rider = exports.Rider = _mongoose["default"].models.Rider || _mongoose["default"].model("Rider", RiderSchema);
+var Rider = exports.Rider = _mongoose["default"].models.RiderV2 || _mongoose["default"].model("RiderV2", RiderSchema, "riders_v2");

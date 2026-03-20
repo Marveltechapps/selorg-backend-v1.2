@@ -1,8 +1,10 @@
 const { Page } = require('../../models/Page');
 const { Collection } = require('../../models/Collection');
 const { Media } = require('../../models/Media');
-const { Site } = require('../../models/Site');
-const { REDIRECT_TYPES } = require('../../shared/constants');
+const { Banner } = require('../../models/Banner');
+const { Product } = require('../../models/Product');
+const { importSkuMaster } = require('../../services/import/skuMasterImport.service');
+const { importCmsPages } = require('../../services/import/cmsPagesImport.service');
 
 async function listPages(req, res) {
   try {
@@ -110,8 +112,23 @@ async function updateCollection(req, res) {
 
 async function deleteCollection(req, res) {
   try {
+    const { PromoBlock } = require('../../models/PromoBlock');
+    const col = await Collection.findById(req.params.id).select('_id slug').lean();
+    if (!col) return res.status(404).json({ message: 'Collection not found' });
+    const refs = await PromoBlock.find({
+      redirectType: 'collection',
+      redirectValue: { $in: [String(col._id), col.slug] },
+    })
+      .select('_id blockKey')
+      .lean();
+    if (refs.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'Collection is referenced by promo blocks',
+        references: refs,
+      });
+    }
     const collection = await Collection.findByIdAndDelete(req.params.id);
-    if (!collection) return res.status(404).json({ message: 'Collection not found' });
     res.json({ success: true });
   } catch (err) {
     console.error('deleteCollection error:', err);
@@ -151,7 +168,51 @@ async function deleteMedia(req, res) {
   }
 }
 
+async function getOverview(req, res) {
+  try {
+    const [skus, styleCount, variantCount, pages, banners, collections] = await Promise.all([
+      Product.countDocuments({}),
+      Product.countDocuments({ classification: 'Style' }),
+      Product.countDocuments({ classification: 'Variant' }),
+      Page.countDocuments({}),
+      Banner.countDocuments({}),
+      Collection.countDocuments({}),
+    ]);
+
+    const [missingPriceProducts, missingImageProducts, inactiveProducts] = await Promise.all([
+      Product.find({ $or: [{ price: { $exists: false } }, { price: null }, { price: 0 }] })
+        .select('name sku')
+        .lean(),
+      Product.find({ $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }] })
+        .select('name sku')
+        .lean(),
+      Product.find({ $or: [{ isActive: false }, { status: { $in: ['inactive', 'draft'] } }] })
+        .select('name sku')
+        .lean(),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        skuCount: skus,
+        styleCount,
+        variantCount,
+        pagesCount: pages,
+        bannersCount: banners,
+        collectionsCount: collections,
+        missingPriceProducts,
+        missingImageProducts,
+        inactiveProducts,
+      },
+    });
+  } catch (err) {
+    console.error('cms overview error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
 module.exports = {
+  getOverview,
   listPages,
   getPage,
   createPage,
@@ -164,4 +225,49 @@ module.exports = {
   listMedia,
   createMedia,
   deleteMedia,
+  /**
+   * Excel upload handlers are mounted with multer middleware in routes.
+   * These functions should never throw 500 for sheet-level parse errors.
+   */
+  uploadSkuMaster: async (req, res) => {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ success: false, counts: {}, errors: [{ message: 'file is required' }] });
+    }
+    const overwriteRaw = req.body?.overwrite ?? req.query?.overwrite;
+    const overwrite = overwriteRaw === undefined ? false : String(overwriteRaw) === 'true';
+    try {
+      const { counts, errors, warnings, success } = await importSkuMaster(req.file.buffer, { overwrite });
+      return res.status(200).json({
+        success,
+        counts,
+        warnings: warnings || [],
+        errors,
+      });
+    } catch (err) {
+      return res.status(200).json({
+        success: false,
+        counts: {},
+        errors: [{ message: err.message }],
+      });
+    }
+  },
+  uploadCmsPages: async (req, res) => {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ success: false, counts: {}, errors: [{ message: 'file is required' }] });
+    }
+    try {
+      const { counts, errors } = await importCmsPages(req.file.buffer);
+      return res.status(200).json({
+        success: errors.length === 0,
+        counts,
+        errors,
+      });
+    } catch (err) {
+      return res.status(200).json({
+        success: false,
+        counts: {},
+        errors: [{ message: err.message }],
+      });
+    }
+  },
 };

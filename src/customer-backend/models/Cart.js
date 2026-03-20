@@ -8,6 +8,7 @@ const cartItemSchema = new mongoose.Schema(
     quantity: { type: Number, required: true, min: 1 },
     price: { type: Number, required: true },
     originalPrice: { type: Number },
+    gstRate: { type: Number, default: 0 },
     productName: { type: String, default: '' },
     image: { type: String, default: '' },
   },

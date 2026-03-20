@@ -117,6 +117,7 @@ async function createOrder(userId, body) {
   if (!address) return { error: 'Address not found' };
 
   let itemTotal = 0;
+  let totalTax = 0;
   const orderItems = [];
   for (const line of items) {
     const product = await Product.findById(line.productId).lean();
@@ -129,7 +130,13 @@ async function createOrder(userId, body) {
       variantSize = v.size || '';
     }
     const qty = Math.max(1, line.quantity || 1);
-    itemTotal += price * qty;
+    const lineTotal = price * qty;
+    const gstRate = product.gstRate || 0;
+    const taxAmount = lineTotal * (gstRate / (100 + gstRate));
+    
+    itemTotal += lineTotal;
+    totalTax += taxAmount;
+
     orderItems.push({
       productId: product._id,
       productName: product.name,
@@ -138,6 +145,9 @@ async function createOrder(userId, body) {
       quantity: qty,
       price,
       originalPrice: product.originalPrice,
+      hsnCode: product.hsnCode || '',
+      gstRate: gstRate,
+      taxAmount: taxAmount,
       image: (product.images && product.images[0]) || '',
     });
   }
@@ -179,8 +189,10 @@ async function createOrder(userId, body) {
     },
     paymentStatus,
     itemTotal,
+    totalTax,
     handlingCharge,
     deliveryFee,
+    deliveryTip: deliveryTip || 0,
     discount,
     totalBill,
     estimatedDelivery,

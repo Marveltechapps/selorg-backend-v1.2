@@ -4,13 +4,16 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.verifyOtp = exports.requestOtp = exports.refreshToken = exports.getProfile = void 0;
+exports.updateKitStatus = exports.verifyOtp = exports.uploadProfilePhoto = exports.requestOtp = exports.refreshToken = exports.getProfile = exports.completeTraining = exports.getOnboardingState = void 0;
 var _nodeCrypto = require("node:crypto");
 var _env = require("../../config/env.js");
 var _appConfig = require("../../config/appConfig.js");
 var _token = require("../../utils/token.js");
 var _Rider = require("../../models/Rider.js");
+var _RiderKit = require("../../../../rider/models/Kit.js");
 var _Otp = require("../../models/Otp.js");
+var _kycService = require("../kyc/kyc.service.js");
+var _s3Service = require("../../services/s3.service.js");
 function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, "default": e }; if (null === e || "object" != _typeof(e) && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t3 in e) "default" !== _t3 && {}.hasOwnProperty.call(e, _t3) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t3)) && (i.get || i.set) ? o(f, _t3, i) : f[_t3] = e[_t3]); return f; })(e, t); }
 function _regenerator() { /*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/babel/babel/blob/main/packages/babel-helpers/LICENSE */ var e, t, r = "function" == typeof Symbol ? Symbol : {}, n = r.iterator || "@@iterator", o = r.toStringTag || "@@toStringTag"; function i(r, n, o, i) { var c = n && n.prototype instanceof Generator ? n : Generator, u = Object.create(c.prototype); return _regeneratorDefine2(u, "_invoke", function (r, n, o) { var i, c, u, f = 0, p = o || [], y = !1, G = { p: 0, n: 0, v: e, a: d, f: d.bind(e, 4), d: function d(t, r) { return i = t, c = 0, u = e, G.n = r, a; } }; function d(r, n) { for (c = r, u = n, t = 0; !y && f && !o && t < p.length; t++) { var o, i = p[t], d = G.p, l = i[2]; r > 3 ? (o = l === n) && (u = i[(c = i[4]) ? 5 : (c = 3, 3)], i[4] = i[5] = e) : i[0] <= d && ((o = r < 2 && d < i[1]) ? (c = 0, G.v = n, G.n = i[1]) : d < l && (o = r < 3 || i[0] > n || n > l) && (i[4] = r, i[5] = n, G.n = l, c = 0)); } if (o || r > 1) return a; throw y = !0, n; } return function (o, p, l) { if (f > 1) throw TypeError("Generator is already running"); for (y && 1 === p && d(p, l), c = p, u = l; (t = c < 2 ? e : u) || !y;) { i || (c ? c < 3 ? (c > 1 && (G.n = -1), d(c, u)) : G.n = u : G.v = u); try { if (f = 2, i) { if (c || (o = "next"), t = i[o]) { if (!(t = t.call(i, u))) throw TypeError("iterator result is not an object"); if (!t.done) return t; u = t.value, c < 2 && (c = 0); } else 1 === c && (t = i["return"]) && t.call(i), c < 2 && (u = TypeError("The iterator does not provide a '" + o + "' method"), c = 1); i = e; } else if ((t = (y = G.n < 0) ? u : r.call(n, G)) !== a) break; } catch (t) { i = e, c = 1, u = t; } finally { f = 1; } } return { value: t, done: y }; }; }(r, o, i), !0), u; } var a = {}; function Generator() {} function GeneratorFunction() {} function GeneratorFunctionPrototype() {} t = Object.getPrototypeOf; var c = [][n] ? t(t([][n]())) : (_regeneratorDefine2(t = {}, n, function () { return this; }), t), u = GeneratorFunctionPrototype.prototype = Generator.prototype = Object.create(c); function f(e) { return Object.setPrototypeOf ? Object.setPrototypeOf(e, GeneratorFunctionPrototype) : (e.__proto__ = GeneratorFunctionPrototype, _regeneratorDefine2(e, o, "GeneratorFunction")), e.prototype = Object.create(u), e; } return GeneratorFunction.prototype = GeneratorFunctionPrototype, _regeneratorDefine2(u, "constructor", GeneratorFunctionPrototype), _regeneratorDefine2(GeneratorFunctionPrototype, "constructor", GeneratorFunction), GeneratorFunction.displayName = "GeneratorFunction", _regeneratorDefine2(GeneratorFunctionPrototype, o, "GeneratorFunction"), _regeneratorDefine2(u), _regeneratorDefine2(u, o, "Generator"), _regeneratorDefine2(u, n, function () { return this; }), _regeneratorDefine2(u, "toString", function () { return "[object Generator]"; }), (_regenerator = function _regenerator() { return { w: i, m: f }; })(); }
 function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { i({}, "", {}); } catch (e) { i = 0; } _regeneratorDefine2 = function _regeneratorDefine(e, r, n, t) { function o(r, n) { _regeneratorDefine2(e, r, function (e) { return this._invoke(r, n, e); }); } r ? i ? i(e, r, { value: n, enumerable: !t, configurable: !t, writable: !t }) : e[r] = n : (o("next", 0), o("throw", 1), o("return", 2)); }, _regeneratorDefine2(e, r, n, t); }
@@ -151,6 +154,34 @@ var requestOtp = exports.requestOtp = /*#__PURE__*/function () {
     return _ref2.apply(this, arguments);
   };
 }();
+var uploadProfilePhoto = exports.uploadProfilePhoto = /*#__PURE__*/function () {
+  var _refProfilePhoto = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeProfilePhoto(riderId, fileBuffer, mimeType, originalName) {
+    var key, profilePicture;
+    return _regenerator().w(function (_contextProfilePhoto) {
+      while (1) switch (_contextProfilePhoto.n) {
+        case 0:
+          key = "riders/".concat(riderId, "/profile/").concat(Date.now(), "_").concat((0, _nodeCrypto.randomBytes)(4).toString("hex"), "_").concat((originalName || "profile.jpg").replace(/[^a-zA-Z0-9.-]/g, "_"));
+          _contextProfilePhoto.n = 1;
+          return (0, _s3Service.uploadToS3)(fileBuffer, key, mimeType, {
+            bucket: "profile"
+          });
+        case 1:
+          profilePicture = _contextProfilePhoto.v;
+          _contextProfilePhoto.n = 2;
+          return _Rider.Rider.findOneAndUpdate({
+            riderId: riderId
+          }, {
+            profilePicture: profilePicture
+          });
+        case 2:
+          return _contextProfilePhoto.a(2, profilePicture);
+      }
+    }, _calleeProfilePhoto);
+  }));
+  return function uploadProfilePhoto(_xRiderId, _xBuffer, _xMime, _xName) {
+    return _refProfilePhoto.apply(this, arguments);
+  };
+}();
 var verifyOtp = exports.verifyOtp = /*#__PURE__*/function () {
   var _ref3 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3(phoneNumber, code, userType, deviceId, deviceName, ipAddress, userAgent) {
     var record, rider, lockoutMinutes, normalizedCode, _rider$mfa, _rider, _yield$import, createSession, session;
@@ -257,8 +288,67 @@ var verifyOtp = exports.verifyOtp = /*#__PURE__*/function () {
           _rider.failedLoginAttempts = 0;
           _rider.accountLockedUntil = undefined;
           _context3.n = 15;
-          return _rider.save();
+          return Promise.all([_rider.save(), (0, _kycService.getUserStatus)(_rider.riderId), _RiderKit.findOne({
+            isActive: true
+          }).lean()]);
         case 15:
+          var _resultsAuth = _context3.v;
+          documents = _resultsAuth[1];
+          var kitConfigAuth = _resultsAuth[2];
+          var activeKitItemsAuth = kitConfigAuth ? kitConfigAuth.items.filter(function (i) {
+            return i.isActive;
+          }) : [];
+          var kitCompleteAuth = activeKitItemsAuth.length === 0 || activeKitItemsAuth.every(function (item) {
+            return (_rider.checkedKitItems || []).includes(item.id);
+          });
+          onboardingComplete = (function (rider, documents, kitComplete) {
+            console.log(`[AUTH] Checking onboarding status for rider: ${rider.riderId}`);
+            if (!rider.name || !String(rider.name).trim()) {
+              console.log("[AUTH] Onboarding incomplete: name missing");
+              return false;
+            }
+            if (/^Rider\s+\d{4}$/.test(String(rider.name).trim())) {
+              console.log("[AUTH] Onboarding incomplete: name is still placeholder");
+              return false;
+            }
+            if (!rider.preferredLocation || !rider.preferredLocation.cityId || !rider.preferredLocation.hubId) {
+              console.log("[AUTH] Onboarding incomplete: preferred location missing");
+              return false;
+            }
+            if (!rider.vehicle || !rider.vehicle.type || !rider.vehicle.registrationNumber) {
+              console.log("[AUTH] Onboarding incomplete: vehicle details missing");
+              return false;
+            }
+            if (!rider.profilePicture) {
+              console.log("[AUTH] Onboarding incomplete: profile picture missing");
+              return false;
+            }
+            
+            var required = (documents || []).filter(function (d) {
+              return d.required;
+            });
+            var allVerified = required.length > 0 && required.every(function (d) {
+              return ["verified", "pending"].includes(d.status);
+            });
+            
+            if (!allVerified) {
+              console.log("[AUTH] Onboarding incomplete: KYC documents not verified");
+              return false;
+            }
+
+            if (!rider.trainingCompleted) {
+              console.log("[AUTH] Onboarding incomplete: training not completed");
+              return false;
+            }
+
+            if (!kitComplete) {
+              console.log("[AUTH] Onboarding incomplete: kit checklist not completed");
+              return false;
+            }
+            
+            console.log("[AUTH] Onboarding COMPLETE for rider");
+            return true;
+          })(_rider, documents, kitCompleteAuth);
           _context3.n = 16;
           return Promise.resolve().then(function () {
             return _interopRequireWildcard(require("./session.service.js"));
@@ -281,6 +371,7 @@ var verifyOtp = exports.verifyOtp = /*#__PURE__*/function () {
             name: _rider.name,
             status: _rider.status,
             sessionId: session.sessionId,
+            onboardingComplete: onboardingComplete,
             mfaRequired: ((_rider$mfa = _rider.mfa) === null || _rider$mfa === void 0 ? void 0 : _rider$mfa.enabled) === true
           });
         case 18:
@@ -345,7 +436,7 @@ var refreshToken = exports.refreshToken = /*#__PURE__*/function () {
 }();
 var getProfile = exports.getProfile = /*#__PURE__*/function () {
   var _ref5 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee5(phoneNumber) {
-    var rider;
+    var rider, documents, required, allVerified, onboardingComplete;
     return _regenerator().w(function (_context5) {
       while (1) switch (_context5.n) {
         case 0:
@@ -361,17 +452,231 @@ var getProfile = exports.getProfile = /*#__PURE__*/function () {
           }
           return _context5.a(2, null);
         case 2:
+          _context5.n = 3;
+          return Promise.all([(0, _kycService.getUserStatus)(rider.riderId), _RiderKit.findOne({
+            isActive: true
+          }).lean()]);
+        case 3:
+          var _resultsProfile = _context5.v;
+          documents = _resultsProfile[0];
+          var kitConfigProfile = _resultsProfile[1];
+          var activeKitItemsProfile = kitConfigProfile ? kitConfigProfile.items.filter(function (i) {
+            return i.isActive;
+          }) : [];
+          var kitCompleteProfile = activeKitItemsProfile.length === 0 || activeKitItemsProfile.every(function (item) {
+            return (rider.checkedKitItems || []).includes(item.id);
+          });
+          onboardingComplete = (function (rider, documents, kitComplete) {
+            if (!rider.name || !String(rider.name).trim()) return false;
+            if (/^Rider\s+\d{4}$/.test(String(rider.name).trim())) return false;
+            if (!rider.preferredLocation || !rider.preferredLocation.cityId || !rider.preferredLocation.hubId) return false;
+            if (!rider.vehicle || !rider.vehicle.type || !rider.vehicle.registrationNumber) return false;
+            if (!rider.profilePicture) return false;
+            
+            var required = (documents || []).filter(function (d) {
+              return d.required;
+            });
+            var allVerified = required.length > 0 && required.every(function (d) {
+              return ["verified", "pending"].includes(d.status);
+            });
+            if (!allVerified) return false;
+            if (!rider.trainingCompleted) return false;
+            if (!kitComplete) return false;
+            return true;
+          })(rider, documents, kitCompleteProfile);
           return _context5.a(2, {
             id: rider.riderId,
             phoneNumber: rider.phoneNumber,
             name: rider.name,
             email: rider.email,
-            status: rider.status
+            status: rider.status,
+            onboardingComplete: onboardingComplete,
+            preferredLocation: rider.preferredLocation,
+            vehicle: rider.vehicle,
+            profilePicture: rider.profilePicture
           });
       }
     }, _callee5);
   }));
   return function getProfile(_x10) {
     return _ref5.apply(this, arguments);
+  };
+}();
+var completeTraining = exports.completeTraining = /*#__PURE__*/function () {
+  var _ref6 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee6(riderId) {
+    var rider;
+    return _regenerator().w(function (_context6) {
+      while (1) switch (_context6.n) {
+        case 0:
+          _context6.n = 1;
+          return _Rider.Rider.findOneAndUpdate({
+            riderId: riderId
+          }, {
+            trainingCompleted: true
+          }, {
+            "new": true
+          });
+        case 1:
+          rider = _context6.v;
+          if (rider) {
+            _context6.n = 2;
+            break;
+          }
+          throw new Error("Rider not found");
+        case 2:
+          return _context6.a(2, {
+            success: true,
+            trainingCompleted: rider.trainingCompleted
+          });
+      }
+    }, _callee6);
+  }));
+  return function completeTraining(_x11) {
+    return _ref6.apply(this, arguments);
+  };
+}();
+var getOnboardingState = exports.getOnboardingState = /*#__PURE__*/function () {
+  var _ref7 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee7(riderId) {
+    var rider, documents, kitConfig, activeKitItems, kitComplete, onboardingComplete, currentStep, checkedKitItemLabels;
+    return _regenerator().w(function (_context7) {
+      while (1) switch (_context7.n) {
+        case 0:
+          _context7.n = 1;
+          return _Rider.Rider.findOne({
+            riderId: riderId
+          });
+        case 1:
+          rider = _context7.v;
+          if (rider) {
+            _context7.n = 2;
+            break;
+          }
+          throw new Error("Rider not found");
+        case 2:
+          _context7.n = 3;
+          return Promise.all([(0, _kycService.getUserStatus)(riderId), _RiderKit.findOne({
+            isActive: true
+          }).lean()]);
+        case 3:
+          var _results = _context7.v;
+          documents = _results[0];
+          kitConfig = _results[1];
+          activeKitItems = kitConfig ? kitConfig.items.filter(function (i) {
+            return i.isActive;
+          }) : [];
+          kitComplete = activeKitItems.length === 0 || activeKitItems.every(function (item) {
+            return (rider.checkedKitItems || []).includes(item.id);
+          });
+          checkedKitItemLabels = (rider.checkedKitItemLabels || []).length ? rider.checkedKitItemLabels : (rider.checkedKitItems || []).map(function (id) {
+            var matched = activeKitItems.find(function (i) {
+              return i.id === id;
+            });
+            return matched ? matched.label : id;
+          });
+          onboardingComplete = (function (rider, documents, kitComplete) {
+            if (!rider.name || !String(rider.name).trim()) return false;
+            if (/^Rider\s+\d{4}$/.test(String(rider.name).trim())) return false;
+            if (!rider.preferredLocation || !rider.preferredLocation.cityId || !rider.preferredLocation.hubId) return false;
+            if (!rider.vehicle || !rider.vehicle.type || !rider.vehicle.registrationNumber) return false;
+            if (!rider.profilePicture) return false;
+            var required = (documents || []).filter(function (d) {
+              return d.required;
+            });
+            var allVerified = required.length > 0 && required.every(function (d) {
+              return ["verified", "pending"].includes(d.status);
+            });
+            if (!allVerified) return false;
+            if (!rider.trainingCompleted) return false;
+            if (!kitComplete) return false;
+            return true;
+          })(rider, documents, kitComplete);
+          currentStep = "complete";
+          if (!rider.name || !String(rider.name).trim() || /^Rider\s+\d{4}$/.test(String(rider.name).trim())) {
+            currentStep = "profile";
+          } else if (!rider.preferredLocation || !rider.preferredLocation.cityId || !rider.preferredLocation.hubId) {
+            currentStep = "location";
+          } else if (!rider.vehicle || !rider.vehicle.type || !rider.vehicle.registrationNumber) {
+            currentStep = "vehicle";
+          } else if (!rider.profilePicture) {
+            currentStep = "profile-photo";
+          } else {
+            var required = (documents || []).filter(function (d) {
+              return d.required;
+            });
+            var allVerified = required.length > 0 && required.every(function (d) {
+              return ["verified", "pending"].includes(d.status);
+            });
+            if (!allVerified) {
+              currentStep = "documents";
+            } else if (!rider.trainingCompleted) {
+              currentStep = "training";
+            } else if (!kitComplete) {
+              currentStep = "kit";
+            }
+          }
+          return _context7.a(2, {
+            riderId: riderId,
+            onboardingComplete: onboardingComplete,
+            currentStep: currentStep,
+            trainingCompleted: !!rider.trainingCompleted,
+            kitComplete: kitComplete,
+            checkedKitItems: rider.checkedKitItems || [],
+            checkedKitItemLabels: checkedKitItemLabels
+          });
+      }
+    }, _callee7);
+  }));
+  return function getOnboardingState(_x12) {
+    return _ref7.apply(this, arguments);
+  };
+}();
+var updateKitStatus = exports.updateKitStatus = /*#__PURE__*/function () {
+  var _refKitStatus = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeKitStatus(riderId, checkedItemIds) {
+    var rider, kitConfig, activeItems, checkedKitItemLabels;
+    return _regenerator().w(function (_contextKitStatus) {
+      while (1) switch (_contextKitStatus.n) {
+        case 0:
+          _contextKitStatus.n = 1;
+          return _RiderKit.findOne({
+            isActive: true
+          }).lean();
+        case 1:
+          kitConfig = _contextKitStatus.v;
+          activeItems = kitConfig && Array.isArray(kitConfig.items) ? kitConfig.items.filter(function (i) {
+            return i.isActive;
+          }) : [];
+          checkedKitItemLabels = checkedItemIds.map(function (id) {
+            var matched = activeItems.find(function (i) {
+              return i.id === id;
+            });
+            return matched ? matched.label : id;
+          });
+          _contextKitStatus.n = 2;
+          return _Rider.Rider.findOneAndUpdate({
+            riderId: riderId
+          }, {
+            checkedKitItems: checkedItemIds,
+            checkedKitItemLabels: checkedKitItemLabels
+          }, {
+            "new": true
+          });
+        case 2:
+          rider = _contextKitStatus.v;
+          if (rider) {
+            _contextKitStatus.n = 3;
+            break;
+          }
+          throw new Error("Rider not found");
+        case 3:
+          return _contextKitStatus.a(2, {
+            success: true,
+            checkedKitItems: rider.checkedKitItems,
+            checkedKitItemLabels: rider.checkedKitItemLabels || checkedKitItemLabels
+          });
+      }
+    }, _calleeKitStatus);
+  }));
+  return function updateKitStatus(riderId, checkedItemIds) {
+    return _refKitStatus.apply(this, arguments);
   };
 }();

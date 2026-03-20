@@ -246,14 +246,15 @@ operationsRouter.post("/fulfillment/:id/advance", _authenticate.authenticate, /*
 
 // Get warehouses summary
 operationsRouter.get("/warehouses", _authenticate.authenticate, /*#__PURE__*/function () {
-  var _ref6 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee6(_req, res) {
+  var _ref6 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee6(req, res) {
     var warehouses, _t6;
+    console.log('[API] GET /warehouses called with query:', req.query);
     return _regenerator().w(function (_context6) {
       while (1) switch (_context6.p = _context6.n) {
         case 0:
           _context6.p = 0;
           _context6.n = 1;
-          return operationsService.getWarehouses();
+          return operationsService.getWarehouses(req.query);
         case 1:
           warehouses = _context6.v;
           res.json({

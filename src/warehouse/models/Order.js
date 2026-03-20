@@ -39,7 +39,7 @@ const OrderSchema = new mongoose.Schema({
   riderId: {
     type: String,
     default: null,
-    match: /^RIDER-\d+$/,
+    match: /^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/,
     index: true,
   },
   etaMinutes: {
@@ -100,6 +100,14 @@ const OrderSchema = new mongoose.Schema({
     type: Number,
     default: null,
     min: 0,
+  },
+  delivery: {
+    address: {
+      coordinates: {
+        lat: Number,
+        lng: Number,
+      },
+    },
   },
 }, {
   timestamps: true,

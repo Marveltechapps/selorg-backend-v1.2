@@ -59,4 +59,4 @@ InventoryItemSchema.index({
 }, {
   unique: true
 });
-var InventoryItem = exports.InventoryItem = _mongoose["default"].model("InventoryItem", InventoryItemSchema);
+var InventoryItem = exports.InventoryItem = _mongoose["default"].models.InventoryItem || _mongoose["default"].model("InventoryItem", InventoryItemSchema);

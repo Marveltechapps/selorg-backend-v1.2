@@ -1,5 +1,23 @@
+const path = require('path');
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
-const Rider = require('../../rider/models/Rider');
+// CRITICAL: Use RiderOperational (riders collection, string id) for warehouse assignments.
+// ProductionRider/DarkstoreRider use rider_id, store_id, last_update, ObjectId _id - incompatible.
+// Use direct module export to avoid mongoose.model() resolution picking wrong schema.
+const Rider = require(path.resolve(__dirname, '../../rider/models/Rider.js'));
+// RiderV2 profile (riders_v2 collection) is the source of truth for
+// mobile riders like RDR-ADY-2603-001. We use it as a fallback to
+// hydrate the legacy Rider collection when needed for assignments.
+const { Rider: RiderV2 } = require('../../rider_v2_backend/src/models/Rider');
+const { Order: RiderV2Order } = require('../../rider_v2_backend/src/models/Order');
+
+// Runtime check: RiderOperational has 'id' field; ProductionRider/DarkstoreRider have 'rider_id'
+if (!Rider || !Rider.schema.paths.id || Rider.schema.paths.rider_id) {
+  throw new Error(
+    'orderService: RiderOperational model not available. ' +
+    'Expected riders collection with string id field.'
+  );
+}
 const { calculateDistance } = require('../../utils/distanceCalculator');
 const appConfig = require('../../config/app');
 const logger = require('../../core/utils/logger');
@@ -109,36 +127,126 @@ const listOrders = async (filters = {}, pagination = {}, sorting = {}) => {
 };
 
 const assignOrder = async (orderId, riderId, overrideSla = false) => {
-  // Always try to find actual documents first
-  let order = await Order.findOne({ id: orderId });
-  let rider = await Rider.findOne({ id: riderId });
-
-  // In development mode, provide helpful error messages
-  if (!order) {
+  // Use raw collection to find order - 'orders' collection has mixed schemas (WarehouseOrder
+  // vs DarkstoreOrder). Darkstore uses order_id; Warehouse uses id. Avoid loading as Mongoose
+  // document to prevent validation failures on save (items as objects, timeline.ASSIGNED, etc).
+  const ordersColl = mongoose.connection.collection('orders');
+  const orderDoc = await ordersColl.findOne({ $or: [{ id: orderId }, { order_id: orderId }] });
+  if (!orderDoc) {
     const error = new Error(`Order ${orderId} not found in database`);
     error.statusCode = 404;
     throw error;
   }
 
-  if (!rider) {
-    const error = new Error(`Rider ${riderId} not found in database`);
-    error.statusCode = 404;
-    throw error;
+  let rider = await Rider.findOne({ id: riderId });
+  let effectiveRiderId = riderId;
+
+  // If riderId looks like a phone number (e.g. 7418268091), resolve to RiderV2.riderId
+  // so RiderV2Order sync and rider app list API match (rider app uses JWT sub = riderId).
+  if (!rider && /^\d{10}$/.test(String(riderId).trim())) {
+    const v2ByPhone = await RiderV2.findOne({ phoneNumber: String(riderId).trim() }).lean();
+    if (v2ByPhone && v2ByPhone.riderId) {
+      effectiveRiderId = v2ByPhone.riderId;
+      rider = await Rider.findOne({ id: effectiveRiderId });
+    }
   }
 
-  // Validation checks
-  if (!['pending', 'assigned'].includes(order.status)) {
-    const error = new Error('Order cannot be assigned in current status');
+  // When the legacy Rider document is missing (common for new RiderV2 profiles),
+  // create an operational Rider document from riders_v2 so that dashboard
+  // assignments work and we can persist capacity/status updates.
+  if (!rider) {
+    const v2 = await RiderV2.findOne({ riderId: effectiveRiderId }).lean();
+
+    if (v2) {
+      const name = v2.name || v2.phoneNumber || effectiveRiderId;
+      const avatarInitials =
+        (name || '')
+          .split(' ')
+          .filter(Boolean)
+          .map((p) => p[0])
+          .join('')
+          .slice(0, 3)
+          .toUpperCase() || 'R';
+
+      const availability = v2.availability || 'offline'; // available | busy | offline
+      const statusMap = {
+        available: 'online',
+        busy: 'busy',
+        offline: 'offline',
+      };
+      const mappedStatus = statusMap[availability] || 'offline';
+
+      const locationSource = v2.currentLocation || v2.preferredLocation || {};
+      const location =
+        locationSource && typeof locationSource === 'object'
+          ? {
+              lat: typeof locationSource.lat === 'number' ? locationSource.lat : locationSource.latitude || 0,
+              lng: typeof locationSource.lng === 'number' ? locationSource.lng : locationSource.longitude || 0,
+            }
+          : null;
+
+      // Create operational Rider document for assignment persistence (RiderOperational schema
+      // uses string `id` field, not ObjectId _id, so RDR-ADY-2603-001 format works)
+      rider = new Rider({
+        id: effectiveRiderId,
+        name,
+        avatarInitials,
+        status: mappedStatus,
+        currentOrderId: null,
+        location: location && (location.lat !== 0 || location.lng !== 0) ? location : null,
+        capacity: {
+          currentLoad: 0,
+          maxLoad: 5,
+        },
+        avgEtaMins: 0,
+        rating: (v2.stats && v2.stats.averageRating) || 0,
+        zone:
+          (v2.preferredLocation && v2.preferredLocation.hubName) ||
+          v2.preferredLocation?.cityName ||
+          null,
+      });
+      try {
+        await rider.save();
+      } catch (saveErr) {
+        if (saveErr.code === 11000) {
+          rider = await Rider.findOne({ id: effectiveRiderId });
+        } else {
+          throw saveErr;
+        }
+      }
+    }
+
+    if (!rider) {
+      const error = new Error(`Rider ${riderId} not found in database`);
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  // Validation checks - allow assign/reassign for pre-assignment and in-progress statuses
+  // Warehouse: pending, assigned, delayed, picked_up, in_transit
+  // Darkstore: new, processing, ready (pre-assign) + ASSIGNED, PICKING, PICKED, PACKED, READY_FOR_DISPATCH
+  const assignableStatuses = [
+    'pending', 'assigned', 'delayed', 'picked_up', 'in_transit',
+    'new', 'processing', 'ready', 'picking', 'picked', 'packed', 'ready_for_dispatch',
+  ];
+  const orderStatus = orderDoc.status;
+  const normalizedStatus = (orderStatus || '').toLowerCase();
+  if (!assignableStatuses.includes(normalizedStatus)) {
+    const error = new Error(`Order cannot be assigned in current status (${orderStatus}). Allowed: ${assignableStatuses.join(', ')}`);
     error.statusCode = 400;
     throw error;
   }
 
+  // Resolve riderId from order (Warehouse: riderId, Darkstore: assignee.id)
+  const existingRiderId = orderDoc.riderId || (orderDoc.assignee && orderDoc.assignee.id) || null;
+
   // Handle reassignment: if order is already assigned to a different rider, update previous rider
   let previousRider = null;
-  const isReassignment = order.status === 'assigned' && order.riderId && order.riderId !== riderId;
+  const isReassignment = existingRiderId && existingRiderId !== effectiveRiderId;
   
   if (isReassignment) {
-    previousRider = await Rider.findOne({ id: order.riderId });
+    previousRider = await Rider.findOne({ id: existingRiderId });
     if (previousRider) {
       // Decrease previous rider's load
       if (previousRider.capacity && previousRider.capacity.currentLoad > 0) {
@@ -148,9 +256,12 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
       // Update previous rider's status if they have no more orders
       if (previousRider.capacity.currentLoad === 0) {
         // Check if rider has any other assigned orders
-        const otherOrders = await Order.countDocuments({ 
-          riderId: previousRider.id, 
-          status: { $in: ['assigned', 'picked_up', 'in_transit'] } 
+        const otherOrders = await ordersColl.countDocuments({
+          $and: [
+            { $or: [{ riderId: previousRider.id }, { 'assignee.id': previousRider.id }] },
+            { $nor: [{ id: orderId }, { order_id: orderId }] },
+            { status: { $in: ['assigned', 'picked_up', 'in_transit', 'ASSIGNED', 'PICKED', 'PICKING', 'READY_FOR_DISPATCH'] } },
+          ],
         });
         
         if (otherOrders === 0) {
@@ -186,48 +297,56 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
   }
 
   // Calculate ETA based on distance
+  const dropLocation = orderDoc.dropLocation || orderDoc.delivery_address;
   let etaMinutes = null;
-  if (rider.location && order.dropLocation) {
-    // Simplified: assume 1 km = 2 minutes
-    // In production, use actual distance calculation
+  if (rider.location && dropLocation) {
     etaMinutes = 15; // Default estimate
   }
 
-  // SLA validation
-  if (!overrideSla && etaMinutes) {
+  // SLA validation (Warehouse: slaDeadline, Darkstore: sla_deadline)
+  const slaDeadline = orderDoc.slaDeadline || orderDoc.sla_deadline;
+  if (!overrideSla && etaMinutes && slaDeadline) {
     const estimatedDeliveryTime = new Date();
     estimatedDeliveryTime.setMinutes(estimatedDeliveryTime.getMinutes() + etaMinutes);
-    
-    if (estimatedDeliveryTime > order.slaDeadline) {
+    if (estimatedDeliveryTime > new Date(slaDeadline)) {
       const error = new Error('Assignment would violate SLA deadline');
       error.statusCode = 400;
       throw error;
     }
   }
 
-  // Update order
-  order.status = 'assigned';
-  order.riderId = riderId;
-  order.etaMinutes = etaMinutes || 15; // Default ETA in dev mode
-  if (!order.timeline) order.timeline = [];
-  
-  // Add appropriate timeline entry
-  if (isReassignment && previousRider) {
-    order.timeline.push({
-      status: 'assigned',
-      time: new Date(),
-      note: `Reassigned from ${previousRider.name} to ${rider.name}`,
-    });
-  } else {
-    order.timeline.push({
-      status: 'assigned',
-      time: new Date(),
-      note: `Assigned to ${rider.name}`,
-    });
-  }
+  const etaMins = etaMinutes || 15;
+  const timelineNote = isReassignment && previousRider
+    ? `Reassigned from ${previousRider.name} to ${rider.name}`
+    : `Assigned to ${rider.name}`;
+
+  // Update order via raw collection to avoid Mongoose validation (mixed Warehouse/Darkstore schemas)
+  // Darkstore uses ASSIGNED (uppercase); Warehouse uses assigned (lowercase)
+  const statusValue = orderDoc.store_id ? 'ASSIGNED' : 'assigned';
+  const orderUpdate = {
+    $set: {
+      status: statusValue,
+      riderId: effectiveRiderId,
+      etaMinutes: etaMins,
+      // Darkstore uses assignee; set both for compatibility
+      'assignee.id': effectiveRiderId,
+      'assignee.name': rider.name,
+      'assignee.initials': (rider.avatarInitials || rider.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()) || 'R',
+    },
+    $push: {
+      timeline: {
+        status: 'assigned',
+        time: new Date(),
+        note: timelineNote,
+        // Darkstore timeline uses timestamp
+        timestamp: new Date(),
+        updatedBy: '',
+        updatedByRole: '',
+      },
+    },
+  };
 
   // Update rider
-  // Only update status to busy if rider was idle/online, otherwise keep current status
   if (rider.status === 'idle' || rider.status === 'online') {
     rider.status = 'busy';
   }
@@ -235,37 +354,158 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
   if (!rider.capacity) rider.capacity = { currentLoad: 0, maxLoad: 5 };
   rider.capacity.currentLoad = (rider.capacity.currentLoad || 0) + 1;
 
-  // Save all documents - order, new rider, and previous rider if reassignment
-  // Use try-catch to ensure all saves succeed or fail together
   try {
-    const savePromises = [order.save(), rider.save()];
-    if (previousRider) {
-      savePromises.push(previousRider.save());
+    const orderFilter = { $or: [{ id: orderId }, { order_id: orderId }] };
+    const [orderResult] = await Promise.all([
+      ordersColl.updateOne(orderFilter, orderUpdate),
+      rider.save(),
+      previousRider ? previousRider.save() : Promise.resolve(),
+    ]);
+
+    if (orderResult.modifiedCount === 0 && orderResult.matchedCount === 0) {
+      throw new Error(`Order ${orderId} not found for update`);
     }
-    await Promise.all(savePromises);
   } catch (saveError) {
     logger.error('Error saving order/rider assignment:', saveError);
-    // If save fails, attempt to rollback changes (best effort)
-    // In production, consider using MongoDB transactions for true atomicity
     throw new Error(`Failed to save assignment: ${saveError.message}`);
   }
 
-  // Populate rider info in response
-  const updatedOrder = order.toObject ? order.toObject() : { ...order };
-  
-  // Ensure all required fields are present
+  // Sync to RiderV2Order so rider app list API returns this order, and push WebSocket for real-time update
+  try {
+    const orderIdVal = String(orderDoc.id || orderDoc.order_id || orderId);
+    const pickupRaw = orderDoc.pickupLocation || orderDoc.store_id || 'Hub';
+    const dropRaw = orderDoc.dropLocation || orderDoc.delivery_address || '';
+    const zoneVal = orderDoc.zone || '';
+
+    // Extract strings from pickup/drop (warehouse/darkstore may use objects)
+    const darkstoreCode = typeof pickupRaw === 'string'
+      ? pickupRaw
+      : (pickupRaw && typeof pickupRaw === 'object' && (pickupRaw.address || pickupRaw.addressLine1 || pickupRaw.store_id))
+        ? String(pickupRaw.address || pickupRaw.addressLine1 || pickupRaw.store_id || 'Hub')
+        : 'Hub';
+    const dropStr = typeof dropRaw === 'string'
+      ? dropRaw
+      : (dropRaw && typeof dropRaw === 'object' && (dropRaw.address || dropRaw.addressLine1 || dropRaw.delivery_address))
+        ? String(dropRaw.address || dropRaw.addressLine1 || dropRaw.delivery_address || '')
+        : '';
+    const addressLine1 = (dropStr && dropStr.trim()) ? dropStr.trim() : 'Delivery address';
+    const cityStr = (zoneVal && typeof zoneVal === 'string') ? zoneVal.trim() : '';
+
+    const customerPhoneNumber = (orderDoc.customer_phone && String(orderDoc.customer_phone).trim())
+      ? String(orderDoc.customer_phone).trim()
+      : '0000000000'; // RiderV2Order requires non-empty; use placeholder when missing
+
+    const rawItems = orderDoc.items || [];
+    const itemsForRiderV2 = Array.isArray(rawItems)
+      ? rawItems.map((it, i) => {
+          const isObj = it && typeof it === 'object';
+          return {
+            skuId: isObj ? (it.skuId || it.productName || `item-${i}`) : String(it || `item-${i}`),
+            productName: isObj ? (it.productName || it.name || '') : String(it || ''),
+            quantity: isObj ? (it.quantity || 1) : 1,
+            unit: isObj ? (it.unit || 'pc') : 'pc',
+            pricePerUnit: isObj ? (it.pricePerUnit || it.price || 0) : 0,
+            totalPrice: isObj ? (it.totalPrice || (it.price || 0) * (it.quantity || 1)) : 0,
+          };
+        })
+      : [{ skuId: 'item-0', productName: 'Order item', quantity: 1, unit: 'pc', pricePerUnit: 0, totalPrice: 0 }];
+    if (itemsForRiderV2.length === 0) {
+      itemsForRiderV2.push({ skuId: 'item-0', productName: 'Order item', quantity: 1, unit: 'pc', pricePerUnit: 0, totalPrice: 0 });
+    }
+
+    const riderAssignment = { riderId: effectiveRiderId, assignedAt: new Date() };
+    const scheduledTimeRaw = orderDoc.delivery?.scheduledTime || orderDoc.scheduled_time || orderDoc.scheduledTime;
+    const scheduledTime = scheduledTimeRaw ? new Date(scheduledTimeRaw) : null;
+    const deliverySlot = orderDoc.delivery?.slot || orderDoc.delivery_slot || 'asap';
+    const metadata = { etaMinutes: etaMins, estimatedDistanceKm: Math.round((etaMins / 4) * 10) / 10 };
+
+    const existing = await RiderV2Order.findOne({ orderNumber: orderIdVal }).lean();
+    if (existing) {
+      const updatePayload = {
+        status: 'assigned',
+        riderAssignment,
+        'metadata.etaMinutes': etaMins,
+        'metadata.estimatedDistanceKm': metadata.estimatedDistanceKm,
+      };
+      if (scheduledTime) updatePayload['delivery.scheduledTime'] = scheduledTime;
+      if (deliverySlot) updatePayload['delivery.slot'] = deliverySlot;
+      const updateResult = await RiderV2Order.updateOne(
+        { orderNumber: orderIdVal },
+        { $set: updatePayload }
+      );
+      logger.info('[RiderV2Order] Updated existing order', {
+        orderNumber: orderIdVal,
+        riderId: effectiveRiderId,
+        matched: updateResult.matchedCount,
+        modified: updateResult.modifiedCount,
+      });
+    } else {
+      const deliveryPayload = {
+        address: {
+          addressLine1,
+          city: cityStr || 'NA',
+          state: 'NA',
+          pincode: 'NA',
+        },
+        slot: deliverySlot || 'asap',
+      };
+      if (scheduledTime) deliveryPayload.scheduledTime = scheduledTime;
+
+      await RiderV2Order.create({
+        orderNumber: orderIdVal,
+        customerPhoneNumber,
+        darkstoreCode,
+        items: itemsForRiderV2,
+        delivery: deliveryPayload,
+        payment: { method: 'cod', status: 'pending', amount: 0 },
+        pricing: { subtotal: 0, deliveryFee: 0, discount: 0, tax: 0, total: 0 },
+        status: 'assigned',
+        riderAssignment,
+        metadata,
+      });
+      logger.info('[RiderV2Order] Created new order', { orderNumber: orderIdVal, riderId: effectiveRiderId });
+    }
+
+    const riderCacheHelper = require('../../rider_v2_backend/src/utils/riderCacheHelper.js');
+    if (riderCacheHelper && typeof riderCacheHelper.invalidateOrdersForRider === 'function') {
+      await riderCacheHelper.invalidateOrdersForRider();
+    }
+
+    const webSocketService = require('../../rider_v2_backend/src/modules/websocket/websocket.service.js').webSocketService;
+    if (webSocketService && typeof webSocketService.notifyOrderAssignment === 'function') {
+      webSocketService.notifyOrderAssignment(effectiveRiderId, {
+        orderId: orderIdVal,
+        orderNumber: orderIdVal,
+        riderId: effectiveRiderId,
+        status: 'assigned',
+        etaMinutes: etaMins,
+      });
+    }
+  } catch (syncErr) {
+    logger.error('[RiderV2Order] Sync failed - rider app will not see this order', {
+      orderId: orderDoc.id || orderDoc.order_id || orderId,
+      riderId: effectiveRiderId,
+      error: syncErr.message,
+      stack: syncErr.stack,
+    });
+  }
+
+  // Build response from orderDoc + updates (schema-agnostic)
+  const orderIdVal = orderDoc.id || orderDoc.order_id || orderId;
+  const baseTimeline = orderDoc.timeline || [];
+  const newTimelineEntry = { status: 'assigned', time: new Date(), note: timelineNote };
   const responseOrder = {
-    id: updatedOrder.id,
-    status: updatedOrder.status,
-    riderId: updatedOrder.riderId,
-    etaMinutes: updatedOrder.etaMinutes,
-    slaDeadline: updatedOrder.slaDeadline,
-    pickupLocation: updatedOrder.pickupLocation,
-    dropLocation: updatedOrder.dropLocation,
-    customerName: updatedOrder.customerName,
-    items: updatedOrder.items || [],
-    timeline: updatedOrder.timeline || [],
-    zone: updatedOrder.zone || null,
+    id: orderIdVal,
+    status: 'assigned',
+    riderId: effectiveRiderId,
+    etaMinutes: etaMins,
+    slaDeadline: slaDeadline || orderDoc.slaDeadline || orderDoc.sla_deadline,
+    pickupLocation: orderDoc.pickupLocation || orderDoc.store_id || null,
+    dropLocation: orderDoc.dropLocation || orderDoc.delivery_address || null,
+    customerName: orderDoc.customerName || orderDoc.customer_name || null,
+    items: orderDoc.items || [],
+    timeline: [...baseTimeline, newTimelineEntry],
+    zone: orderDoc.zone || null,
     rider: {
       id: rider.id,
       name: rider.name,

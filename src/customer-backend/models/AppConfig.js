@@ -91,6 +91,20 @@ const appConfigSchema = new mongoose.Schema(
 
     supportCategories: [supportCategorySchema],
 
+    support: {
+      contactPhone: { type: String, default: '+919999999999' },
+      contactEmail: { type: String, default: 'support@selorg.com' },
+    },
+
+    payment: {
+      upiMerchantId: { type: String, default: 'merchant@upi' },
+      upiMerchantName: { type: String, default: 'SelOrg' },
+    },
+
+    images: {
+      placeholderUrl: { type: String, default: 'https://placehold.co/200x200?text=No+Image' },
+    },
+
     search: {
       placeholder: { type: String, default: 'Search products...' },
       popularSearches: [{ type: String }],
@@ -185,6 +199,17 @@ const DEFAULT_APP_CONFIG = {
     isActive: false,
     message: 'We are upgrading our systems. Please check back shortly.',
     estimatedEndTime: null,
+  },
+  support: {
+    contactPhone: '+919999999999',
+    contactEmail: 'support@selorg.com',
+  },
+  payment: {
+    upiMerchantId: 'merchant@upi',
+    upiMerchantName: 'SelOrg',
+  },
+  images: {
+    placeholderUrl: 'https://placehold.co/200x200?text=No+Image',
   },
   supportCategories: [
     { key: 'contact_support', label: 'Contact Support', description: 'Get in touch with our team', icon: 'phone', isActive: true, order: 0 },

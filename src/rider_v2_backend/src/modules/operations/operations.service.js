@@ -7,7 +7,11 @@ Object.defineProperty(exports, "__esModule", {
 exports.updateInventoryItem = exports.getWarehouses = exports.getInventoryItem = exports.getInventory = exports.getFulfillmentTasks = exports.advanceFulfillmentTask = void 0;
 var _Inventory = require("../../models/Inventory.js");
 var _Warehouse = require("../../models/Warehouse.js");
+var _Zone = require("../../../../merch/models/Zone.js");
+var _distanceCalculator = require("../../../../utils/distanceCalculator.js");
+var _nodeFetch = _interopRequireDefault(require("node-fetch"));
 var _FulfillmentTask = require("../../models/FulfillmentTask.js");
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
 var _Rider = require("../../models/Rider.js");
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
@@ -254,99 +258,108 @@ var advanceFulfillmentTask = exports.advanceFulfillmentTask = /*#__PURE__*/funct
   };
 }();
 var getWarehouses = exports.getWarehouses = /*#__PURE__*/function () {
-  var _ref6 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee7() {
-    var warehouses, summaries;
+  var _ref6 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee7(params) {
+    var lat, lng, zones, hubs, apiKey, origins, destinations, response, data;
     return _regenerator().w(function (_context7) {
       while (1) switch (_context7.n) {
         case 0:
+          lat = params && params.latitude ? parseFloat(params.latitude) : null;
+          lng = params && params.longitude ? parseFloat(params.longitude) : null;
           _context7.n = 1;
-          return _Warehouse.Warehouse.find({
-            isActive: true
+          return _Zone.find({
+            status: {
+              $in: ["Active", "active"]
+            }
           }).lean();
         case 1:
-          warehouses = _context7.v;
-          _context7.n = 2;
-          return Promise.all(warehouses.map(/*#__PURE__*/function () {
-            var _ref7 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee6(warehouse) {
-              var _yield$Promise$all, _yield$Promise$all2, inventoryStats, activeRiders, openTasks, stats;
-              return _regenerator().w(function (_context6) {
-                while (1) switch (_context6.n) {
-                  case 0:
-                    _context6.n = 1;
-                    return Promise.all([_Inventory.InventoryItem.aggregate([{
-                      $match: {
-                        warehouseCode: warehouse.code
-                      }
-                    }, {
-                      $group: {
-                        _id: null,
-                        totalSkus: {
-                          $sum: 1
-                        },
-                        lowStock: {
-                          $sum: {
-                            $cond: [{
-                              $eq: ["$status", "low"]
-                            }, 1, 0]
-                          }
-                        },
-                        damaged: {
-                          $sum: {
-                            $cond: [{
-                              $eq: ["$status", "damaged"]
-                            }, 1, 0]
-                          }
-                        }
-                      }
-                    }]), _Rider.Rider.countDocuments({
-                      "currentShift.warehouseCode": warehouse.code,
-                      availability: {
-                        $in: ["available", "busy"]
-                      }
-                    }), _FulfillmentTask.FulfillmentTask.countDocuments({
-                      warehouseCode: warehouse.code,
-                      status: {
-                        $in: ["pending", "in_progress", "blocked"]
-                      }
-                    })]);
-                  case 1:
-                    _yield$Promise$all = _context6.v;
-                    _yield$Promise$all2 = _slicedToArray(_yield$Promise$all, 3);
-                    inventoryStats = _yield$Promise$all2[0];
-                    activeRiders = _yield$Promise$all2[1];
-                    openTasks = _yield$Promise$all2[2];
-                    stats = inventoryStats[0] || {
-                      totalSkus: 0,
-                      lowStock: 0,
-                      damaged: 0
-                    };
-                    return _context6.a(2, {
-                      code: warehouse.code,
-                      name: warehouse.name,
-                      region: warehouse.region,
-                      utilization: warehouse.capacity.total > 0 ? warehouse.capacity.used / warehouse.capacity.total : 0,
-                      activeRiders: activeRiders,
-                      openTasks: openTasks,
-                      inventoryHealth: {
-                        totalSkus: stats.totalSkus,
-                        lowStock: stats.lowStock,
-                        damaged: stats.damaged
-                      }
-                    });
+          zones = _context7.v;
+          console.log('[OperationsService] Found active zones:', zones.length);
+          if (!(lat && lng && zones.length > 0)) {
+            _context7.n = 10;
+            break;
+          }
+          zones.forEach(function (z) {
+            if (z.center && z.center.lat && z.center.lng) {
+              z.straightDistance = (0, _distanceCalculator.calculateDistance)(lat, lng, z.center.lat, z.center.lng);
+            } else {
+              z.straightDistance = Infinity;
+            }
+          });
+          zones.sort(function (a, b) {
+            return a.straightDistance - b.straightDistance;
+          });
+          apiKey = process.env.GOOGLE_MAPS_API_KEY;
+          if (!apiKey) {
+            _context7.n = 8;
+            break;
+          }
+          _context7.p = 1;
+          origins = "".concat(lat, ",").concat(lng);
+          // Only send zones that have a center to the Distance Matrix API
+          var zonesWithCenter = zones.slice(0, 10).filter(function (z) {
+            return z.center && z.center.lat && z.center.lng;
+          });
+          if (zonesWithCenter.length === 0) {
+            _context7.n = 8;
+            break;
+          }
+          destinations = zonesWithCenter.map(function (z) {
+            return "".concat(z.center.lat, ",").concat(z.center.lng);
+          }).join("|");
+          _context7.n = 5;
+          return (0, _nodeFetch["default"])("https://maps.googleapis.com/maps/api/distancematrix/json?origins=".concat(origins, "&destinations=").concat(destinations, "&key=").concat(apiKey));
+        case 5:
+          response = _context7.v;
+          _context7.n = 6;
+          return response.json();
+        case 6:
+          data = _context7.v;
+          if (data.status === "OK" && data.rows && data.rows[0]) {
+            console.log('[OperationsService] Distance Matrix data status OK. Elements:', data.rows[0].elements.length);
+            for (var i = 0; i < data.rows[0].elements.length; i++) {
+              var element = data.rows[0].elements[i];
+              if (zonesWithCenter && zonesWithCenter[i]) {
+                if (element.status === "OK" && element.distance) {
+                  zonesWithCenter[i].googleDistance = element.distance.value / 1000;
+                  zonesWithCenter[i].googleDistanceText = element.distance.text;
+                } else {
+                  console.log(`[OperationsService] Element ${i} status: ${element.status}`);
+                  zonesWithCenter[i].googleDistance = zonesWithCenter[i].straightDistance;
                 }
-              }, _callee6);
-            }));
-            return function (_x6) {
-              return _ref7.apply(this, arguments);
+              }
+            }
+            zones.sort(function (a, b) {
+              return (a.googleDistance || a.straightDistance) - (b.googleDistance || b.straightDistance);
+            });
+          } else {
+            console.log('[OperationsService] Distance Matrix failed or returned no data:', data.status);
+          }
+        case 8:
+          _context7.n = 10;
+          break;
+        case 10:
+          hubs = (lat && lng ? zones.slice(0, 5) : zones).map(function (z) {
+            return {
+              code: z.code || z._id.toString(),
+              name: z.name,
+              address: z.city || "—",
+              city: z.city || "—",
+              state: z.region || "—",
+              pincode: "",
+              distance: z.googleDistanceText || (z.straightDistance !== undefined && z.straightDistance !== Infinity ? "".concat(z.straightDistance.toFixed(1), " km") : "—"),
+              hubId: z.code || z._id.toString().substring(0, 8),
+              dispatchBays: "—",
+              coordinates: z.center ? {
+                lat: z.center.lat,
+                lng: z.center.lng
+              } : null
             };
-          }()));
-        case 2:
-          summaries = _context7.v;
-          return _context7.a(2, summaries);
+          });
+          return _context7.a(2, hubs);
       }
     }, _callee7);
   }));
-  return function getWarehouses() {
+  return function getWarehouses(_x6) {
     return _ref6.apply(this, arguments);
   };
 }();

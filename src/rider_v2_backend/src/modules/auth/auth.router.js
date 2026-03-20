@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.authRouter = void 0;
 var _express = require("express");
+var _multer = _interopRequireDefault(require("multer"));
 var _zod = require("zod");
 var _authenticate = require("../../middleware/authenticate.js");
 var _rateLimiter = require("../../middleware/rateLimiter.js");
@@ -13,6 +14,7 @@ var _authService = require("./auth.service.js");
 var _authSchema = require("./auth.schema.js");
 var _riderService = require("../delivery/rider.service.js");
 var _mfaService = require("./mfa.service.js");
+function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -23,6 +25,12 @@ function _regeneratorDefine2(e, r, n, t) { var i = Object.defineProperty; try { 
 function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
 function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
 var authRouter = exports.authRouter = (0, _express.Router)();
+var upload = (0, _multer["default"])({
+  storage: _multer["default"].memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 // Apply strict rate limiting to OTP endpoints
 authRouter.post("/send-otp", _rateLimiter.otpLimiter, /*#__PURE__*/function () {
@@ -227,6 +235,183 @@ authRouter.get("/me", _authenticate.authenticate, /*#__PURE__*/function () {
   }));
   return function (_x9, _x0) {
     return _ref5.apply(this, arguments);
+  };
+}());
+
+authRouter.get("/onboarding/state", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refOnboardingState = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeOnboardingState(req, res) {
+    var state, _tOnboardingState;
+    return _regenerator().w(function (_contextOnboardingState) {
+      while (1) switch (_contextOnboardingState.p = _contextOnboardingState.n) {
+        case 0:
+          if (req.user) {
+            _contextOnboardingState.n = 1;
+            break;
+          }
+          res.status(401).json({
+            error: "Unauthorized"
+          });
+          return _contextOnboardingState.a(2);
+        case 1:
+          _contextOnboardingState.p = 1;
+          _contextOnboardingState.n = 2;
+          return (0, _authService.getOnboardingState)(req.user.id);
+        case 2:
+          state = _contextOnboardingState.v;
+          res.json(_objectSpread({
+            success: true
+          }, state));
+          _contextOnboardingState.n = 4;
+          break;
+        case 3:
+          _contextOnboardingState.p = 3;
+          _tOnboardingState = _contextOnboardingState.v;
+          console.error("Failed to get onboarding state:", _tOnboardingState);
+          res.status(500).json({
+            error: "Failed to get onboarding state"
+          });
+        case 4:
+          return _contextOnboardingState.a(2);
+      }
+    }, _calleeOnboardingState, null, [[1, 3]]);
+  }));
+  return function (req, res) {
+    return _refOnboardingState.apply(this, arguments);
+  };
+}());
+
+authRouter.post("/onboarding/complete-training", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refCompleteTraining = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeCompleteTraining(req, res) {
+    var result, _tCompleteTraining;
+    return _regenerator().w(function (_contextCompleteTraining) {
+      while (1) switch (_contextCompleteTraining.p = _contextCompleteTraining.n) {
+        case 0:
+          if (req.user) {
+            _contextCompleteTraining.n = 1;
+            break;
+          }
+          res.status(401).json({
+            error: "Unauthorized"
+          });
+          return _contextCompleteTraining.a(2);
+        case 1:
+          _contextCompleteTraining.p = 1;
+          _contextCompleteTraining.n = 2;
+          return (0, _authService.completeTraining)(req.user.id);
+        case 2:
+          result = _contextCompleteTraining.v;
+          res.json(_objectSpread({
+            success: true
+          }, result));
+          _contextCompleteTraining.n = 4;
+          break;
+        case 3:
+          _contextCompleteTraining.p = 3;
+          _tCompleteTraining = _contextCompleteTraining.v;
+          console.error("Failed to complete training:", _tCompleteTraining);
+          res.status(500).json({
+            error: "Failed to complete training"
+          });
+        case 4:
+          return _contextCompleteTraining.a(2);
+      }
+    }, _calleeCompleteTraining, null, [[1, 3]]);
+  }));
+  return function (req, res) {
+    return _refCompleteTraining.apply(this, arguments);
+  };
+}());
+
+authRouter.post("/onboarding/kit-status", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refKitStatus = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeKitStatus(req, res) {
+    var result, _tKitStatus;
+    return _regenerator().w(function (_contextKitStatus) {
+      while (1) switch (_contextKitStatus.p = _contextKitStatus.n) {
+        case 0:
+          if (req.user) {
+            _contextKitStatus.n = 1;
+            break;
+          }
+          res.status(401).json({
+            error: "Unauthorized"
+          });
+          return _contextKitStatus.a(2);
+        case 1:
+          _contextKitStatus.p = 1;
+          _contextKitStatus.n = 2;
+          return (0, _authService.updateKitStatus)(req.user.id, req.body.checkedItemIds || []);
+        case 2:
+          result = _contextKitStatus.v;
+          res.json(_objectSpread({
+            success: true
+          }, result));
+          _contextKitStatus.n = 4;
+          break;
+        case 3:
+          _contextKitStatus.p = 3;
+          _tKitStatus = _contextKitStatus.v;
+          console.error("Failed to update kit status:", _tKitStatus);
+          res.status(500).json({
+            error: "Failed to update kit status"
+          });
+        case 4:
+          return _contextKitStatus.a(2);
+      }
+    }, _calleeKitStatus, null, [[1, 3]]);
+  }));
+  return function (req, res) {
+    return _refKitStatus.apply(this, arguments);
+  };
+}());
+authRouter.post("/profile-photo", _authenticate.authenticate, upload.single("file"), /*#__PURE__*/function () {
+  var _refProfilePhoto = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeProfilePhoto(req, res) {
+    var profilePicture, _tProfilePhoto;
+    return _regenerator().w(function (_contextProfilePhoto) {
+      while (1) switch (_contextProfilePhoto.p = _contextProfilePhoto.n) {
+        case 0:
+          if (req.user) {
+            _contextProfilePhoto.n = 1;
+            break;
+          }
+          res.status(401).json({
+            error: "Unauthorized"
+          });
+          return _contextProfilePhoto.a(2);
+        case 1:
+          if (req.file) {
+            _contextProfilePhoto.n = 2;
+            break;
+          }
+          res.status(400).json({
+            error: "No file uploaded"
+          });
+          return _contextProfilePhoto.a(2);
+        case 2:
+          _contextProfilePhoto.p = 2;
+          _contextProfilePhoto.n = 3;
+          return (0, _authService.uploadProfilePhoto)(req.user.id, req.file.buffer, req.file.mimetype, req.file.originalname);
+        case 3:
+          profilePicture = _contextProfilePhoto.v;
+          res.json({
+            success: true,
+            profilePicture: profilePicture
+          });
+          _contextProfilePhoto.n = 5;
+          break;
+        case 4:
+          _contextProfilePhoto.p = 4;
+          _tProfilePhoto = _contextProfilePhoto.v;
+          console.error("Profile photo upload failed:", _tProfilePhoto);
+          res.status(500).json({
+            error: "Failed to upload profile photo"
+          });
+        case 5:
+          return _contextProfilePhoto.a(2);
+      }
+    }, _calleeProfilePhoto, null, [[2, 4]]);
+  }));
+  return function (_xProfilePhotoReq, _xProfilePhotoRes) {
+    return _refProfilePhoto.apply(this, arguments);
   };
 }());
 

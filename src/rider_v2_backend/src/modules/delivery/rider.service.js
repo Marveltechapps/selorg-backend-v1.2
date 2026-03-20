@@ -4,10 +4,12 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.uploadDocument = exports.updateRiderPreferredLocation = exports.updateRiderProfile = exports.updateRiderLocation = exports.startShift = exports.setAvailability = exports.getRiderStats = exports.getRiderByPhone = exports.getRiderById = exports.endShift = exports.createRider = void 0;
+exports.uploadDocument = exports.getCities = exports.updateRiderPreferredLocation = exports.updateRiderProfile = exports.updateRiderLocation = exports.startShift = exports.setAvailability = exports.getRiderStats = exports.getRiderByPhone = exports.getRiderById = exports.endShift = exports.createRider = void 0;
 var _nodeCrypto = require("node:crypto");
 var _Rider = require("../../models/Rider.js");
 var _Order = require("../../models/Order.js");
+var _City = _interopRequireDefault(require("../../../../merch/models/City.js"));
+function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 var _riderCacheHelper = require("../../utils/riderCacheHelper.js");
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
@@ -20,7 +22,7 @@ function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.
 function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
 var createRider = exports.createRider = /*#__PURE__*/function () {
   var _ref = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee(input) {
-    var existing, riderId, rider, _t;
+    var existing, now, yearMonth, storeId, storeCode, parts, prefix, lastRider, lastSequence, newSequence, riderId, rider, _t;
     return _regenerator().w(function (_context) {
       while (1) switch (_context.p = _context.n) {
         case 0:
@@ -39,7 +41,31 @@ var createRider = exports.createRider = /*#__PURE__*/function () {
             isNew: false
           });
         case 2:
-          riderId = "rider-".concat((0, _nodeCrypto.randomUUID)().slice(0, 8));
+          // Pro tip: RDR-[Store]-[YYMM]-[Sequence]
+          now = new Date();
+          yearMonth = now.getFullYear().toString().slice(-2) + (now.getMonth() + 1).toString().padStart(2, '0');
+          storeId = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+          storeCode = 'GEN';
+          parts = storeId.split('-');
+          if (parts.length >= 2) {
+            storeCode = parts[1].slice(0, 3).toUpperCase();
+          }
+          prefix = "RDR-".concat(storeCode, "-").concat(yearMonth, "-");
+          
+          // Find last rider with this prefix to increment sequence
+          _context.n = 3;
+          return _Rider.Rider.findOne({
+            riderId: new RegExp("^" + prefix)
+          }).sort({ riderId: -1 }).lean();
+        case 3:
+          lastRider = _context.v;
+          lastSequence = 0;
+          if (lastRider && lastRider.riderId) {
+            newSequence = lastRider.riderId.split('-').pop();
+            lastSequence = parseInt(newSequence) || 0;
+          }
+          riderId = "".concat(prefix).concat(String(lastSequence + 1).padStart(3, '0'));
+
           rider = new _Rider.Rider({
             riderId: riderId,
             name: input.name,
@@ -293,8 +319,9 @@ var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
           if (updates.name) update.name = updates.name;
           if (updates.email !== undefined) update.email = updates.email;
           if (updates.vehicle) {
-            update["vehicle.registrationNumber"] = updates.vehicle.registrationNumber;
-            update["vehicle.model"] = updates.vehicle.model;
+            if (updates.vehicle.type) update["vehicle.type"] = updates.vehicle.type;
+            if (updates.vehicle.registrationNumber) update["vehicle.registrationNumber"] = updates.vehicle.registrationNumber;
+            if (updates.vehicle.model) update["vehicle.model"] = updates.vehicle.model;
           }
           if (updates.bankDetails) {
             update["bankDetails.accountNumber"] = updates.bankDetails.accountNumber;
@@ -345,6 +372,109 @@ var updateRiderPreferredLocation = exports.updateRiderPreferredLocation = /*#__P
     return _ref10.apply(this, arguments);
   };
 }();
+var getCities = exports.getCities = /*#__PURE__*/function () {
+  var _refCities = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeCities(params) {
+    var search, isActive, page, limit, filter, s, skip, limitNum, _yield$Promise$all, cities, total, totalPages;
+    return _regenerator().w(function (_contextCities) {
+      while (1) switch (_contextCities.p = _contextCities.n) {
+        case 0:
+          search = params.search, isActive = params.isActive, page = params.page, limit = params.limit;
+          filter = {};
+          if (isActive !== undefined && isActive !== '') {
+            filter.isActive = isActive === 'true' || isActive === true;
+          }
+          if (search && search.trim()) {
+            s = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            filter.$or = [{ name: { $regex: s, $options: 'i' } }, { code: { $regex: s, $options: 'i' } }];
+          }
+          skip = Math.max(0, (parseInt(page || 1, 10) - 1) * parseInt(limit || 50, 10));
+          limitNum = Math.min(100, Math.max(1, parseInt(limit || 50, 10)));
+          _contextCities.n = 1;
+          return Promise.all([
+            _City["default"].find(filter).sort({ name: 1 }).skip(skip).limit(limitNum).lean(),
+            _City["default"].countDocuments(filter)
+          ]);
+        case 1:
+          _yield$Promise$all = _contextCities.v;
+          cities = _yield$Promise$all[0];
+          total = _yield$Promise$all[1];
+          totalPages = Math.ceil(total / limitNum);
+          return _contextCities.a(2, {
+            success: true,
+            data: cities.map(function (c) {
+              return {
+                id: c._id.toString(),
+                _id: c._id,
+                code: c.code,
+                name: c.name,
+                state: c.state,
+                country: c.country,
+                isActive: c.isActive,
+                createdAt: c.createdAt,
+                updatedAt: c.updatedAt
+              };
+            }),
+            pagination: { page: parseInt(page || 1, 10), limit: limitNum, total: total, totalPages: totalPages }
+          });
+      }
+    }, _calleeCities);
+  }));
+  return function getCities(_xCities) {
+    return _refCities.apply(this, arguments);
+  };
+}();
+
+// List riders for dashboard / delivery views from riders_v2 collection.
+// Returns a lightweight shape compatible with /delivery/riders expectations.
+var listRiders = /*#__PURE__*/function () {
+  var _refList = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeList() {
+    var docs;
+    return _regenerator().w(function (_contextList) {
+      while (1) switch (_contextList.n) {
+        case 0:
+          // For dashboard assignment we want all operational riders who can work today.
+          // Include:
+          // - status: 'approved' or 'active' (fully onboarded)
+          // - status: 'pending' but already verified (early access like Giridharan)
+          // The dashboard will then filter further by availability/zone/etc.
+          _contextList.n = 1;
+          return _Rider.Rider.find({
+            $or: [
+              { status: { $in: ["approved", "active"] } },
+              { status: "pending", isVerified: true }
+            ]
+          }).lean();
+        case 1:
+          docs = _contextList.v;
+          return _contextList.a(2, docs.map(function (doc) {
+            var _doc$currentLocation, _doc$currentLocation2;
+            return {
+              id: doc.riderId,
+              name: doc.name,
+              phoneNumber: doc.phoneNumber,
+              // Map operational availability ('available' | 'busy' | 'offline') into status field
+              status: doc.availability || "offline",
+              // Current order assignment is managed by dispatch stack; default to null here.
+              currentOrderId: null,
+              location: doc.currentLocation ? {
+                lat: (_doc$currentLocation = doc.currentLocation.lat) !== null && _doc$currentLocation !== void 0 ? _doc$currentLocation : 0,
+                lng: (_doc$currentLocation2 = doc.currentLocation.lng) !== null && _doc$currentLocation2 !== void 0 ? _doc$currentLocation2 : 0
+              } : null,
+              capacity: {
+                currentLoad: 0,
+                maxLoad: 5
+              },
+              avgEtaMins: 0
+            };
+          }));
+      }
+    }, _calleeList);
+  }));
+  return function listRiders() {
+    return _refList.apply(this, arguments);
+  };
+}();
+exports.listRiders = listRiders;
 var uploadDocument = exports.uploadDocument = /*#__PURE__*/function () {
   var _ref0 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee0(riderId, documentType, documentUrl) {
     var updateField, rider;

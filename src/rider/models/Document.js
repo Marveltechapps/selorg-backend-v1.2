@@ -48,7 +48,7 @@ const DocumentSchema = new mongoose.Schema({
   riderId: {
     type: String,
     required: true,
-    match: /^RIDER-\d+$/,
+    match: /^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/,
     index: true,
   },
   riderName: {

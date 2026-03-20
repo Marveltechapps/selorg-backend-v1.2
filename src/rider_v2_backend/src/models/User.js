@@ -20,4 +20,4 @@ var UserSchema = new _mongoose.Schema({
 }, {
   timestamps: true
 });
-var User = exports.User = _mongoose["default"].model("User", UserSchema);
+var User = exports.User = _mongoose["default"].models.User || _mongoose["default"].model("User", UserSchema);

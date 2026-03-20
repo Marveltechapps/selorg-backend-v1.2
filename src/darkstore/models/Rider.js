@@ -54,5 +54,5 @@ const riderSchema = new mongoose.Schema(
 riderSchema.index({ rider_id: 1 });
 riderSchema.index({ store_id: 1, status: 1 });
 
-module.exports = mongoose.models.Rider || mongoose.model('Rider', riderSchema);
+module.exports = mongoose.models.DarkstoreRider || mongoose.model('DarkstoreRider', riderSchema);
 

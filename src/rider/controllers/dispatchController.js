@@ -296,6 +296,96 @@ const updateAutoAssignRule = async (req, res, next) => {
   }
 };
 
+/**
+ * Group orders into clusters based on distance
+ */
+const groupOrders = async (req, res, next) => {
+  try {
+    const filters = {
+      status: req.query.status, // Can be 'all', 'pending', etc.
+      radius: parseFloat(req.query.radius) || 2,
+      minSize: parseInt(req.query.minSize) || 2,
+      maxSize: parseInt(req.query.maxSize) || 10,
+    };
+
+    const result = await dispatchService.groupOrders(filters);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Save clusters to backend
+ */
+const saveClusters = async (req, res, next) => {
+  try {
+    const { clusters } = req.body;
+    if (!clusters || !Array.isArray(clusters)) {
+      return res.status(400).json({ error: 'Clusters array is required' });
+    }
+    
+    const result = await dispatchService.saveClusters(clusters);
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * List saved clusters
+ */
+const listClusters = async (req, res, next) => {
+  try {
+    const filters = {
+      status: req.query.status,
+      zone: req.query.zone,
+    };
+    
+    const result = await dispatchService.listClusters(filters);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete a cluster
+ */
+const deleteCluster = async (req, res, next) => {
+  try {
+    const { clusterId } = req.params;
+    const result = await dispatchService.deleteCluster(clusterId);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Cluster not found' });
+    }
+    
+    res.status(200).json({ message: 'Cluster deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Assign a cluster to a rider
+ */
+const assignCluster = async (req, res, next) => {
+  try {
+    const { clusterId } = req.params;
+    const { riderId } = req.body;
+    
+    if (!riderId) {
+      return res.status(400).json({ error: 'riderId is required' });
+    }
+    
+    const result = await dispatchService.assignClusterToRider(clusterId, riderId);
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   listUnassignedOrders,
   getUnassignedOrdersCount,
@@ -310,4 +400,9 @@ module.exports = {
   createManualOrder,
   getAutoAssignRules,
   updateAutoAssignRule,
+  groupOrders,
+  saveClusters,
+  listClusters,
+  deleteCluster,
+  assignCluster,
 };

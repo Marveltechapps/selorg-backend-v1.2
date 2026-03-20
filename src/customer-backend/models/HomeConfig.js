@@ -21,11 +21,13 @@ const homeConfigSchema = new mongoose.Schema(
   {
     key: { type: String, default: 'main', unique: true },
     heroVideoUrl: String,
-    searchPlaceholder: String,
+    searchPlaceholder: { type: String, default: 'Search for Dal, Milk…' },
     deliveryTypeLabel: String,
-    categorySectionTitle: String,
-    organicTagline: String,
-    organicIconUrl: String,
+    deliveryLabel: { type: String, default: '10-min delivery' },
+    categorySectionTitle: { type: String, default: 'Grocery & Kitchen' },
+    organicTagline: { type: String, default: '' },
+    organicIconUrl: { type: String, default: '' },
+    trendingSearches: [{ type: String }],
     sectionOrder: { type: [String], default: [] },
     sectionVisibility: { type: Object, default: {} },
     /** Section keys with display labels for admin UI. Defaults to VALID_SECTION_KEYS with human-readable labels. */
@@ -39,15 +41,24 @@ const homeConfigSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+homeConfigSchema.path('trendingSearches').validate(function validateTrending(v) {
+  return !Array.isArray(v) || v.length <= 10;
+}, 'trendingSearches cannot exceed 10 items');
+
+const KEY_PREFIX_PATTERN = /^(collections|deals|wellbeing|banner_main|banner_sub|section)_[a-zA-Z0-9_-]+$/;
+
 /** Validate section keys against allowlist. Use in controller before update. */
 function validateSectionKeys(keys) {
   if (!Array.isArray(keys)) return true;
-  return keys.every((k) => typeof k === 'string' && VALID_SECTION_KEYS_SET.has(k));
+  return keys.every((k) => {
+    if (typeof k !== 'string') return false;
+    return VALID_SECTION_KEYS_SET.has(k) || KEY_PREFIX_PATTERN.test(k);
+  });
 }
 
 function validateSectionDefinitions(defs) {
   if (!Array.isArray(defs)) return true;
-  return defs.every((d) => d && typeof d.key === 'string' && VALID_SECTION_KEYS_SET.has(d.key));
+  return defs.every((d) => d && typeof d.key === 'string' && (VALID_SECTION_KEYS_SET.has(d.key) || KEY_PREFIX_PATTERN.test(d.key)));
 }
 const HomeConfig = mongoose.models.CustomerHomeConfig || mongoose.model('CustomerHomeConfig', homeConfigSchema, 'customer_home_configs');
 module.exports = {

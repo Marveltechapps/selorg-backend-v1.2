@@ -7,7 +7,7 @@
  exports.riderRouter = void 0;
  var _express = require("express");
  var _zod = require("zod");
- var riderService = _interopRequireWildcard(require("./rider.service.js"));
+var riderService = _interopRequireWildcard(require("./rider.service.js"));
  var homeService = _interopRequireWildcard(require("./home.service.js"));
  var _authenticate = require("../../middleware/authenticate.js");
  function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, "default": e }; if (null === e || "object" != _typeof(e) && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t0 in e) "default" !== _t0 && {}.hasOwnProperty.call(e, _t0) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t0)) && (i.get || i.set) ? o(f, _t0, i) : f[_t0] = e[_t0]); return f; })(e, t); }
@@ -19,7 +19,7 @@ var createRiderSchema = _zod.z.object({
   name: _zod.z.string().min(2),
   phoneNumber: _zod.z.string().regex(/^\+?[1-9]\d{9,14}$/),
   email: _zod.z.string().email().optional(),
-  vehicleType: _zod.z["enum"](["bike", "scooter", "bicycle"])
+  vehicleType: _zod.z["enum"](["bike", "scooter", "cycle", "ev"])
 });
 var updateLocationSchema = _zod.z.object({
   lat: _zod.z.number().min(-90).max(90),
@@ -49,7 +49,7 @@ var preferredLocationSchema = _zod.z.object({
      return _regenerator().w(function (_contextHome) {
        while (1) switch (_contextHome.p = _contextHome.n) {
          case 0:
-           if (req.user && req.user.sub) {
+           if (req.user && req.user.id) {
              _contextHome.n = 1;
              break;
            }
@@ -58,7 +58,7 @@ var preferredLocationSchema = _zod.z.object({
            });
            return _contextHome.a(2);
          case 1:
-           riderId = req.user.sub;
+           riderId = req.user.id;
            _contextHome.p = 1;
            _contextHome.n = 2;
            return homeService.buildRiderHomeView(riderId);
@@ -84,6 +84,60 @@ var preferredLocationSchema = _zod.z.object({
      return _refHome.apply(this, arguments);
    };
  }());
+
+// Public rider list for dashboard / dispatch views.
+// Uses riders_v2 collection via rider.service and returns a
+// lightweight structure that the dashboard expects at /delivery/riders.
+riderRouter.get("/riders", /*#__PURE__*/function () {
+  var _refListRoute = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeListRoute(req, res) {
+    var riders, _tList;
+    return _regenerator().w(function (_contextListRoute) {
+      while (1) switch (_contextListRoute.p = _contextListRoute.n) {
+        case 0:
+          _contextListRoute.p = 0;
+          _contextListRoute.n = 1;
+          return riderService.listRiders();
+        case 1:
+          riders = _contextListRoute.v;
+          res.json({ riders: riders });
+          _contextListRoute.n = 3;
+          break;
+        case 2:
+          _contextListRoute.p = 2;
+          _tList = _contextListRoute.v;
+          console.error("Error listing riders:", _tList);
+          res.status(500).json({ error: "Failed to list riders" });
+        case 3:
+          return _contextListRoute.a(2);
+      }
+    }, _calleeListRoute, null, [[0, 2]]);
+  }));
+  return function (_xListReq, _xListRes) {
+    return _refListRoute.apply(this, arguments);
+  };
+}());
+
+// List cities (used by rider app onboarding)
+riderRouter.get("/cities", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refCitiesRoute = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeCitiesRoute(req, res) {
+    var result;
+    return _regenerator().w(function (_contextCitiesRoute) {
+      while (1) switch (_contextCitiesRoute.p = _contextCitiesRoute.n) {
+        case 0:
+          _contextCitiesRoute.n = 1;
+          return riderService.getCities(req.query);
+        case 1:
+          result = _contextCitiesRoute.v;
+          res.json(result);
+        case 2:
+          return _contextCitiesRoute.a(2);
+      }
+    }, _calleeCitiesRoute);
+  }));
+  return function (_xReq, _xRes) {
+    return _refCitiesRoute.apply(this, arguments);
+  };
+}());
 
 // Create new rider (onboarding)
 riderRouter.post("/riders", /*#__PURE__*/function () {
@@ -555,6 +609,7 @@ var updateProfileSchema = _zod.z.object({
   name: _zod.z.string().min(2).optional(),
   email: _zod.z.string().email().optional(),
   vehicle: _zod.z.object({
+    type: _zod.z.string().optional(),
     registrationNumber: _zod.z.string().optional(),
     model: _zod.z.string().optional()
   }).optional(),

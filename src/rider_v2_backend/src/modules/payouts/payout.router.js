@@ -112,7 +112,7 @@ router.get("/summary", _authenticate.authenticate, /*#__PURE__*/function () {
           return _contextSummary.a(2);
         case 1:
           riderId = req.user.id;
-          period = (req.query.period && ['today', 'week', 'month'].includes(req.query.period)) ? req.query.period : 'today';
+          period = (req.query.period && ['today', 'week', 'month', 'lifetime'].includes(req.query.period)) ? req.query.period : 'today';
           _contextSummary.n = 2;
           return payoutService.getEarningsSummary(riderId, period);
         case 2:

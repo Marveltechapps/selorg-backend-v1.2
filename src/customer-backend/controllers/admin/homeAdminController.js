@@ -2,7 +2,6 @@ const { Category } = require('../../models/Category');
 const { Banner } = require('../../models/Banner');
 const {
   HomeConfig,
-  DEFAULT_SECTION_DEFINITIONS,
   validateSectionKeys,
   validateSectionDefinitions,
 } = require('../../models/HomeConfig');
@@ -14,6 +13,26 @@ const { Product } = require('../../models/Product');
 const { ProductAttribute } = require('../../models/ProductAttribute');
 const { uploadProductImage: uploadProductImageToS3 } = require('../../../utils/s3Upload');
 const { getBootstrapPreviewForAdmin } = require('../../services/bootstrapService');
+const cache = require('../../../utils/cache');
+
+/** Normalize description to embedded object format. Accepts string or object. */
+function normalizeProductDescription(desc) {
+  if (desc == null) return undefined;
+  if (typeof desc === 'string') {
+    const s = desc.trim();
+    return { about: s, nutrition: '', originOfPlace: '', healthBenefits: '', raw: s };
+  }
+  if (typeof desc === 'object' && !Array.isArray(desc)) {
+    return {
+      about: String(desc.about ?? '').trim(),
+      nutrition: String(desc.nutrition ?? '').trim(),
+      originOfPlace: String(desc.originOfPlace ?? '').trim(),
+      healthBenefits: String(desc.healthBenefits ?? '').trim(),
+      raw: String(desc.raw ?? desc.about ?? '').trim(),
+    };
+  }
+  return undefined;
+}
 
 exports.getBootstrapPreview = async (req, res) => {
   try {
@@ -43,6 +62,10 @@ exports.listCategories = async (req, res) => {
     productCount: countMap[item._id.toString()] || 0,
   }));
   res.json({ success: true, data: enriched });
+};
+exports.listCategoryChildren = async (req, res) => {
+  const items = await Category.find({ parentId: req.params.id }).sort({ order: 1 }).lean();
+  res.json({ success: true, data: items });
 };
 function slugify(str) {
   if (!str || typeof str !== 'string') return '';
@@ -116,6 +139,16 @@ exports.deleteCategory = async (req, res) => {
   await Category.findByIdAndDelete(id);
   res.json({ success: true });
 };
+exports.reorderCategories = async (req, res) => {
+  const { orderedIds = [] } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'orderedIds must be a non-empty array' });
+  }
+  await Promise.all(
+    orderedIds.map((id, idx) => Category.updateOne({ _id: id }, { $set: { order: idx + 1 } }))
+  );
+  res.json({ success: true });
+};
 
 exports.listBanners = async (req, res) => {
   const items = await Banner.find().sort({ slot: 1, order: 1 }).lean();
@@ -139,12 +172,23 @@ exports.deleteBanner = async (req, res) => {
   }
   res.json({ success: true });
 };
+exports.reorderBanners = async (req, res) => {
+  const { slot, orderedIds = [] } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'orderedIds must be a non-empty array' });
+  }
+  const filter = slot ? { slot } : {};
+  await Promise.all(
+    orderedIds.map((id, idx) =>
+      Banner.updateOne({ _id: id, ...filter }, { $set: { order: idx + 1 } })
+    )
+  );
+  res.json({ success: true });
+};
 
 exports.getHomeConfig = async (req, res) => {
   const cfg = await HomeConfig.findOne({ key: 'main' }).lean();
-  const definitionsFromCollection = await getSectionDefinitionsForConfig();
-  const sectionDefinitions =
-    definitionsFromCollection.length > 0 ? definitionsFromCollection : DEFAULT_SECTION_DEFINITIONS;
+  const sectionDefinitions = await getSectionDefinitionsForConfig();
   const data = cfg
     ? { ...cfg, sectionDefinitions }
     : { ...cfg, sectionDefinitions };
@@ -188,6 +232,7 @@ exports.upsertHomeConfig = async (req, res) => {
     return res.status(400).json({ success: false, message: sanitized.error });
   }
   const updated = await HomeConfig.findOneAndUpdate({ key: 'main' }, sanitized, { upsert: true, new: true, setDefaultsOnInsert: true }).lean();
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.json({ success: true, data: updated });
 };
 exports.updateHomeConfig = async (req, res) => {
@@ -199,6 +244,7 @@ exports.updateHomeConfig = async (req, res) => {
   if (!updated) {
     return res.status(404).json({ success: false, message: 'Home config not found' });
   }
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.json({ success: true, data: updated });
 };
 exports.deleteHomeConfig = async (req, res) => {
@@ -220,43 +266,68 @@ async function getSectionDefinitionsForConfig() {
 }
 
 exports.listSectionDefinitions = async (req, res) => {
-  let items = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
-  if (items.length === 0) {
-    await HomeSectionDefinition.insertMany(
-      DEFAULT_SECTION_DEFINITIONS.map((d, i) => ({ key: d.key, label: d.label, order: i }))
-    );
-    items = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
-  }
+  const items = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
   res.json({ success: true, data: items });
 };
 exports.createSectionDefinition = async (req, res) => {
-  const { key, label, order } = req.body || {};
-  if (!key || typeof key !== 'string') {
-    return res.status(400).json({ success: false, message: 'key is required' });
+  const mongoose = require('mongoose');
+  const { key, label, order, type, collectionId, taglineText, categoryIds, bannerId } = req.body || {};
+  let finalKey = key;
+  if (!finalKey || typeof finalKey !== 'string') {
+    if (type === 'collections' && collectionId) {
+      finalKey = `collections_${collectionId}`;
+    } else if (type === 'banner_main' && bannerId) {
+      finalKey = `banner_main_${bannerId}`;
+    } else if (type === 'banner_sub' && bannerId) {
+      finalKey = `banner_sub_${bannerId}`;
+    } else {
+      finalKey = `section_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    }
   }
-  if (!validateKey(key)) {
-    return res.status(400).json({ success: false, message: 'key must be one of the allowed section keys' });
+  if (!validateKey(finalKey)) {
+    return res.status(400).json({ success: false, message: 'key must be one of the allowed section keys or match pattern' });
   }
-  const existing = await HomeSectionDefinition.findOne({ key }).lean();
+  const existing = await HomeSectionDefinition.findOne({ key: finalKey }).lean();
   if (existing) {
     return res.status(400).json({ success: false, message: 'A section definition with this key already exists' });
   }
-  const created = await HomeSectionDefinition.create({
-    key,
-    label: typeof label === 'string' ? label : key,
+  const payload = {
+    key: finalKey,
+    label: typeof label === 'string' ? label : finalKey,
     order: typeof order === 'number' ? order : 0,
-  });
+  };
+  if (type && ['super_category', 'banner_main', 'banner_sub', 'collections', 'lifestyle', 'tagline'].includes(type)) {
+    payload.type = type;
+  }
+  if (collectionId && mongoose.Types.ObjectId.isValid(collectionId)) {
+    payload.collectionId = collectionId;
+  }
+  if (typeof taglineText === 'string') payload.taglineText = taglineText;
+  if (Array.isArray(categoryIds)) {
+    payload.categoryIds = categoryIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+  }
+  if (bannerId && mongoose.Types.ObjectId.isValid(bannerId)) {
+    payload.bannerId = bannerId;
+  }
+  const created = await HomeSectionDefinition.create(payload);
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.status(201).json({ success: true, data: created.toObject ? created.toObject() : created });
 };
 exports.updateSectionDefinition = async (req, res) => {
-  const { label, order } = req.body || {};
+  const mongoose = require('mongoose');
+  const { label, order, collectionId, taglineText, categoryIds, bannerId } = req.body || {};
   const update = {};
   if (typeof label === 'string') update.label = label;
   if (typeof order === 'number') update.order = order;
+  if (collectionId !== undefined) update.collectionId = collectionId && mongoose.Types.ObjectId.isValid(collectionId) ? collectionId : null;
+  if (taglineText !== undefined) update.taglineText = typeof taglineText === 'string' ? taglineText : '';
+  if (categoryIds !== undefined) update.categoryIds = Array.isArray(categoryIds) ? categoryIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) : [];
+  if (bannerId !== undefined) update.bannerId = bannerId && mongoose.Types.ObjectId.isValid(bannerId) ? bannerId : null;
   const updated = await HomeSectionDefinition.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
   if (!updated) {
     return res.status(404).json({ success: false, message: 'Section definition not found' });
   }
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.json({ success: true, data: updated });
 };
 exports.deleteSectionDefinition = async (req, res) => {
@@ -264,6 +335,18 @@ exports.deleteSectionDefinition = async (req, res) => {
   if (!deleted) {
     return res.status(404).json({ success: false, message: 'Section definition not found' });
   }
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
+  res.json({ success: true });
+};
+exports.reorderSectionDefinitions = async (req, res) => {
+  const { orderedIds = [] } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'orderedIds must be a non-empty array' });
+  }
+  await Promise.all(
+    orderedIds.map((id, idx) => HomeSectionDefinition.updateOne({ _id: id }, { $set: { order: idx } }))
+  );
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.json({ success: true });
 };
 
@@ -283,6 +366,45 @@ exports.deleteHomeSection = async (req, res) => {
   await HomeSection.findByIdAndDelete(req.params.id);
   res.json({ success: true });
 };
+exports.patchHomeSectionProducts = async (req, res) => {
+  const { productIds = [] } = req.body || {};
+  if (!Array.isArray(productIds)) {
+    return res.status(400).json({ success: false, message: 'productIds must be an array' });
+  }
+  const validProducts = await Product.find({
+    _id: { $in: productIds },
+    isActive: true,
+    classification: 'Style',
+  })
+    .select('_id')
+    .lean();
+  const validIds = new Set(validProducts.map((p) => String(p._id)));
+  const invalidIds = productIds.filter((id) => !validIds.has(String(id)));
+  if (invalidIds.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'One or more products are invalid/inactive/not Style',
+      invalidIds,
+    });
+  }
+  const updated = await HomeSection.findByIdAndUpdate(
+    req.params.id,
+    { $set: { productIds } },
+    { new: true }
+  ).lean();
+  if (!updated) return res.status(404).json({ success: false, message: 'Section not found' });
+  res.json({ success: true, data: updated });
+};
+exports.reorderHomeSections = async (req, res) => {
+  const { orderedIds = [] } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'orderedIds must be a non-empty array' });
+  }
+  await Promise.all(
+    orderedIds.map((id, idx) => HomeSection.updateOne({ _id: id }, { $set: { order: idx + 1 } }))
+  );
+  res.json({ success: true });
+};
 
 exports.listLifestyle = async (req, res) => {
   const items = await LifestyleItem.find().sort({ order: 1 }).lean();
@@ -298,6 +420,16 @@ exports.updateLifestyle = async (req, res) => {
 };
 exports.deleteLifestyle = async (req, res) => {
   await LifestyleItem.findByIdAndDelete(req.params.id);
+  res.json({ success: true });
+};
+exports.reorderLifestyle = async (req, res) => {
+  const { orderedIds = [] } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'orderedIds must be a non-empty array' });
+  }
+  await Promise.all(
+    orderedIds.map((id, idx) => LifestyleItem.updateOne({ _id: id }, { $set: { order: idx + 1 } }))
+  );
   res.json({ success: true });
 };
 
@@ -317,10 +449,20 @@ exports.deletePromoBlock = async (req, res) => {
   await PromoBlock.findByIdAndDelete(req.params.id);
   res.json({ success: true });
 };
+exports.reorderPromoBlocks = async (req, res) => {
+  const { orderedIds = [] } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'orderedIds must be a non-empty array' });
+  }
+  await Promise.all(
+    orderedIds.map((id, idx) => PromoBlock.updateOne({ _id: id }, { $set: { order: idx + 1 } }))
+  );
+  res.json({ success: true });
+};
 
 exports.listProducts = async (req, res) => {
   const { categoryId, status, stock, page, limit, search } = req.query;
-  const query = {};
+  const query = { deletedAt: null };
   const andParts = [];
 
   if (search && String(search).trim()) {
@@ -397,6 +539,30 @@ exports.listProducts = async (req, res) => {
   }
   res.json({ success: true, data: items });
 };
+exports.getProductById = async (req, res) => {
+  const item = await Product.findById(req.params.id)
+    .populate('categoryId', 'name slug')
+    .populate('subcategoryId', 'name slug')
+    .lean();
+  if (!item) return res.status(404).json({ success: false, message: 'Product not found' });
+  const variants = item.hierarchyCode
+    ? await Product.find({
+        _id: { $ne: item._id },
+        hierarchyCode: item.hierarchyCode,
+        classification: 'Variant',
+      }).lean()
+    : [];
+  res.json({ success: true, data: { ...item, variants } });
+};
+exports.getProductVariants = async (req, res) => {
+  const item = await Product.findById(req.params.id).select('hierarchyCode').lean();
+  if (!item) return res.status(404).json({ success: false, message: 'Product not found' });
+  const variants = await Product.find({
+    hierarchyCode: item.hierarchyCode,
+    classification: 'Variant',
+  }).lean();
+  res.json({ success: true, data: variants });
+};
 exports.createProduct = async (req, res) => {
   const body = { ...req.body };
   if (!body.subcategoryId) body.subcategoryId = null;
@@ -431,6 +597,9 @@ exports.createProduct = async (req, res) => {
     }
   }
 
+  const normalizedDesc = normalizeProductDescription(body.description);
+  if (normalizedDesc !== undefined) body.description = normalizedDesc;
+
   const created = await Product.create(body);
   const populated = await Product.findById(created._id)
     .populate('categoryId', 'name slug')
@@ -464,7 +633,11 @@ exports.updateProduct = async (req, res) => {
     if (req.body[key] !== undefined) body[key] = req.body[key];
   }
   if (body.status !== undefined) body.isActive = body.status === 'active';
+  delete body.sku; // SKU is immutable after creation
   if (body.subcategoryId === '') body.subcategoryId = null;
+
+  const normalizedDesc = normalizeProductDescription(body.description);
+  if (normalizedDesc !== undefined) body.description = normalizedDesc;
 
   // Check for duplicate SKU when sku is being updated (exclude current product)
   if (body.sku !== undefined) {
@@ -487,11 +660,40 @@ exports.updateProduct = async (req, res) => {
   res.json({ success: true, data: updated });
 };
 exports.deleteProduct = async (req, res) => {
-  const deleted = await Product.findByIdAndDelete(req.params.id);
-  if (!deleted) {
+  const existing = await Product.findById(req.params.id).lean();
+  if (!existing) {
     return res.status(404).json({ success: false, message: 'Product not found' });
   }
-  res.json({ success: true });
+  const [sectionRefs, collectionRefs] = await Promise.all([
+    HomeSection.find({ productIds: req.params.id }).select('_id title sectionKey').lean(),
+    require('../../models/Collection').Collection.find({ productIds: req.params.id }).select('_id name slug').lean(),
+  ]);
+  await Product.findByIdAndUpdate(req.params.id, {
+    $set: { isActive: false, status: 'inactive', deletedAt: new Date() },
+  });
+  res.json({
+    success: true,
+    data: {
+      softDeleted: true,
+      references: {
+        sections: sectionRefs,
+        collections: collectionRefs,
+      },
+    },
+  });
+};
+exports.patchProductStatus = async (req, res) => {
+  const { isActive } = req.body || {};
+  if (typeof isActive !== 'boolean') {
+    return res.status(400).json({ success: false, message: 'isActive must be boolean' });
+  }
+  const updated = await Product.findByIdAndUpdate(
+    req.params.id,
+    { $set: { isActive, status: isActive ? 'active' : 'inactive' } },
+    { new: true }
+  ).lean();
+  if (!updated) return res.status(404).json({ success: false, message: 'Product not found' });
+  res.json({ success: true, data: updated });
 };
 
 /** Publish product: transition draft → active and trigger downstream sync (Catalog → Warehouse → Dark Store → Customer App). */
@@ -548,6 +750,17 @@ exports.bulkUpdateProducts = async (req, res) => {
   }
 
   const result = await Product.updateMany({ _id: { $in: validIds } }, updateOp);
+  res.json({ success: true, count: result.modifiedCount });
+};
+exports.bulkUpdateProductStatus = async (req, res) => {
+  const { ids = [], isActive } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0 || typeof isActive !== 'boolean') {
+    return res.status(400).json({ success: false, message: 'ids[] and boolean isActive are required' });
+  }
+  const result = await Product.updateMany(
+    { _id: { $in: ids } },
+    { $set: { isActive, status: isActive ? 'active' : 'inactive' } }
+  );
   res.json({ success: true, count: result.modifiedCount });
 };
 
