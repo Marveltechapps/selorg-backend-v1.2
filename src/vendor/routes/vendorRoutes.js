@@ -12,7 +12,7 @@ router.post(
   vendorController.createVendor
 );
 
-router.get('/summary', vendorController.listVendors); // reuse list for summary quick counts
+router.get('/summary', vendorController.getVendorSummary); // reuse list for summary quick counts
 
 router.get('/:vendorId', vendorController.getVendor);
 router.put('/:vendorId', vendorController.putVendor);

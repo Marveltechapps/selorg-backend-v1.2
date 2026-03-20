@@ -129,6 +129,79 @@ async function getVendorHealth(req, res, next) {
   }
 }
 
+async function getVendorSummary(req, res, next) {
+  try {
+    const Vendor = require('../models/Vendor');
+    const Shipment = require('../models/Shipment');
+    const QCCheck = require('../models/QCCheck');
+    const Certificate = require('../models/Certificate');
+
+    // Active vendors count
+    const activeVendors = await Vendor.countDocuments({ status: 'active' });
+    const totalVendors = await Vendor.countDocuments({});
+    const pendingVendors = await Vendor.countDocuments({ status: 'under_review' });
+
+    // Delivery Timeliness
+    const totalDeliveries = await Shipment.countDocuments({
+      estimatedArrival: { $exists: true },
+      deliveredAt: { $exists: true }
+    });
+    const onTimeDeliveries = await Shipment.countDocuments({
+      estimatedArrival: { $exists: true },
+      deliveredAt: { $exists: true },
+      $expr: { $lte: ['$deliveredAt', '$estimatedArrival'] }
+    });
+    const deliveryTimeliness = totalDeliveries === 0
+      ? 0
+      : Math.round((onTimeDeliveries / totalDeliveries) * 1000) / 10;
+
+    // Product Quality (QC Pass Rate)
+    const totalQC = await QCCheck.countDocuments({});
+    const passedQC = await QCCheck.countDocuments({
+      status: { $in: ['approved', 'passed', 'pass'] }
+    });
+    const productQuality = totalQC === 0
+      ? 0
+      : Math.round((passedQC / totalQC) * 1000) / 10;
+
+    // Rejection Rate
+    const rejectedQC = await QCCheck.countDocuments({
+      status: { $in: ['rejected', 'failed', 'fail'] }
+    });
+    const rejectionRate = totalQC === 0
+      ? 0
+      : Math.round((rejectedQC / totalQC) * 1000) / 10;
+
+    // Compliance Status
+    const vendorsWithValidDocs = await Certificate.distinct('vendorId', {
+      status: 'valid'
+    });
+    const complianceStatus = activeVendors === 0
+      ? 0
+      : Math.round((vendorsWithValidDocs.length / activeVendors) * 1000) / 10;
+    // Avg PO Response Hours - PurchaseOrder model does not have acknowledgedAt/acceptedAt in schema
+    // so we default to 0 until such a field is available in the DB.
+    const avgPOResponseHours = 0;
+
+    res.json({
+      activeVendors,
+      totalVendors,
+      pendingVendors,
+      slaCompliance: deliveryTimeliness,
+      openPOs: 0,
+      criticalAlerts: 0,
+      deliveryTimeliness,
+      productQuality,
+      complianceStatus,
+      rejectionRate,
+      avgPOResponseHours,
+      topPerformers: []
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createVendor,
   listVendors,
@@ -143,5 +216,6 @@ module.exports = {
   createVendorAlert,
   getVendorPerformance,
   getVendorHealth,
+  getVendorSummary,
 };
 

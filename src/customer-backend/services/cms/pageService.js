@@ -191,12 +191,12 @@ function buildHomePageFromLegacy(legacy) {
     if (taglineByKey[sk] !== undefined) blockType = 'organicTagline';
     const section = sections[sk];
     const blockConfig = {};
-    if (section?.title) blockConfig.title = section.title;
-    else {
-      const def = config.sectionDefinitions?.find((d) => d.key === sk);
-      if (def?.label) blockConfig.title = def.label;
-    }
-    if (config.categorySectionTitle && (sk === 'categories' || typeByKey[sk] === 'super_category')) blockConfig.title = config.categorySectionTitle;
+    // Always use dashboard-provided label for the block title.
+    // Never use legacy HomeSection.title (it can drift from the admin "Section list").
+    const def = config.sectionDefinitions?.find((d) => d.key === sk);
+    if (def?.label) blockConfig.title = def.label;
+    // No legacy title overrides here.
+    // Section titles must come from HomeSectionDefinition (dashboard) only.
     if (taglineByKey[sk] !== undefined) blockConfig.tagline = taglineByKey[sk];
     else if (config.organicTagline && sk === 'organic_tagline') blockConfig.tagline = config.organicTagline;
     if (config.organicIconUrl && (sk === 'organic_tagline' || taglineByKey[sk] !== undefined)) blockConfig.iconUrl = config.organicIconUrl;

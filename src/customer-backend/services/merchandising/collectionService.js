@@ -41,7 +41,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
 
     const products = await Product.find(query)
       .lean()
-      .select({ name: 1, images: 1, imageUrl: 1, price: 1, originalPrice: 1, discount: 1, quantity: 1, size: 1, tag: 1, mrp: 1, taxPercent: 1, isSaleable: 1, stock: 1, stockQuantity: 1, baseCost: 0 })
+      .select({ name: 1, images: 1, imageUrl: 1, price: 1, originalPrice: 1, discount: 1, quantity: 1, size: 1, tag: 1, mrp: 1, taxPercent: 1, isSaleable: 1, stock: 1, stockQuantity: 1 })
       .limit(100);
 
     const sortBy = sortOverride || col.sortBy || 'manual';
@@ -59,7 +59,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
 
   const products = await Product.find({ _id: { $in: productIds }, isActive: true, isSaleable: true, classification: 'Style' })
     .lean()
-    .select({ name: 1, images: 1, imageUrl: 1, price: 1, originalPrice: 1, discount: 1, quantity: 1, size: 1, tag: 1, mrp: 1, taxPercent: 1, isSaleable: 1, stock: 1, stockQuantity: 1, baseCost: 0 });
+    .select({ name: 1, images: 1, imageUrl: 1, price: 1, originalPrice: 1, discount: 1, quantity: 1, size: 1, tag: 1, mrp: 1, taxPercent: 1, isSaleable: 1, stock: 1, stockQuantity: 1 });
   const map = new Map(products.map((p) => [String(p._id), p]));
   const ordered = productIds.map((id) => map.get(String(id))).filter(Boolean);
   const start = (page - 1) * limit;

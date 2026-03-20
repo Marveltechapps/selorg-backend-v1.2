@@ -39,12 +39,14 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
 
   const subcategoryIds = subcategories.map((s) => s._id);
   const productCategoryIds = subCategoryId
-    ? [mongoose.Types.ObjectId(subCategoryId)]
+    ? [new mongoose.Types.ObjectId(subCategoryId)]
     : [catId, ...subcategoryIds];
 
   const products = await Product.find({
     categoryId: { $in: productCategoryIds },
     isActive: true,
+    isSaleable: true,
+    classification: 'Style',
   })
     .sort({ order: 1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
@@ -74,12 +76,14 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     products: products.map((p) => ({
       id: String(p._id),
       name: p.name,
-      images: p.images || [],
+      images: Array.isArray(p.images) ? p.images : [],
       price: p.price,
       originalPrice: p.originalPrice,
       discount: p.discount,
-      quantity: p.quantity || (p.variants && p.variants[0] ? p.variants[0].size : ''),
-      variants: (p.variants || []).map((v, i) => ({
+      quantity:
+        p.quantity ||
+        (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : ''),
+      variants: (Array.isArray(p.variants) ? p.variants : []).map((v, i) => ({
         id: v._id ? String(v._id) : String(p._id) + '-' + i,
         size: v.size,
         price: v.price,

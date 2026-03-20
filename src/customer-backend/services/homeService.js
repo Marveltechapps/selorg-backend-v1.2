@@ -44,15 +44,24 @@ async function getHomePayload(req = {}) {
   const sectionOrder = sectionDefinitions.map((d) => d.key);
 
   const superCategoryDefs = definitionsFromCollection.filter((d) => d.type === 'super_category');
+  const topLevelCategories = superCategoryDefs.length > 0
+    ? await Category.find({ isActive: true, parentId: { $in: [null, undefined] } }).sort({ order: 1 }).lean()
+    : [];
   const categoryByKey = {};
   for (const def of superCategoryDefs) {
     const ids = Array.isArray(def.categoryIds) && def.categoryIds.length > 0
       ? def.categoryIds.map((id) => (typeof id === 'object' && id && id._id ? id._id : id))
       : [];
-    if (ids.length > 0 && def.key) {
-      const found = await Category.find({ _id: { $in: ids }, isActive: true }).lean();
-      const orderMap = new Map(ids.map((id, i) => [String(id), i]));
-      categoryByKey[def.key] = found.sort((a, b) => (orderMap.get(String(a._id)) ?? 99) - (orderMap.get(String(b._id)) ?? 99));
+    if (def.key) {
+      if (ids.length > 0) {
+        const found = await Category.find({ _id: { $in: ids }, isActive: true }).lean();
+        const orderMap = new Map(ids.map((id, i) => [String(id), i]));
+        categoryByKey[def.key] = found.sort((a, b) => (orderMap.get(String(a._id)) ?? 99) - (orderMap.get(String(b._id)) ?? 99));
+      } else {
+        // If super_category has no explicit categoryIds, fall back to all top-level categories.
+        // This keeps the customer app fully driven by admin section definitions without dummy data.
+        categoryByKey[def.key] = topLevelCategories;
+      }
     }
   }
   const categories = categoryByKey[Object.keys(categoryByKey)[0]] || [];

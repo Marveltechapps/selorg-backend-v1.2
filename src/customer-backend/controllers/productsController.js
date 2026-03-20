@@ -123,7 +123,7 @@ async function searchSuggestions(req, res) {
       isSaleable: true,
       classification: 'Style',
     })
-      .select({ name: 1, imageUrl: 1, sku: 1, size: 1, baseCost: 0 })
+      .select({ name: 1, imageUrl: 1, sku: 1, size: 1 })
       .limit(5)
       .maxTimeMS(100)
       .lean();
