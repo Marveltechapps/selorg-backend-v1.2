@@ -10,6 +10,8 @@ const Alert = require('../models/Alert');
 const GRN = require('../models/GRN');
 const VendorRating = require('../models/VendorRating');
 const { mergeHubFilter } = require('../constants/hubScope');
+const emailService = require('../services/emailService');
+const inviteService = require('../services/inviteService');
 
 async function createVendor(req, res, next) {
   try {
@@ -319,6 +321,226 @@ async function getVendorSummary(req, res, next) {
   }
 }
 
+async function sendInviteEmail(req, res, next) {
+  try {
+    const { vendorId, personalMessage, expiryDays } = req.body;
+
+    const Vendor = require('../models/Vendor');
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) {
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+
+    if (!vendor.contact?.email) {
+      return res.status(400).json({
+        error: 'Vendor has no email address',
+      });
+    }
+
+    const { token } = await inviteService.createInviteToken(
+      vendorId,
+      expiryDays || 7
+    );
+
+    const frontendUrl =
+      process.env.FRONTEND_URL || 'http://localhost:5173';
+    const inviteLink = `${frontendUrl}/vendor-signup?token=${token}`;
+
+    const result = await emailService.sendEmail({
+      to: vendor.contact.email,
+      templateName: 'vendor_invite',
+      templateData: {
+        vendorName: vendor.name,
+        inviteLink,
+        expiryDays: expiryDays || 7,
+        personalMessage: personalMessage || '',
+        category: vendor.metadata?.category || '',
+        companyName: process.env.COMPANY_NAME || 'Selorg',
+      },
+    });
+
+    vendor.status = 'invited';
+    vendor.stage = 'invited';
+    if (!vendor.metadata) vendor.metadata = {};
+    vendor.metadata.inviteSentAt = new Date().toISOString();
+    if (result.previewUrl) {
+      vendor.metadata.inviteEmailPreviewUrl = result.previewUrl;
+    }
+    vendor.markModified('metadata');
+    await vendor.save();
+
+    res.json({
+      success: true,
+      message: `Invite sent to ${vendor.contact.email}`,
+      previewUrl: result.previewUrl || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function sendDocumentRequestEmail(req, res, next) {
+  try {
+    const { vendorId, requiredDocs, deadline, notes } = req.body;
+    const Vendor = require('../models/Vendor');
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+    const frontendUrl =
+      process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    const result = await emailService.sendEmail({
+      to: vendor.contact?.email,
+      templateName: 'document_request',
+      templateData: {
+        vendorName: vendor.name,
+        requiredDocs: requiredDocs || [],
+        deadline,
+        notes,
+        dashboardLink: `${frontendUrl}/vendor-signup?token=${vendor.metadata?.inviteToken || ''}`,
+        requestedBy: 'Selorg Team',
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Document request email sent',
+      previewUrl: result.previewUrl || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function sendPaymentEmail(req, res, next) {
+  try {
+    const {
+      vendorId,
+      amount,
+      referenceNumber,
+      invoiceNumbers,
+      paymentMethod,
+    } = req.body;
+    const Vendor = require('../models/Vendor');
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+    const result = await emailService.sendEmail({
+      to: vendor.contact?.email,
+      templateName: 'payment_notification',
+      templateData: {
+        vendorName: vendor.name,
+        amount,
+        paymentDate: new Date().toLocaleDateString('en-IN'),
+        referenceNumber,
+        bankAccount: vendor.metadata?.bankAccount,
+        invoiceNumbers,
+        paymentMethod: paymentMethod || 'NEFT',
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment email sent',
+      previewUrl: result.previewUrl || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function sendRejectionEmail(req, res, next) {
+  try {
+    const { vendorId, rejectionReason, canReapply, reapplyAfterDays } =
+      req.body;
+    const Vendor = require('../models/Vendor');
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+    const result = await emailService.sendEmail({
+      to: vendor.contact?.email,
+      templateName: 'rejection',
+      templateData: {
+        vendorName: vendor.name,
+        rejectionReason,
+        canReapply: canReapply || false,
+        reapplyAfterDays: reapplyAfterDays || 30,
+        contactEmail: process.env.SUPPORT_EMAIL || 'vendor@selorg.com',
+      },
+    });
+
+    vendor.status = 'rejected';
+    vendor.stage = 'rejected';
+    await vendor.save();
+
+    res.json({
+      success: true,
+      message: 'Rejection email sent',
+      previewUrl: result.previewUrl || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getEmailTemplatePreview(req, res, next) {
+  try {
+    const { templateName } = req.params;
+
+    const SAMPLE = {
+      vendorName: 'FreshMart Suppliers',
+      inviteLink: 'http://localhost:5173/vendor-signup?token=sample',
+      expiryDays: 7,
+      companyName: 'Selorg',
+      personalMessage: 'We would love you as our dairy supplier.',
+      category: 'Dairy / Perishables',
+      requiredDocs: ['FSSAI License', 'GST Certificate'],
+      deadline: '30 Mar 2026',
+      dashboardLink: 'http://localhost:5173/vendor-signup',
+      poNumber: 'PO-2026-001',
+      poDate: '23 Mar 2026',
+      items: [{ sku: 'MILK-1L', qty: 100, unit: 'L', unitPrice: 22 }],
+      totalValue: 2200,
+      deliveryDate: '25 Mar 2026',
+      warehouseAddress: 'Anna Nagar Darkstore, Chennai',
+      amount: 15000,
+      paymentDate: '23 Mar 2026',
+      referenceNumber: 'REF-2026-123',
+      paymentMethod: 'NEFT',
+      bankAccount: '9876543210',
+      invoiceNumbers: ['INV-001', 'INV-002'],
+      contractId: 'CONTRACT-2026-001',
+      validFrom: '01 Apr 2026',
+      validTo: '31 Mar 2027',
+      signDeadline: '30 Mar 2026',
+      contractLink: 'http://localhost:5173/contract/sample',
+      keyTerms: ['Net 15 payment terms', 'Weekly PO cycle'],
+      rejectionReason: 'Documentation incomplete',
+      canReapply: true,
+      reapplyAfterDays: 30,
+      contactEmail: 'vendor@selorg.com',
+    };
+
+    const templates = {
+      vendor_invite: emailService.getVendorInviteTemplate,
+      document_request: emailService.getDocumentRequestTemplate,
+      po_confirmation: emailService.getPOConfirmationTemplate,
+      payment_notification: emailService.getPaymentNotificationTemplate,
+      contract_sent: emailService.getContractSentTemplate,
+      rejection: emailService.getRejectionTemplate,
+    };
+
+    const fn = templates[templateName];
+    if (!fn) return res.status(404).json({ error: 'Template not found' });
+
+    const { htmlBody } = fn(SAMPLE);
+    res.setHeader('Content-Type', 'text/html');
+    res.send(htmlBody);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createVendor,
   listVendors,
@@ -334,5 +556,10 @@ module.exports = {
   getVendorPerformance,
   getVendorHealth,
   getVendorSummary,
+  sendInviteEmail,
+  sendDocumentRequestEmail,
+  sendPaymentEmail,
+  sendRejectionEmail,
+  getEmailTemplatePreview,
 };
 

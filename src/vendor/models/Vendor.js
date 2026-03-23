@@ -91,6 +91,15 @@ const VendorSchema = new mongoose.Schema(
     name: { type: String, trim: true },
     code: { type: String, trim: true },
     status: { type: String, default: 'pending' },
+    stage: {
+      type: String,
+      enum: [
+        'invited', 'new_request', 'kyc_verification',
+        'docs_verification', 'review_pending', 'contract',
+        'tier_assignment', 'approved', 'rejected',
+      ],
+      default: 'new_request',
+    },
     sla: { type: Number, default: 0 },
     activeRelationships: { type: Number, default: 0 },
     onboarding: { type: mongoose.Schema.Types.Mixed },
