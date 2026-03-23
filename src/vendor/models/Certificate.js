@@ -10,6 +10,7 @@ const CertificateSchema = new mongoose.Schema(
     status: { type: String, default: 'valid' },
     fileUrl: String,
     metadata: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

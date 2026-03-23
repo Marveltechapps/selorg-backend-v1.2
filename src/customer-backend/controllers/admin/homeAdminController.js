@@ -154,16 +154,97 @@ exports.listBanners = async (req, res) => {
   const items = await Banner.find().sort({ slot: 1, order: 1 }).lean();
   res.json({ success: true, data: items });
 };
+
+/** Strip nulls and immutable fields so Mongoose does not cast-error (e.g. link: null on String). */
+function sanitizeBannerBody(body) {
+  const b = { ...(body || {}) };
+  delete b._id;
+  delete b.createdAt;
+  delete b.updatedAt;
+  delete b.__v;
+  if (b.link === null || b.link === '') delete b.link;
+  if (b.startDate === null) delete b.startDate;
+  if (b.endDate === null) delete b.endDate;
+  const allowedSlots = ['hero', 'small', 'mid', 'large', 'info', 'category'];
+  if (b.slot != null && !allowedSlots.includes(String(b.slot))) {
+    b.slot = 'hero';
+  }
+  const allowedPresentation = ['single', 'carousel'];
+  if (b.presentationMode != null && !allowedPresentation.includes(String(b.presentationMode))) {
+    delete b.presentationMode;
+  }
+  if (b.isNavigable !== undefined && typeof b.isNavigable !== 'boolean') {
+    b.isNavigable = Boolean(b.isNavigable);
+  }
+  if (Array.isArray(b.contentItems)) {
+    b.contentItems = sanitizeBannerContentItems(b.contentItems);
+  }
+  return b;
+}
+
+const OID = /^[a-f0-9]{24}$/i;
+
+/** Sub-page blocks (no further nesting). */
+function sanitizeLeafContentItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((raw) => {
+    const t = raw && typeof raw === 'object' ? { ...raw } : {};
+    delete t.nestedContentItems;
+    delete t.blockTitle;
+    if (t.type === 'products' && Array.isArray(t.productIds)) {
+      t.productIds = t.productIds.filter((id) => id && OID.test(String(id)));
+    }
+    if (t.link === null || t.link === '') delete t.link;
+    if (t.isNavigable !== undefined && typeof t.isNavigable !== 'boolean') {
+      t.isNavigable = Boolean(t.isNavigable);
+    }
+    return t;
+  });
+}
+
+function sanitizeBannerContentItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((raw) => {
+    const t = raw && typeof raw === 'object' ? { ...raw } : {};
+    if (t.type === 'products' && Array.isArray(t.productIds)) {
+      t.productIds = t.productIds.filter((id) => id && OID.test(String(id)));
+    }
+    if (t.link === null || t.link === '') delete t.link;
+    if (t.blockTitle === null || t.blockTitle === '') delete t.blockTitle;
+    if (t.isNavigable !== undefined && typeof t.isNavigable !== 'boolean') {
+      t.isNavigable = Boolean(t.isNavigable);
+    }
+    if (Array.isArray(t.nestedContentItems)) {
+      t.nestedContentItems = sanitizeLeafContentItems(t.nestedContentItems);
+    }
+    return t;
+  });
+}
+
 exports.createBanner = async (req, res) => {
-  const created = await Banner.create(req.body);
-  res.status(201).json({ success: true, data: created });
+  try {
+    const body = sanitizeBannerBody(req.body);
+    const created = await Banner.create(body);
+    res.status(201).json({ success: true, data: created });
+  } catch (err) {
+    console.error('createBanner', err);
+    const message = err && err.message ? err.message : 'Validation failed';
+    res.status(400).json({ success: false, message });
+  }
 };
 exports.updateBanner = async (req, res) => {
-  const updated = await Banner.findByIdAndUpdate(req.params.id, req.body, { new: true }).lean();
-  if (!updated) {
-    return res.status(404).json({ success: false, message: 'Banner not found' });
+  try {
+    const body = sanitizeBannerBody(req.body);
+    const updated = await Banner.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true }).lean();
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Banner not found' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('updateBanner', err);
+    const message = err && err.message ? err.message : 'Validation failed';
+    res.status(400).json({ success: false, message });
   }
-  res.json({ success: true, data: updated });
 };
 exports.deleteBanner = async (req, res) => {
   const deleted = await Banner.findByIdAndDelete(req.params.id);
@@ -271,15 +352,35 @@ exports.listSectionDefinitions = async (req, res) => {
 };
 exports.createSectionDefinition = async (req, res) => {
   const mongoose = require('mongoose');
-  const { key, label, order, type, collectionId, taglineText, categoryIds, bannerId } = req.body || {};
+  const {
+    key,
+    label,
+    order,
+    type,
+    collectionId,
+    taglineText,
+    categoryIds,
+    bannerId,
+    bannerIds: rawBannerIds,
+    bannerSelectionMode,
+  } = req.body || {};
+  let resolvedBannerIds = [];
+  if (Array.isArray(rawBannerIds) && rawBannerIds.length > 0) {
+    resolvedBannerIds = rawBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+  } else if (bannerId && mongoose.Types.ObjectId.isValid(bannerId)) {
+    resolvedBannerIds = [bannerId];
+  }
+  const firstBannerId = resolvedBannerIds[0];
   let finalKey = key;
   if (!finalKey || typeof finalKey !== 'string') {
     if (type === 'collections' && collectionId) {
       finalKey = `collections_${collectionId}`;
-    } else if (type === 'banner_main' && bannerId) {
-      finalKey = `banner_main_${bannerId}`;
-    } else if (type === 'banner_sub' && bannerId) {
-      finalKey = `banner_sub_${bannerId}`;
+    } else if (type === 'banner_main' && firstBannerId) {
+      finalKey = `banner_main_${firstBannerId}`;
+    } else if (type === 'banner_sub' && firstBannerId) {
+      finalKey = `banner_sub_${firstBannerId}`;
+    } else if (type === 'banner' && firstBannerId) {
+      finalKey = `banner_${firstBannerId}`;
     } else {
       finalKey = `section_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     }
@@ -287,16 +388,33 @@ exports.createSectionDefinition = async (req, res) => {
   if (!validateKey(finalKey)) {
     return res.status(400).json({ success: false, message: 'key must be one of the allowed section keys or match pattern' });
   }
-  const existing = await HomeSectionDefinition.findOne({ key: finalKey }).lean();
-  if (existing) {
-    return res.status(400).json({ success: false, message: 'A section definition with this key already exists' });
+  if ((type === 'banner_main' || type === 'banner_sub' || type === 'banner') && resolvedBannerIds.length === 0) {
+    return res.status(400).json({ success: false, message: 'Select at least one banner' });
   }
+  if (type === 'banner' && resolvedBannerIds.length !== 1) {
+    return res.status(400).json({
+      success: false,
+      message: 'Banner section requires exactly one banner. Set hero vs mid in the Banners tab (Slot field).',
+    });
+  }
+  // Allow multiple sections with the same banner/collection: append _1, _2, … until key is unique.
+  const baseKey = finalKey;
+  let candidate = baseKey;
+  let suffix = 0;
+  while (await HomeSectionDefinition.findOne({ key: candidate }).lean()) {
+    suffix += 1;
+    candidate = `${baseKey}_${suffix}`;
+    if (suffix > 500) {
+      return res.status(500).json({ success: false, message: 'Could not allocate unique section key' });
+    }
+  }
+  finalKey = candidate;
   const payload = {
     key: finalKey,
     label: typeof label === 'string' ? label : finalKey,
     order: typeof order === 'number' ? order : 0,
   };
-  if (type && ['super_category', 'banner_main', 'banner_sub', 'collections', 'lifestyle', 'tagline'].includes(type)) {
+  if (type && ['super_category', 'banner_main', 'banner_sub', 'banner', 'collections', 'lifestyle', 'tagline'].includes(type)) {
     payload.type = type;
   }
   if (collectionId && mongoose.Types.ObjectId.isValid(collectionId)) {
@@ -306,8 +424,26 @@ exports.createSectionDefinition = async (req, res) => {
   if (Array.isArray(categoryIds)) {
     payload.categoryIds = categoryIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
   }
-  if (bannerId && mongoose.Types.ObjectId.isValid(bannerId)) {
+  if (resolvedBannerIds.length > 0) {
+    payload.bannerIds = resolvedBannerIds;
+    payload.bannerId = resolvedBannerIds[0];
+  } else if (bannerId && mongoose.Types.ObjectId.isValid(bannerId)) {
     payload.bannerId = bannerId;
+    payload.bannerIds = [bannerId];
+  }
+  if (typeof bannerSelectionMode === 'string' && ['single', 'multiple'].includes(bannerSelectionMode)) {
+    payload.bannerSelectionMode = bannerSelectionMode;
+  } else if (type === 'banner_main' || type === 'banner_sub') {
+    payload.bannerSelectionMode = resolvedBannerIds.length > 1 ? 'multiple' : 'single';
+  } else if (type === 'banner') {
+    payload.bannerSelectionMode = 'single';
+  }
+  if (type === 'banner_main' || type === 'banner_sub') {
+    /** Single banner = static; multiple = carousel (derived from count, not a separate checkbox). */
+    payload.useCarousel = resolvedBannerIds.length > 1;
+  }
+  if (type === 'banner') {
+    payload.useCarousel = false;
   }
   const created = await HomeSectionDefinition.create(payload);
   await cache.delByPattern('cache:*bootstrap*').catch(() => {});
@@ -315,14 +451,50 @@ exports.createSectionDefinition = async (req, res) => {
 };
 exports.updateSectionDefinition = async (req, res) => {
   const mongoose = require('mongoose');
-  const { label, order, collectionId, taglineText, categoryIds, bannerId } = req.body || {};
+  const existing = await HomeSectionDefinition.findById(req.params.id).lean();
+  if (!existing) {
+    return res.status(404).json({ success: false, message: 'Section definition not found' });
+  }
+  const {
+    label,
+    order,
+    collectionId,
+    taglineText,
+    categoryIds,
+    bannerId,
+    bannerIds: rawBannerIds,
+    bannerSelectionMode,
+  } = req.body || {};
   const update = {};
   if (typeof label === 'string') update.label = label;
   if (typeof order === 'number') update.order = order;
   if (collectionId !== undefined) update.collectionId = collectionId && mongoose.Types.ObjectId.isValid(collectionId) ? collectionId : null;
   if (taglineText !== undefined) update.taglineText = typeof taglineText === 'string' ? taglineText : '';
   if (categoryIds !== undefined) update.categoryIds = Array.isArray(categoryIds) ? categoryIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) : [];
-  if (bannerId !== undefined) update.bannerId = bannerId && mongoose.Types.ObjectId.isValid(bannerId) ? bannerId : null;
+  if (rawBannerIds !== undefined) {
+    const ids = Array.isArray(rawBannerIds) ? rawBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) : [];
+    if (existing.type === 'banner' && ids.length > 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Banner section allows only one banner (set hero vs mid in Banners tab).',
+      });
+    }
+    update.bannerIds = ids;
+    update.bannerId = ids[0] || null;
+    update.useCarousel = existing.type === 'banner' ? false : ids.length > 1;
+    if (existing.type === 'banner') {
+      update.bannerSelectionMode = 'single';
+    }
+  } else if (bannerId !== undefined) {
+    update.bannerId = bannerId && mongoose.Types.ObjectId.isValid(bannerId) ? bannerId : null;
+    update.bannerIds = update.bannerId ? [update.bannerId] : [];
+    update.useCarousel = existing.type === 'banner' ? false : false;
+  }
+  if (typeof bannerSelectionMode === 'string' && ['single', 'multiple'].includes(bannerSelectionMode)) {
+    if (existing.type !== 'banner' || bannerSelectionMode === 'single') {
+      update.bannerSelectionMode = bannerSelectionMode;
+    }
+  }
   const updated = await HomeSectionDefinition.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
   if (!updated) {
     return res.status(404).json({ success: false, message: 'Section definition not found' });

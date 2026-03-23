@@ -1,23 +1,30 @@
+const mongoose = require('mongoose');
 const VendorInvoice = require('../models/VendorInvoice');
 const Vendor = require('../models/Vendor');
 const logger = require('../../utils/logger');
+const { mergeHubFilter, hubFieldsForCreate } = require('../../vendor/constants/hubScope');
+
+function toObjectIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  return ids
+    .filter((id) => id && mongoose.Types.ObjectId.isValid(String(id)))
+    .map((id) => new mongoose.Types.ObjectId(String(id)));
+}
 
 class VendorPaymentsService {
   async getPayablesSummary() {
     try {
-      const outstanding = await VendorInvoice.find({
-        status: { $in: ['pending_approval', 'approved', 'scheduled', 'overdue'] },
-      }).lean();
+      const outstanding = await VendorInvoice.find(
+        mergeHubFilter({
+          status: { $in: ['pending_approval', 'approved', 'scheduled', 'overdue'] },
+        })
+      ).lean();
 
-      const pending = await VendorInvoice.find({
-        status: 'pending_approval',
-      }).lean();
+      const pending = await VendorInvoice.find(mergeHubFilter({ status: 'pending_approval' })).lean();
 
-      const overdue = await VendorInvoice.find({
-        status: 'overdue',
-      }).lean();
+      const overdue = await VendorInvoice.find(mergeHubFilter({ status: 'overdue' })).lean();
 
-      const overdueVendors = new Set(overdue.map(i => i.vendorId.toString())).size;
+      const overdueVendors = new Set(overdue.map((i) => i.vendorId.toString())).size;
 
       return {
         outstandingPayablesAmount: outstanding.reduce((sum, inv) => sum + inv.amount, 0),
@@ -58,17 +65,15 @@ class VendorPaymentsService {
       const pageSize = filter.pageSize || 20;
       const skip = (page - 1) * pageSize;
 
+      const scoped = mergeHubFilter(query);
+
       const [data, total] = await Promise.all([
-        VendorInvoice.find(query)
-          .sort({ dueDate: 1 })
-          .skip(skip)
-          .limit(pageSize)
-          .lean(),
-        VendorInvoice.countDocuments(query),
+        VendorInvoice.find(scoped).sort({ dueDate: 1 }).skip(skip).limit(pageSize).lean(),
+        VendorInvoice.countDocuments(scoped),
       ]);
 
       return {
-        data: data.map(invoice => ({
+        data: data.map((invoice) => ({
           id: invoice._id.toString(),
           ...invoice,
         })),
@@ -84,12 +89,18 @@ class VendorPaymentsService {
 
   async getVendorInvoiceDetails(id) {
     try {
-      const invoice = await VendorInvoice.findById(id).lean();
+      if (!mongoose.Types.ObjectId.isValid(String(id))) {
+        throw new Error('Invoice not found');
+      }
+      const invoice = await VendorInvoice.findOne(mergeHubFilter({ _id: id })).lean();
       if (!invoice) {
         throw new Error('Invoice not found');
       }
 
-      const vendor = await Vendor.findById(invoice.vendorId).lean();
+      let vendor = null;
+      if (invoice.vendorId && mongoose.Types.ObjectId.isValid(String(invoice.vendorId))) {
+        vendor = await Vendor.findOne(mergeHubFilter({ _id: invoice.vendorId })).lean();
+      }
 
       return {
         id: invoice._id.toString(),
@@ -104,8 +115,11 @@ class VendorPaymentsService {
 
   async approveInvoice(id) {
     try {
-      const invoice = await VendorInvoice.findByIdAndUpdate(
-        id,
+      if (!mongoose.Types.ObjectId.isValid(String(id))) {
+        throw new Error('Invoice not found');
+      }
+      const invoice = await VendorInvoice.findOneAndUpdate(
+        mergeHubFilter({ _id: id }),
         { $set: { status: 'approved' } },
         { new: true, runValidators: true }
       ).lean();
@@ -129,18 +143,22 @@ class VendorPaymentsService {
       if (!Array.isArray(ids) || ids.length === 0) {
         throw new Error('ids array is required and must not be empty');
       }
+      const objectIds = toObjectIds(ids);
+      if (objectIds.length === 0) {
+        throw new Error('No valid invoice ids');
+      }
       const result = await VendorInvoice.updateMany(
-        {
-          _id: { $in: ids },
+        mergeHubFilter({
+          _id: { $in: objectIds },
           status: 'pending_approval',
-        },
+        }),
         { $set: { status: 'approved' } }
       );
-      const approved = await VendorInvoice.find({ _id: { $in: ids } }).lean();
+      const approved = await VendorInvoice.find(mergeHubFilter({ _id: { $in: objectIds } })).lean();
       return {
         approvedCount: result.modifiedCount,
         totalRequested: ids.length,
-        data: approved.map(inv => ({
+        data: approved.map((inv) => ({
           id: inv._id.toString(),
           ...inv,
         })),
@@ -153,8 +171,11 @@ class VendorPaymentsService {
 
   async rejectInvoice(id, reason) {
     try {
-      const invoice = await VendorInvoice.findByIdAndUpdate(
-        id,
+      if (!mongoose.Types.ObjectId.isValid(String(id))) {
+        throw new Error('Invoice not found');
+      }
+      const invoice = await VendorInvoice.findOneAndUpdate(
+        mergeHubFilter({ _id: id }),
         { $set: { status: 'rejected', notes: reason } },
         { new: true, runValidators: true }
       ).lean();
@@ -175,8 +196,11 @@ class VendorPaymentsService {
 
   async markInvoicePaid(id) {
     try {
-      const invoice = await VendorInvoice.findByIdAndUpdate(
-        id,
+      if (!mongoose.Types.ObjectId.isValid(String(id))) {
+        throw new Error('Invoice not found');
+      }
+      const invoice = await VendorInvoice.findOneAndUpdate(
+        mergeHubFilter({ _id: id }),
         { $set: { status: 'paid', paymentId: `pay_${Date.now()}` } },
         { new: true, runValidators: true }
       ).lean();
@@ -197,8 +221,12 @@ class VendorPaymentsService {
 
   async uploadInvoice(data) {
     try {
+      const raw = data && typeof data === 'object' ? { ...data } : {};
+      delete raw.hubKey;
+      delete raw._id;
       const invoice = new VendorInvoice({
-        ...data,
+        ...raw,
+        ...hubFieldsForCreate(),
         status: 'pending_approval',
         uploadedAt: new Date(),
       });
@@ -217,13 +245,21 @@ class VendorPaymentsService {
   async createPayment(request) {
     try {
       const paymentId = `pay_${Date.now()}`;
-      
+
       await Promise.all(
-        request.invoices.map(inv =>
-          VendorInvoice.findByIdAndUpdate(inv.invoiceId, {
-            $set: { status: 'paid', paymentId },
-          })
-        )
+        (request.invoices || []).map(async (inv) => {
+          if (!inv.invoiceId || !mongoose.Types.ObjectId.isValid(String(inv.invoiceId))) {
+            throw new Error('Invalid invoice id in payment request');
+          }
+          const updated = await VendorInvoice.findOneAndUpdate(
+            mergeHubFilter({ _id: inv.invoiceId }),
+            { $set: { status: 'paid', paymentId } },
+            { new: true }
+          ).lean();
+          if (!updated) {
+            throw new Error(`Invoice ${inv.invoiceId} not found in this hub`);
+          }
+        })
       );
 
       return { success: true, paymentId };
@@ -235,8 +271,8 @@ class VendorPaymentsService {
 
   async getVendors() {
     try {
-      const vendors = await Vendor.find({ isActive: true }).lean();
-      return vendors.map(vendor => ({
+      const vendors = await Vendor.find(mergeHubFilter({ isActive: true })).lean();
+      return vendors.map((vendor) => ({
         id: vendor._id.toString(),
         ...vendor,
       }));
@@ -248,4 +284,3 @@ class VendorPaymentsService {
 }
 
 module.exports = new VendorPaymentsService();
-

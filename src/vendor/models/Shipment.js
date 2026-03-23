@@ -8,6 +8,7 @@ const ShipmentSchema = new mongoose.Schema(
     estimatedArrival: Date,
     deliveredAt: Date,
     relatedGRNs: [String],
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

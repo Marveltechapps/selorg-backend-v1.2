@@ -5,6 +5,7 @@ const upload = multer({ dest: process.env.FILE_UPLOAD_DIR || 'uploads/' });
 const router = express.Router();
 const poController = require('../controllers/purchaseOrderController');
 const { requireAuth } = require('../../core/middleware');
+const { mergeHubFilter } = require('../constants/hubScope');
 
 router.get('/', poController.listPurchaseOrders);
 router.post('/', requireAuth, body('vendorId').notEmpty(), body('items').isArray(), poController.createPurchaseOrder);
@@ -16,7 +17,7 @@ router.delete('/:poId', requireAuth, async (req, res) => {
   // soft delete
   try {
     const PurchaseOrder = require('../models/PurchaseOrder');
-    const po = await PurchaseOrder.findById(req.params.poId);
+    const po = await PurchaseOrder.findOne(mergeHubFilter({ _id: req.params.poId }));
     if (!po) return res.status(404).json({ code: 404, message: 'Not found' });
     po.archived = true;
     await po.save();

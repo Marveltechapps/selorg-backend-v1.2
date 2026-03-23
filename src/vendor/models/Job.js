@@ -7,6 +7,7 @@ const JobSchema = new mongoose.Schema(
     status: { type: String, enum: ['pending', 'running', 'succeeded', 'failed', 'cancelled'], default: 'pending' },
     progress: { type: Number, default: 0 },
     result: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

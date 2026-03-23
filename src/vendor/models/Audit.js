@@ -29,6 +29,7 @@ const AuditSchema = new mongoose.Schema(
     recommendations: [String],
     attachments: [String],
     metadata: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

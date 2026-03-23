@@ -13,6 +13,7 @@ const SystemLogSchema = new mongoose.Schema(
     message: { type: String, required: true },
     timestamp: { type: Date, default: Date.now, index: true },
     metadata: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

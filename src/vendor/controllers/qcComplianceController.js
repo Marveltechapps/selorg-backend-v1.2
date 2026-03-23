@@ -6,6 +6,7 @@ const Certificate = require('../models/Certificate');
 const Vendor = require('../models/Vendor');
 const logger = require('../../core/utils/logger');
 const asyncHandler = require('../../middleware/asyncHandler');
+const { mergeHubFilter, hubFieldsForCreate } = require('../constants/hubScope');
 
 /**
  * Get all audits
@@ -23,7 +24,7 @@ const getAudits = asyncHandler(async (req, res) => {
     if (endDate) filter.date.$lte = new Date(endDate);
   }
 
-  const audits = await Audit.find(filter)
+  const audits = await Audit.find(mergeHubFilter(filter))
     .sort({ date: -1 })
     .lean();
 
@@ -45,7 +46,7 @@ const getAudits = asyncHandler(async (req, res) => {
  * Get audit by ID
  */
 const getAuditById = asyncHandler(async (req, res) => {
-  const audit = await Audit.findById(req.params.id).lean();
+  const audit = await Audit.findOne(mergeHubFilter({ _id: req.params.id })).lean();
   
   if (!audit) {
     return res.status(404).json({
@@ -77,7 +78,7 @@ const createAudit = asyncHandler(async (req, res) => {
     auditId: req.body.auditId || `AUD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
   };
 
-  const audit = new Audit(auditData);
+  const audit = new Audit({ ...auditData, ...hubFieldsForCreate() });
   await audit.save();
 
   res.status(201).json({
@@ -105,7 +106,7 @@ const getTemperatureCompliance = asyncHandler(async (req, res) => {
   if (shipmentId) filter.shipmentId = shipmentId;
   if (compliant !== undefined) filter.compliant = compliant === 'true';
 
-  const temps = await TemperatureCompliance.find(filter)
+  const temps = await TemperatureCompliance.find(mergeHubFilter(filter))
     .sort({ createdAt: -1 })
     .lean();
 
@@ -156,7 +157,7 @@ const createTemperatureCompliance = asyncHandler(async (req, res) => {
     }
   }
 
-  const temp = new TemperatureCompliance(tempData);
+  const temp = new TemperatureCompliance({ ...tempData, ...hubFieldsForCreate() });
   await temp.save();
 
   res.status(201).json({
@@ -179,7 +180,7 @@ const patchTemperatureCompliance = asyncHandler(async (req, res) => {
   const { tempId } = req.params;
   const { compliant, notes } = req.body;
 
-  const temp = await TemperatureCompliance.findById(tempId);
+  const temp = await TemperatureCompliance.findOne(mergeHubFilter({ _id: tempId }));
   if (!temp) {
     return res.status(404).json({
       success: false,
@@ -216,14 +217,14 @@ const getVendorRatings = asyncHandler(async (req, res) => {
   const filter = {};
   if (vendorId) filter.vendorId = vendorId;
 
-  let ratings = await VendorRating.find(filter).lean();
+  let ratings = await VendorRating.find(mergeHubFilter(filter)).lean();
 
   // If no ratings exist, calculate them
   if (ratings.length === 0 && vendorId) {
     ratings = [await calculateVendorRating(vendorId)];
   } else if (!vendorId) {
     // Calculate ratings for all vendors
-    const vendors = await Vendor.find({ archived: false }).lean();
+    const vendors = await Vendor.find(mergeHubFilter({ archived: false })).lean();
     ratings = await Promise.all(vendors.map(v => calculateVendorRating(v._id.toString())));
   }
 
@@ -246,9 +247,9 @@ const getVendorRatings = asyncHandler(async (req, res) => {
  */
 async function calculateVendorRating(vendorId) {
   const [qcChecks, audits, vendor] = await Promise.all([
-    QCCheck.find({ vendorId }).lean(),
-    Audit.find({ vendorId }).lean(),
-    Vendor.findOne({ _id: vendorId }).lean(),
+    QCCheck.find(mergeHubFilter({ vendorId })).lean(),
+    Audit.find(mergeHubFilter({ vendorId })).lean(),
+    Vendor.findOne(mergeHubFilter({ _id: vendorId })).lean(),
   ]);
 
   const totalQCChecks = qcChecks.length;
@@ -261,7 +262,7 @@ async function calculateVendorRating(vendorId) {
     : 0;
 
   // Compliance score based on certificates
-  const certificates = await Certificate.find({ vendorId, status: 'valid' }).lean();
+  const certificates = await Certificate.find(mergeHubFilter({ vendorId, status: 'valid' })).lean();
   const complianceScore = Math.min(100, certificates.length * 20); // Simple calculation
 
   // Overall rating
@@ -294,8 +295,11 @@ async function calculateVendorRating(vendorId) {
 
   // Save or update rating
   await VendorRating.findOneAndUpdate(
-    { vendorId },
-    { ...ratingData, calculatedAt: new Date() },
+    mergeHubFilter({ vendorId }),
+    {
+      $set: { ...ratingData, calculatedAt: new Date() },
+      $setOnInsert: hubFieldsForCreate(),
+    },
     { upsert: true, new: true }
   );
 

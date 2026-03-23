@@ -3,6 +3,7 @@ const GRN = require('../models/GRN');
 const QCCheck = require('../models/QCCheck');
 const logger = require('../../core/utils/logger');
 const asyncHandler = require('../../middleware/asyncHandler');
+const { mergeHubFilter } = require('../constants/hubScope');
 
 /**
  * Get sales overview metrics
@@ -20,13 +21,13 @@ const getSalesOverview = asyncHandler(async (req, res) => {
 
   // Calculate metrics from purchase orders and GRNs
   const [totalOrders, totalRevenue, avgOrderValue] = await Promise.all([
-    PurchaseOrder.countDocuments(filter),
+    PurchaseOrder.countDocuments(mergeHubFilter(filter)),
     PurchaseOrder.aggregate([
-      { $match: filter },
+      { $match: mergeHubFilter(filter) },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$totals.grandTotal', 0] } } } }
     ]),
     PurchaseOrder.aggregate([
-      { $match: filter },
+      { $match: mergeHubFilter(filter) },
       { $group: { _id: null, avg: { $avg: { $ifNull: ['$totals.grandTotal', 0] } } } }
     ])
   ]);
@@ -43,9 +44,9 @@ const getSalesOverview = asyncHandler(async (req, res) => {
   }
 
   const [prevOrders, prevRevenue] = await Promise.all([
-    PurchaseOrder.countDocuments(previousFilter),
+    PurchaseOrder.countDocuments(mergeHubFilter(previousFilter)),
     PurchaseOrder.aggregate([
-      { $match: previousFilter },
+      { $match: mergeHubFilter(previousFilter) },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$totals.grandTotal', 0] } } } }
     ])
   ]);
@@ -56,8 +57,8 @@ const getSalesOverview = asyncHandler(async (req, res) => {
   const avgOrderGrowth = prevOrders > 0 ? ((avgValue - (prevRev / Math.max(prevOrders, 1))) / (prevRev / Math.max(prevOrders, 1))) * 100 : 0;
 
   // Count unique products
-  const products = await PurchaseOrder.distinct('items.productId', filter);
-  const prevProducts = await PurchaseOrder.distinct('items.productId', previousFilter);
+  const products = await PurchaseOrder.distinct('items.productId', mergeHubFilter(filter));
+  const prevProducts = await PurchaseOrder.distinct('items.productId', mergeHubFilter(previousFilter));
   const productsGrowth = prevProducts.length > 0 ? ((products.length - prevProducts.length) / prevProducts.length) * 100 : 0;
 
   res.json({
@@ -103,7 +104,7 @@ const getSalesData = asyncHandler(async (req, res) => {
   }
 
   const salesData = await PurchaseOrder.aggregate([
-    { $match: matchFilter },
+    { $match: mergeHubFilter(matchFilter) },
     {
       $group: {
         _id: groupFormat,
@@ -149,7 +150,7 @@ const getProductPerformance = asyncHandler(async (req, res) => {
   }
 
   const productPerformance = await PurchaseOrder.aggregate([
-    { $match: matchFilter },
+    { $match: mergeHubFilter(matchFilter) },
     { $unwind: '$items' },
     {
       $group: {
@@ -214,10 +215,10 @@ const getOrderAnalytics = asyncHandler(async (req, res) => {
     if (endDate) matchFilter.createdAt.$lte = new Date(endDate);
   }
 
-  const totalOrders = await PurchaseOrder.countDocuments(matchFilter);
+  const totalOrders = await PurchaseOrder.countDocuments(mergeHubFilter(matchFilter));
   
   const orderAnalytics = await PurchaseOrder.aggregate([
-    { $match: matchFilter },
+    { $match: mergeHubFilter(matchFilter) },
     {
       $group: {
         _id: '$status',
@@ -275,7 +276,7 @@ const getRevenueByCategory = asyncHandler(async (req, res) => {
 
   const [categoryRevenue, totalRevenue] = await Promise.all([
     PurchaseOrder.aggregate([
-      { $match: matchFilter },
+      { $match: mergeHubFilter(matchFilter) },
       { $unwind: '$items' },
       {
         $group: {
@@ -286,7 +287,7 @@ const getRevenueByCategory = asyncHandler(async (req, res) => {
       { $sort: { revenue: -1 } },
     ]),
     PurchaseOrder.aggregate([
-      { $match: matchFilter },
+      { $match: mergeHubFilter(matchFilter) },
       { $unwind: '$items' },
       {
         $group: {
@@ -334,7 +335,7 @@ const getHourlySales = asyncHandler(async (req, res) => {
   }
 
   const hourlySales = await PurchaseOrder.aggregate([
-    { $match: matchFilter },
+    { $match: mergeHubFilter(matchFilter) },
     {
       $group: {
         _id: { $hour: '$createdAt' },
@@ -379,7 +380,7 @@ const getFinancialSummary = asyncHandler(async (req, res) => {
 
   const [summary, refunds] = await Promise.all([
     PurchaseOrder.aggregate([
-      { $match: filter },
+      { $match: mergeHubFilter(filter) },
       {
         $group: {
           _id: null,
@@ -390,7 +391,7 @@ const getFinancialSummary = asyncHandler(async (req, res) => {
       }
     ]),
     PurchaseOrder.aggregate([
-      { $match: { ...filter, status: 'RETURNED' } },
+      { $match: mergeHubFilter({ ...filter, status: 'RETURNED' }) },
       {
         $group: {
           _id: null,
@@ -440,10 +441,10 @@ const getCustomerInsights = asyncHandler(async (req, res) => {
 
   // Calculate customer metrics from purchase orders
   const [totalOrders, uniqueCustomers, avgOrdersPerCustomer] = await Promise.all([
-    PurchaseOrder.countDocuments(matchFilter),
-    PurchaseOrder.distinct('createdBy', matchFilter),
+    PurchaseOrder.countDocuments(mergeHubFilter(matchFilter)),
+    PurchaseOrder.distinct('createdBy', mergeHubFilter(matchFilter)),
     PurchaseOrder.aggregate([
-      { $match: matchFilter },
+      { $match: mergeHubFilter(matchFilter) },
       { $group: { _id: '$createdBy', orderCount: { $sum: 1 } } },
       { $group: { _id: null, avg: { $avg: '$orderCount' } } }
     ])
@@ -460,8 +461,8 @@ const getCustomerInsights = asyncHandler(async (req, res) => {
   }
 
   const [prevOrders, prevCustomers] = await Promise.all([
-    PurchaseOrder.countDocuments(previousFilter),
-    PurchaseOrder.distinct('createdBy', previousFilter)
+    PurchaseOrder.countDocuments(mergeHubFilter(previousFilter)),
+    PurchaseOrder.distinct('createdBy', mergeHubFilter(previousFilter))
   ]);
 
   const prevCustomerCount = prevCustomers.length;
@@ -524,7 +525,7 @@ const getTopCustomers = asyncHandler(async (req, res) => {
   }
 
   const topCustomers = await PurchaseOrder.aggregate([
-    { $match: matchFilter },
+    { $match: mergeHubFilter(matchFilter) },
     {
       $group: {
         _id: '$createdBy',

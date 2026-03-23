@@ -5,6 +5,8 @@ const vendorSchema = new mongoose.Schema({
   email: { type: String, index: true },
   accountNumber: { type: String },
   isActive: { type: Boolean, default: true },
+  /** Finance vendor directory tenant (e.g. chennai-hub) */
+  hubKey: { type: String, trim: true, index: true },
 }, {
   timestamps: true,
 });

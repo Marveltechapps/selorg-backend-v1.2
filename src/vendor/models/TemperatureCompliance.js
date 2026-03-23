@@ -26,6 +26,7 @@ const TemperatureComplianceSchema = new mongoose.Schema(
     startTime: Date,
     endTime: Date,
     metadata: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

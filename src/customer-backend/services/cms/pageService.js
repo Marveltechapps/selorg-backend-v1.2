@@ -170,6 +170,76 @@ function getBlockTypeForSectionKey(sk, typeByKey = {}) {
   return 'promoImage';
 }
 
+/** Parse section key from block id `legacy-<sectionKey>-<order>` */
+function sectionKeyFromLegacyBlockId(blockId) {
+  const m = String(blockId || '').match(/^legacy-(.+)-(\d+)$/);
+  return m ? m[1] : '';
+}
+
+/**
+ * Consecutive dashboard banner sections (multiple Banner (Main) rows) each produce one block with
+ * often a single banner — the app then shows a vertical stack instead of one carousel.
+ * Merge those into one block with a combined `banners` array (same for Sub / mid).
+ * Does not merge legacy `hero_banner` with `banner_main_*` (different slots).
+ */
+function mergeConsecutiveBannerBlocks(blocks, typeByKey = {}) {
+  if (!Array.isArray(blocks) || blocks.length < 2) return blocks;
+
+  /** Keys like `banner_<mongoId>` (section type Banner); not `banner_main_*` / `banner_sub_*`. */
+  const isUnifiedBannerKey = (sk) =>
+    typeof sk === 'string' &&
+    /^banner_/.test(sk) &&
+    !/^banner_main_/.test(sk) &&
+    !/^banner_sub_/.test(sk);
+
+  function canMergePair(last, cur, lastSk, curSk) {
+    if (last.type === 'heroBanner' && cur.type === 'heroBanner') {
+      const bothLegacyHero = lastSk === 'hero_banner' && curSk === 'hero_banner';
+      const bothMainDefs = /^banner_main_/.test(lastSk) && /^banner_main_/.test(curSk);
+      const bothUnified =
+        isUnifiedBannerKey(lastSk) &&
+        isUnifiedBannerKey(curSk) &&
+        typeByKey[lastSk] === 'banner_main' &&
+        typeByKey[curSk] === 'banner_main';
+      return bothLegacyHero || bothMainDefs || bothUnified;
+    }
+    if (last.type === 'bannerCarousel' && cur.type === 'bannerCarousel') {
+      const bothLegacyMid = lastSk === 'mid_banner' && curSk === 'mid_banner';
+      const bothSubDefs = /^banner_sub_/.test(lastSk) && /^banner_sub_/.test(curSk);
+      const bothUnified =
+        isUnifiedBannerKey(lastSk) &&
+        isUnifiedBannerKey(curSk) &&
+        typeByKey[lastSk] === 'banner_sub' &&
+        typeByKey[curSk] === 'banner_sub';
+      return bothLegacyMid || bothSubDefs || bothUnified;
+    }
+    return false;
+  }
+
+  const out = [];
+  for (const block of blocks) {
+    const curSk = sectionKeyFromLegacyBlockId(block.id);
+    const last = out[out.length - 1];
+    const lastSk = last ? sectionKeyFromLegacyBlockId(last.id) : '';
+
+    if (last && canMergePair(last, block, lastSk, curSk)) {
+      const a = Array.isArray(last.data?.banners) ? last.data.banners : [];
+      const b = Array.isArray(block.data?.banners) ? block.data.banners : [];
+      last.data = { ...last.data, banners: [...a, ...b] };
+      const n = last.data.banners.length;
+      last.config = { ...last.config, carousel: n > 1 };
+      continue;
+    }
+
+    out.push({
+      ...block,
+      data: block.data ? { ...block.data } : {},
+      config: block.config ? { ...block.config } : {},
+    });
+  }
+  return out;
+}
+
 /**
  * Build block-based home page from legacy home payload.
  * Used when no published CMS Page exists (e.g. customer_pages not seeded).
@@ -182,6 +252,7 @@ function buildHomePageFromLegacy(legacy) {
   const bannersByKey = legacy.bannersByKey || {};
   const taglineByKey = legacy.taglineByKey || {};
   const typeByKey = legacy.typeByKey || {};
+  const carouselByKey = legacy.carouselByKey || {};
   const categoryByKey = legacy.categoryByKey || {};
 
   const blocks = [];
@@ -200,6 +271,10 @@ function buildHomePageFromLegacy(legacy) {
     if (taglineByKey[sk] !== undefined) blockConfig.tagline = taglineByKey[sk];
     else if (config.organicTagline && sk === 'organic_tagline') blockConfig.tagline = config.organicTagline;
     if (config.organicIconUrl && (sk === 'organic_tagline' || taglineByKey[sk] !== undefined)) blockConfig.iconUrl = config.organicIconUrl;
+    if (blockType === 'heroBanner' || blockType === 'bannerCarousel') {
+      const v = carouselByKey[sk];
+      blockConfig.carousel = v === undefined ? true : v !== false;
+    }
 
     let data = {};
     if (sk === 'categories' || typeByKey[sk] === 'super_category') {
@@ -223,12 +298,14 @@ function buildHomePageFromLegacy(legacy) {
     order += 1;
   }
 
+  const mergedBlocks = mergeConsecutiveBannerBlocks(blocks, typeByKey);
+
   return {
     pageId: 'legacy-home',
     slug: 'home',
     title: 'Home',
     version: 1,
-    blocks,
+    blocks: mergedBlocks,
   };
 }
 

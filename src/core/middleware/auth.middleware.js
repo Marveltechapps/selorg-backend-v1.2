@@ -78,6 +78,14 @@ const authenticateToken = (req, res, next) => {
       }
 
       // Attach user to request object
+      const assignedStores = decoded.assignedStores || [];
+      const primaryStoreId = decoded.primaryStoreId || '';
+      const hubKey =
+        (decoded.hubKey && String(decoded.hubKey).trim()) ||
+        (primaryStoreId && String(primaryStoreId).trim()) ||
+        (assignedStores[0] && String(assignedStores[0]).trim()) ||
+        '';
+
       req.user = {
         userId: decoded.userId || decoded.id || '',
         email: decoded.email,
@@ -85,8 +93,9 @@ const authenticateToken = (req, res, next) => {
         role: decoded.role,
         name: decoded.name || '',
         permissions: decoded.permissions || [],
-        assignedStores: decoded.assignedStores || [],
-        primaryStoreId: decoded.primaryStoreId || '',
+        assignedStores,
+        primaryStoreId,
+        hubKey,
       };
 
       next();

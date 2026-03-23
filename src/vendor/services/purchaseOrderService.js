@@ -3,10 +3,12 @@ const Job = require('../models/Job');
 const { v4: uuidv4 } = require('uuid');
 const vendorWarehouseIntegrationService = require('../../shared/services/vendorWarehouseIntegrationService');
 const logger = require('../../core/utils/logger');
+const { mergeHubFilter, hubFieldsForCreate } = require('../constants/hubScope');
 
 async function createPurchaseOrder(payload, requester) {
   // validate totals vs items (basic)
   const po = new PurchaseOrder({
+    ...hubFieldsForCreate(),
     vendorId: payload.vendorId,
     reference: payload.reference,
     currency: payload.currency || 'INR',
@@ -34,8 +36,9 @@ async function listPurchaseOrders(query) {
   const filter = {};
   if (query.vendorId) filter.vendorId = query.vendorId;
   if (query.status && query.status !== 'all') filter.status = query.status;
-  const total = await PurchaseOrder.countDocuments(filter);
-  const data = await PurchaseOrder.find(filter)
+  const scoped = mergeHubFilter(filter);
+  const total = await PurchaseOrder.countDocuments(scoped);
+  const data = await PurchaseOrder.find(scoped)
     .skip((page - 1) * perPage)
     .limit(perPage)
     .sort({ createdAt: -1 })
@@ -44,7 +47,7 @@ async function listPurchaseOrders(query) {
 }
 
 async function getPurchaseOrderById(poId) {
-  const po = await PurchaseOrder.findById(poId).lean();
+  const po = await PurchaseOrder.findOne(mergeHubFilter({ _id: poId })).lean();
   if (!po) {
     const err = new Error('Purchase order not found');
     err.status = 404;
@@ -54,7 +57,7 @@ async function getPurchaseOrderById(poId) {
 }
 
 async function updatePurchaseOrder(poId, payload) {
-  const po = await PurchaseOrder.findById(poId);
+  const po = await PurchaseOrder.findOne(mergeHubFilter({ _id: poId }));
   if (!po) {
     const err = new Error('Purchase order not found');
     err.status = 404;
@@ -71,7 +74,7 @@ async function updatePurchaseOrder(poId, payload) {
 }
 
 async function performAction(poId, actionRequest) {
-  const po = await PurchaseOrder.findById(poId);
+  const po = await PurchaseOrder.findOne(mergeHubFilter({ _id: poId }));
   if (!po) {
     const err = new Error('Purchase order not found');
     err.status = 404;
@@ -107,7 +110,13 @@ async function performAction(poId, actionRequest) {
 }
 
 async function createBulkUploadJob(meta) {
-  const job = new Job({ jobId: uuidv4(), type: 'bulk-upload-po', status: 'pending', result: meta });
+  const job = new Job({
+    ...hubFieldsForCreate(),
+    jobId: uuidv4(),
+    type: 'bulk-upload-po',
+    status: 'pending',
+    result: meta,
+  });
   await job.save();
   return job.toObject();
 }

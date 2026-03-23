@@ -17,6 +17,7 @@ const VendorRatingSchema = new mongoose.Schema(
     lastUpdated: { type: Date, default: Date.now },
     calculatedAt: { type: Date, default: Date.now },
     metadata: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

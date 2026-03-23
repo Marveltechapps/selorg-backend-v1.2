@@ -8,6 +8,8 @@ const UserSchema = new mongoose.Schema(
     role: { type: String, default: 'admin' },
     assignedStores: [{ type: String }],
     primaryStoreId: { type: String },
+    /** Procurement / vendor dashboard tenant (e.g. chennai-hub) */
+    hubKey: { type: String, trim: true },
     metadata: mongoose.Schema.Types.Mixed,
   },
   { timestamps: true }

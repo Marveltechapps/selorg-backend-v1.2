@@ -2,6 +2,7 @@ const SystemService = require('../models/SystemService');
 const SystemLog = require('../models/SystemLog');
 const logger = require('../../core/utils/logger');
 const asyncHandler = require('../../middleware/asyncHandler');
+const { mergeHubFilter, hubFieldsForCreate } = require('../constants/hubScope');
 
 /**
  * Get all system services
@@ -13,7 +14,7 @@ const getServices = asyncHandler(async (req, res) => {
   if (status) filter.status = status;
   if (type) filter.type = type;
 
-  const services = await SystemService.find(filter)
+  const services = await SystemService.find(mergeHubFilter(filter))
     .sort({ name: 1 })
     .lean();
 
@@ -34,7 +35,7 @@ const getServices = asyncHandler(async (req, res) => {
  * Get service by ID
  */
 const getServiceById = asyncHandler(async (req, res) => {
-  const service = await SystemService.findById(req.params.id).lean();
+  const service = await SystemService.findOne(mergeHubFilter({ _id: req.params.id })).lean();
   
   if (!service) {
     return res.status(404).json({
@@ -63,15 +64,18 @@ const upsertService = asyncHandler(async (req, res) => {
   const { name, type, status, endpoint, responseTime, uptime } = req.body;
   
   const service = await SystemService.findOneAndUpdate(
-    { name },
+    mergeHubFilter({ name }),
     {
-      name,
-      type,
-      status,
-      endpoint,
-      responseTime,
-      uptime,
-      lastChecked: new Date(),
+      $set: {
+        name,
+        type,
+        status,
+        endpoint,
+        responseTime,
+        uptime,
+        lastChecked: new Date(),
+      },
+      $setOnInsert: hubFieldsForCreate(),
     },
     { upsert: true, new: true }
   );
@@ -104,7 +108,7 @@ const getLogs = asyncHandler(async (req, res) => {
     if (endDate) filter.timestamp.$lte = new Date(endDate);
   }
 
-  const logs = await SystemLog.find(filter)
+  const logs = await SystemLog.find(mergeHubFilter(filter))
     .sort({ timestamp: -1 })
     .limit(parseInt(limit))
     .lean();
@@ -128,7 +132,7 @@ const getLogs = asyncHandler(async (req, res) => {
  * Create log entry
  */
 const createLog = asyncHandler(async (req, res) => {
-  const log = new SystemLog(req.body);
+  const log = new SystemLog({ ...req.body, ...hubFieldsForCreate() });
   await log.save();
 
   res.status(201).json({

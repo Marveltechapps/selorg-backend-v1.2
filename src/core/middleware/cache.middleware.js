@@ -13,11 +13,11 @@ const appConfig = require('../../config/app');
  * Respects DISABLE_CACHE env; skips caching for health/metrics.
  *
  * @param {number} ttlSeconds - Time to live in seconds (default: 3600)
- * @param {{ skipPaths?: string[] }} [options] - Optional. skipPaths: paths to skip caching (e.g. ['/bootstrap'])
+ * @param {{ skipPaths?: string[], cacheKeyExtra?: (req: object) => string }} [options] - Optional. skipPaths; cacheKeyExtra appends to cache key (e.g. vendor hub).
  * @returns {Function} Express middleware function
  */
 const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
-  const { skipPaths = [] } = typeof options === 'object' ? options : {};
+  const { skipPaths = [], cacheKeyExtra } = typeof options === 'object' ? options : {};
   return async (req, res, next) => {
     // Only cache GET requests
     if (req.method !== 'GET') {
@@ -37,7 +37,11 @@ const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
       return next();
     }
 
-    const cacheKey = `cache:${req.originalUrl}:${JSON.stringify(req.query)}`;
+    const extra =
+      typeof cacheKeyExtra === 'function'
+        ? String(cacheKeyExtra(req) || '')
+        : '';
+    const cacheKey = `cache:${req.originalUrl}:${JSON.stringify(req.query)}${extra}`;
 
     try {
       // Try to get from cache

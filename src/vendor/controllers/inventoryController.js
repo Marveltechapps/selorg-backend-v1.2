@@ -1,4 +1,5 @@
 const inventoryService = require('../services/inventoryService');
+const { mergeHubFilter } = require('../constants/hubScope');
 
 async function getSummary(req, res, next) {
   try {
@@ -56,10 +57,12 @@ async function ackAlert(req, res, next) {
     }
 
     // Support both seeded `alertId` field and MongoDB _id lookup, and ensure the alert belongs to the vendor
-    const alert = await Alert.findOne({
-      vendorId,
-      $or: [{ _id: requestedId }, { alertId: requestedId }],
-    });
+    const alert = await Alert.findOne(
+      mergeHubFilter({
+        vendorId,
+        $or: [{ _id: requestedId }, { alertId: requestedId }],
+      })
+    );
 
     if (!alert) return res.status(404).json({ code: 404, message: 'Not found' });
     alert.acknowledged = true;

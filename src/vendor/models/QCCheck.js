@@ -15,6 +15,7 @@ const QCCheckSchema = new mongoose.Schema(
     measurements: [QCMeasurementSchema],
     notes: String,
     attachments: [String],
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

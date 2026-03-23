@@ -13,6 +13,7 @@ const financeAnalyticsController = require('../controllers/financeAnalyticsContr
 const approvalsController = require('../controllers/approvalsController');
 const pickerWithdrawalsController = require('../controllers/pickerWithdrawalsController');
 const { authenticateToken, requireRole, cacheMiddleware } = require('../../core/middleware');
+const { bindFinanceHubContext } = require('../middleware/financeHubContext');
 const { validateRequest } = require('../../middleware/zodValidator');
 const appConfig = require('../../config/app');
 const {
@@ -79,6 +80,17 @@ router.use('/auth', authRoutes);
 // All finance routes require JWT and role: finance, admin, super_admin
 const financeAuth = [authenticateToken, requireRole('finance', 'admin', 'super_admin')];
 
+// Vendor payables: procurement vendor role + hub-scoped cache keys (see bindFinanceHubContext)
+const vendorPaymentsAuth = [
+  authenticateToken,
+  requireRole('finance', 'admin', 'super_admin', 'vendor'),
+  bindFinanceHubContext,
+];
+const vendorPaymentsCache = (ttl) =>
+  cacheMiddleware(ttl, {
+    cacheKeyExtra: (req) => (req.vendorHubKey ? `:${req.vendorHubKey}` : ''),
+  });
+
 // Finance Overview routes
 router.get('/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.summary), validateRequest(getFinanceSummarySchema), financeDashboardController.getFinanceSummary);
 router.get('/payment-method-split', ...financeAuth, cacheMiddleware(appConfig.cache.finance.summary), validateRequest(getPaymentMethodSplitSchema), financeDashboardController.getPaymentMethodSplit);
@@ -93,17 +105,17 @@ router.get('/customer-payments', ...financeAuth, cacheMiddleware(appConfig.cache
 router.get('/customer-payments/:id', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), validateRequest(getCustomerPaymentDetailsSchema), customerPaymentsController.getCustomerPaymentDetails);
 router.post('/customer-payments/:id/retry', ...financeAuth, validateRequest(retryCustomerPaymentSchema), customerPaymentsController.retryCustomerPayment);
 
-// Vendor Payments routes
-router.get('/vendor-payments/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), vendorPaymentsController.getPayablesSummary);
-router.get('/vendor-payments/invoices', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), validateRequest(getVendorInvoicesSchema), vendorPaymentsController.getVendorInvoices);
-router.post('/vendor-payments/invoices', ...financeAuth, validateRequest(uploadInvoiceSchema), vendorPaymentsController.uploadInvoice);
-router.post('/vendor-payments/invoices/bulk-approve', ...financeAuth, validateRequest(bulkApproveInvoicesSchema), vendorPaymentsController.bulkApproveInvoices);
-router.get('/vendor-payments/invoices/:id', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), validateRequest(getVendorInvoiceDetailsSchema), vendorPaymentsController.getVendorInvoiceDetails);
-router.post('/vendor-payments/invoices/:id/approve', ...financeAuth, validateRequest(approveInvoiceSchema), vendorPaymentsController.approveInvoice);
-router.post('/vendor-payments/invoices/:id/reject', ...financeAuth, validateRequest(rejectInvoiceSchema), vendorPaymentsController.rejectInvoice);
-router.post('/vendor-payments/invoices/:id/mark-paid', ...financeAuth, validateRequest(markInvoicePaidSchema), vendorPaymentsController.markInvoicePaid);
-router.post('/vendor-payments/payments', ...financeAuth, validateRequest(createPaymentSchema), vendorPaymentsController.createPayment);
-router.get('/vendor-payments/vendors', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), vendorPaymentsController.getVendors);
+// Vendor Payments routes (hub-scoped; vendor dashboard users use role `vendor`)
+router.get('/vendor-payments/summary', ...vendorPaymentsAuth, vendorPaymentsCache(appConfig.cache.finance.payments), vendorPaymentsController.getPayablesSummary);
+router.get('/vendor-payments/invoices', ...vendorPaymentsAuth, vendorPaymentsCache(appConfig.cache.finance.payments), validateRequest(getVendorInvoicesSchema), vendorPaymentsController.getVendorInvoices);
+router.post('/vendor-payments/invoices', ...vendorPaymentsAuth, validateRequest(uploadInvoiceSchema), vendorPaymentsController.uploadInvoice);
+router.post('/vendor-payments/invoices/bulk-approve', ...vendorPaymentsAuth, validateRequest(bulkApproveInvoicesSchema), vendorPaymentsController.bulkApproveInvoices);
+router.get('/vendor-payments/invoices/:id', ...vendorPaymentsAuth, vendorPaymentsCache(appConfig.cache.finance.payments), validateRequest(getVendorInvoiceDetailsSchema), vendorPaymentsController.getVendorInvoiceDetails);
+router.post('/vendor-payments/invoices/:id/approve', ...vendorPaymentsAuth, validateRequest(approveInvoiceSchema), vendorPaymentsController.approveInvoice);
+router.post('/vendor-payments/invoices/:id/reject', ...vendorPaymentsAuth, validateRequest(rejectInvoiceSchema), vendorPaymentsController.rejectInvoice);
+router.post('/vendor-payments/invoices/:id/mark-paid', ...vendorPaymentsAuth, validateRequest(markInvoicePaidSchema), vendorPaymentsController.markInvoicePaid);
+router.post('/vendor-payments/payments', ...vendorPaymentsAuth, validateRequest(createPaymentSchema), vendorPaymentsController.createPayment);
+router.get('/vendor-payments/vendors', ...vendorPaymentsAuth, vendorPaymentsCache(appConfig.cache.finance.payments), vendorPaymentsController.getVendors);
 
 // Picker Withdrawals routes (Finance Picker Payouts)
 router.get('/picker-withdrawals', ...financeAuth, pickerWithdrawalsController.list);

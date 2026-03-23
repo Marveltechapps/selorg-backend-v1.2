@@ -1,9 +1,11 @@
 const mongoose = require('mongoose');
 
 const vendorInvoiceSchema = new mongoose.Schema({
+  /** Procurement / finance tenant (e.g. chennai-hub) */
+  hubKey: { type: String, trim: true, index: true },
   vendorId: { type: String, required: true, index: true },
   vendorName: { type: String, required: true },
-  invoiceNumber: { type: String, required: true, unique: true, index: true },
+  invoiceNumber: { type: String, required: true, index: true },
   invoiceDate: { type: Date, required: true, index: true },
   dueDate: { type: Date, required: true, index: true },
   amount: { type: Number, required: true },
@@ -29,6 +31,7 @@ const vendorInvoiceSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+vendorInvoiceSchema.index({ hubKey: 1, invoiceNumber: 1 }, { unique: true });
 vendorInvoiceSchema.index({ vendorId: 1, status: 1 });
 vendorInvoiceSchema.index({ dueDate: 1, status: 1 });
 vendorInvoiceSchema.index({ invoiceDate: 1 });

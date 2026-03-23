@@ -1,16 +1,10 @@
 const express = require('express');
-const { body } = require('express-validator');
 const router = express.Router();
 const vendorController = require('../controllers/vendorController2');
 const { requireAuth } = require('../../core/middleware');
 
 router.get('/', vendorController.listVendors);
-router.post(
-  '/',
-  body('name').notEmpty(),
-  body('code').notEmpty(),
-  vendorController.createVendor
-);
+router.post('/', vendorController.createVendor);
 
 router.get('/summary', vendorController.getVendorSummary); // reuse list for summary quick counts
 

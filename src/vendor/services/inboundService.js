@@ -3,15 +3,16 @@ const Shipment = require('../models/Shipment');
 const Exception = require('../models/Exception');
 const { v4: uuidv4 } = require('uuid');
 const Job = require('../models/Job');
+const { mergeHubFilter, hubFieldsForCreate } = require('../constants/hubScope');
 
 async function createGRN(payload) {
-  const grn = new GRN(payload);
+  const grn = new GRN({ ...payload, ...hubFieldsForCreate() });
   await grn.save();
   return grn.toObject();
 }
 
 async function getGRNById(grnId) {
-  const grn = await GRN.findById(grnId).lean();
+  const grn = await GRN.findOne(mergeHubFilter({ _id: grnId })).lean();
   if (!grn) {
     const err = new Error('GRN not found');
     err.status = 404;
@@ -21,7 +22,7 @@ async function getGRNById(grnId) {
 }
 
 async function updateGRN(grnId, payload) {
-  const grn = await GRN.findById(grnId);
+  const grn = await GRN.findOne(mergeHubFilter({ _id: grnId }));
   if (!grn) {
     const err = new Error('GRN not found');
     err.status = 404;
@@ -61,7 +62,13 @@ async function rejectGRN(grnId, reason) {
   // Ensure reason is forwarded to status change validation and stored on the GRN
   const grn = await changeGRNStatus(grnId, { status: 'REJECTED', reason });
   // create exception
-  const exception = new Exception({ grnId, description: reason, type: 'REJECTED', status: 'OPEN' });
+  const exception = new Exception({
+    ...hubFieldsForCreate(),
+    grnId,
+    description: reason,
+    type: 'REJECTED',
+    status: 'OPEN',
+  });
   await exception.save();
   return { grn, exception: exception.toObject() };
 }
@@ -72,19 +79,20 @@ async function listGRNs(query) {
   const filter = {};
   if (query.vendorId) filter.vendorId = query.vendorId;
   if (query.status) filter.status = query.status;
-  const total = await GRN.countDocuments(filter);
-  const data = await GRN.find(filter).skip((page - 1) * limit).limit(limit).lean();
+  const scoped = mergeHubFilter(filter);
+  const total = await GRN.countDocuments(scoped);
+  const data = await GRN.find(scoped).skip((page - 1) * limit).limit(limit).lean();
   return { data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
 }
 
 async function createShipment(payload) {
-  const s = new Shipment(payload);
+  const s = new Shipment({ ...payload, ...hubFieldsForCreate() });
   await s.save();
   return s.toObject();
 }
 
 async function updateShipmentStatus(shipmentId, payload) {
-  const s = await Shipment.findById(shipmentId);
+  const s = await Shipment.findOne(mergeHubFilter({ _id: shipmentId }));
   if (!s) {
     const err = new Error('Shipment not found');
     err.status = 404;
@@ -99,18 +107,18 @@ async function listExceptions(query) {
   const filter = {};
   if (query.grnId) filter.grnId = query.grnId;
   if (query.status) filter.status = query.status;
-  const data = await Exception.find(filter).lean();
+  const data = await Exception.find(mergeHubFilter(filter)).lean();
   return { data, pagination: { page: 1, limit: data.length, total: data.length, pages: 1 } };
 }
 
 async function createException(payload) {
-  const ex = new Exception(payload);
+  const ex = new Exception({ ...payload, ...hubFieldsForCreate() });
   await ex.save();
   return ex.toObject();
 }
 
 async function resolveException(exceptionId, payload) {
-  const ex = await Exception.findById(exceptionId);
+  const ex = await Exception.findOne(mergeHubFilter({ _id: exceptionId }));
   if (!ex) {
     const err = new Error('Exception not found');
     err.status = 404;
@@ -124,7 +132,7 @@ async function resolveException(exceptionId, payload) {
 
 async function createImportJob() {
   // use lowercase enum values to match Job schema enum
-  const job = new Job({ jobId: uuidv4(), type: 'inbound-import', status: 'pending' });
+  const job = new Job({ ...hubFieldsForCreate(), jobId: uuidv4(), type: 'inbound-import', status: 'pending' });
   await job.save();
   return job.toObject();
 }

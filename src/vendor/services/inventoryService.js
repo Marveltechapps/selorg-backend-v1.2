@@ -1,11 +1,12 @@
 const InventoryItem = require('../models/InventoryItem');
 const Job = require('../models/Job');
 const { v4: uuidv4 } = require('uuid');
+const { mergeHubFilter, hubFieldsForCreate } = require('../constants/hubScope');
 
 async function getInventorySummary(vendorId, range) {
-  const totalSkus = await InventoryItem.countDocuments({ vendorId });
+  const totalSkus = await InventoryItem.countDocuments(mergeHubFilter({ vendorId }));
   const agg = await InventoryItem.aggregate([
-    { $match: { vendorId } },
+    { $match: mergeHubFilter({ vendorId }) },
     {
       $group: {
         _id: null,
@@ -36,8 +37,9 @@ async function listStock(vendorId, query) {
   if (query.sku) filter.sku = query.sku;
   if (query.location) filter.location = query.location;
   if (query.agingDaysGt) filter.agingDays = { $gt: Number(query.agingDaysGt) };
-  const total = await InventoryItem.countDocuments(filter);
-  const items = await InventoryItem.find(filter)
+  const scoped = mergeHubFilter(filter);
+  const total = await InventoryItem.countDocuments(scoped);
+  const items = await InventoryItem.find(scoped)
     .skip((page - 1) * size)
     .limit(size)
     .sort({ lastUpdated: -1 })
@@ -47,7 +49,13 @@ async function listStock(vendorId, query) {
 
 async function triggerSync(vendorId, requestBody) {
   // create a job record for async processing
-  const job = new Job({ jobId: uuidv4(), type: 'inventory-sync', status: 'pending', result: { vendorId, requestBody } });
+  const job = new Job({
+    ...hubFieldsForCreate(),
+    jobId: uuidv4(),
+    type: 'inventory-sync',
+    status: 'pending',
+    result: { vendorId, requestBody },
+  });
   await job.save();
   return job.toObject();
 }
@@ -74,13 +82,13 @@ async function reconcile(vendorId, requestBody) {
 async function listAgingAlerts(vendorId, opts) {
   const filter = { vendorId };
   if (opts.severity) filter.severity = opts.severity;
-  const items = await require('../models/Alert').find(filter).lean();
+  const items = await require('../models/Alert').find(mergeHubFilter(filter)).lean();
   return { total: items.length, items };
 }
 
 async function listStockouts(vendorId, query) {
   const filter = { vendorId, $or: [{ available: { $lte: 0 } }, { quantity: { $lte: 0 } }] };
-  const stockouts = await InventoryItem.find(filter)
+  const stockouts = await InventoryItem.find(mergeHubFilter(filter))
     .sort({ lastUpdated: -1 })
     .lean();
   
@@ -105,7 +113,7 @@ async function listAgingInventory(vendorId, query) {
     agingDays: { $gte: daysThreshold },
   };
   
-  const agingItems = await InventoryItem.find(filter)
+  const agingItems = await InventoryItem.find(mergeHubFilter(filter))
     .sort({ agingDays: -1 })
     .lean();
   
@@ -143,7 +151,7 @@ async function getKPIs(vendorId, query) {
   const agingInventory = await listAgingInventory(vendorId, { daysThreshold: 30 });
   
   const totalValue = await InventoryItem.aggregate([
-    { $match: { vendorId } },
+    { $match: mergeHubFilter({ vendorId }) },
     {
       $group: {
         _id: null,

@@ -10,6 +10,7 @@ const AlertSchema = new mongoose.Schema(
     acknowledged: { type: Boolean, default: false },
     acknowledgedBy: String,
     note: String,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

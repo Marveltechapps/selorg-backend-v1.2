@@ -20,6 +20,7 @@ const SystemServiceSchema = new mongoose.Schema(
     lastChecked: Date,
     uptime: Number, // percentage
     metadata: mongoose.Schema.Types.Mixed,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

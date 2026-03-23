@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+const { isHeroLaneSlot } = require('../utils/bannerPlacement');
 const { HomeConfig } = require('../models/HomeConfig');
 const { HomeSectionDefinition } = require('../models/HomeSectionDefinition');
 const { Category } = require('../models/Category');
@@ -72,33 +74,97 @@ async function getHomePayload(req = {}) {
       { $or: [{ endDate: { $exists: false } }, { endDate: null }, { endDate: { $gte: now } }] },
     ],
   };
-  const bannerMainDefs = definitionsFromCollection.filter((d) => d.type === 'banner_main' && d.bannerId);
-  const bannerSubDefs = definitionsFromCollection.filter((d) => d.type === 'banner_sub' && d.bannerId);
-  const heroBannerIds = bannerMainDefs.map((d) => d.bannerId).filter(Boolean);
-  const midBannerIds = bannerSubDefs.map((d) => d.bannerId).filter(Boolean);
+  /** Ordered banner ObjectIds for this section (handles lean ObjectIds and populated { _id } refs). */
+  function getBannerIdList(d) {
+    if (Array.isArray(d.bannerIds) && d.bannerIds.length > 0) {
+      return d.bannerIds
+        .map((id) => {
+          if (id == null) return null;
+          if (typeof id === 'object' && id._id != null) return id._id;
+          return id;
+        })
+        .filter((id) => id != null && mongoose.Types.ObjectId.isValid(String(id)));
+    }
+    if (d.bannerId) {
+      const raw = typeof d.bannerId === 'object' && d.bannerId._id != null ? d.bannerId._id : d.bannerId;
+      return raw && mongoose.Types.ObjectId.isValid(String(raw)) ? [raw] : [];
+    }
+    return [];
+  }
+
+  /** Unified "banner" sections: hero vs mid comes from Banner.slot (set in Banners tab). */
+  const bannerUnified = definitionsFromCollection.filter((d) => d.type === 'banner' && getBannerIdList(d).length > 0);
+  const unifiedFirstIds = [...new Set(bannerUnified.map((d) => String(getBannerIdList(d)[0])))];
+  const unifiedSlotById = new Map();
+  if (unifiedFirstIds.length > 0) {
+    const oids = unifiedFirstIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const urows = await Banner.find({ _id: { $in: oids } }).select('slot').lean();
+    for (const b of urows) {
+      const slot = b && b.slot ? String(b.slot).toLowerCase() : 'mid';
+      unifiedSlotById.set(String(b._id), slot);
+    }
+  }
+  const bannerMainDefs = [
+    ...definitionsFromCollection.filter((d) => d.type === 'banner_main' && getBannerIdList(d).length > 0),
+    ...bannerUnified.filter((d) => {
+      const id = String(getBannerIdList(d)[0]);
+      return isHeroLaneSlot(unifiedSlotById.get(id));
+    }),
+  ];
+  const bannerSubDefs = [
+    ...definitionsFromCollection.filter((d) => d.type === 'banner_sub' && getBannerIdList(d).length > 0),
+    ...bannerUnified.filter((d) => {
+      const id = String(getBannerIdList(d)[0]);
+      return !isHeroLaneSlot(unifiedSlotById.get(id));
+    }),
+  ];
+  const heroBannerIds = [...new Set(bannerMainDefs.flatMap((d) => getBannerIdList(d)).map((id) => String(id)))];
+  const midBannerIds = [...new Set(bannerSubDefs.flatMap((d) => getBannerIdList(d)).map((id) => String(id)))];
   let heroBanners = [];
   let midBanners = [];
   if (heroBannerIds.length > 0) {
-    heroBanners = await Banner.find({ _id: { $in: heroBannerIds }, isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
+    const heroOid = heroBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    heroBanners = await Banner.find({ _id: { $in: heroOid }, isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
     const orderMap = new Map(heroBannerIds.map((id, i) => [String(id), i]));
     heroBanners.sort((a, b) => (orderMap.get(String(a._id)) ?? 99) - (orderMap.get(String(b._id)) ?? 99));
   }
   if (midBannerIds.length > 0) {
-    midBanners = await Banner.find({ _id: { $in: midBannerIds }, isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
+    const midOid = midBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    midBanners = await Banner.find({ _id: { $in: midOid }, isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
     const orderMap = new Map(midBannerIds.map((id, i) => [String(id), i]));
     midBanners.sort((a, b) => (orderMap.get(String(a._id)) ?? 99) - (orderMap.get(String(b._id)) ?? 99));
   }
+  /**
+   * Section carousels: resolve by admin-selected IDs without schedule filter.
+   * Do NOT filter by isActive here — inactive flags were dropping slides so the app showed
+   * a single static banner (no dots) even when multiple IDs were configured.
+   * Legacy hero/mid slot lists above still use isActive + schedule.
+   */
+  let mainBannerMap = new Map();
+  if (heroBannerIds.length > 0) {
+    const heroOid = heroBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const rows = await Banner.find({ _id: { $in: heroOid } }).sort({ order: 1 }).lean();
+    mainBannerMap = new Map(rows.map((b) => [String(b._id), b]));
+  }
+  let subBannerMap = new Map();
+  if (midBannerIds.length > 0) {
+    const midOid = midBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const rows = await Banner.find({ _id: { $in: midOid } }).sort({ order: 1 }).lean();
+    subBannerMap = new Map(rows.map((b) => [String(b._id), b]));
+  }
   const bannersByKey = {};
   for (const d of bannerMainDefs) {
-    if (d.bannerId && d.key) {
-      const banner = heroBanners.find((b) => String(b._id) === String(d.bannerId));
-      if (banner) bannersByKey[d.key] = [banner];
+    const ids = getBannerIdList(d);
+    if (d.key && ids.length > 0) {
+      const list = ids.map((bid) => mainBannerMap.get(String(bid))).filter(Boolean);
+      if (list.length > 0) bannersByKey[d.key] = list;
     }
   }
   for (const d of bannerSubDefs) {
-    if (d.bannerId && d.key) {
-      const banner = midBanners.find((b) => String(b._id) === String(d.bannerId));
-      if (banner) bannersByKey[d.key] = [banner];
+    const ids = getBannerIdList(d);
+    if (d.key && ids.length > 0) {
+      const list = ids.map((bid) => subBannerMap.get(String(bid))).filter(Boolean);
+      if (list.length > 0) bannersByKey[d.key] = list;
     }
   }
   const sectionsDocs = await HomeSection.find({ isActive: true }).sort({ order: 1 }).lean();
@@ -108,8 +174,10 @@ async function getHomePayload(req = {}) {
     const products = await resolveProducts(s.productIds || []);
     sections[s.sectionKey] = { title: s.title, products };
   }
+  // HomeSectionDefinition with a collectionId is the source of truth for that key's products.
+  // Always merge from the collection (do not skip when HomeSection already created an empty stub).
   for (const d of sectionDefs) {
-    if (d.collectionId && !sections[d.key]) {
+    if (d.collectionId && d.key) {
       const products = await resolveCollectionProducts(d.collectionId);
       sections[d.key] = { title: d.label || d.key, products };
     }
@@ -135,7 +203,31 @@ async function getHomePayload(req = {}) {
 
   const typeByKey = {};
   for (const d of definitionsFromCollection) {
-    if (d.key && d.type) typeByKey[d.key] = d.type;
+    if (d.key && d.type) {
+      if (d.type === 'banner') {
+        const ids = getBannerIdList(d);
+        if (ids.length > 0) {
+          const slot = unifiedSlotById.get(String(ids[0]));
+          typeByKey[d.key] = isHeroLaneSlot(slot) ? 'banner_main' : 'banner_sub';
+        } else {
+          typeByKey[d.key] = 'banner_sub';
+        }
+      } else {
+        typeByKey[d.key] = d.type;
+      }
+    }
+  }
+
+  const carouselByKey = {};
+  /** Expose configured banner id lists so the app can reconcile if resolved bannersByKey is short. */
+  const bannerIdsByKey = {};
+  for (const d of definitionsFromCollection) {
+    if (d.key && (d.type === 'banner_main' || d.type === 'banner_sub' || d.type === 'banner')) {
+      const ids = getBannerIdList(d);
+      /** Carousel when more than one banner; single banner = static (ignores stale DB useCarousel). */
+      carouselByKey[d.key] = ids.length > 1;
+      if (ids.length > 0) bannerIdsByKey[d.key] = ids.map((id) => String(id));
+    }
   }
 
   // Section list (HomeSectionDefinition) is the ONLY source of truth. Never use HomeConfig.sectionOrder.
@@ -152,8 +244,10 @@ async function getHomePayload(req = {}) {
     heroBanners: heroBanners || [],
     midBanners: midBanners || [],
     bannersByKey,
+    bannerIdsByKey,
     taglineByKey,
     typeByKey,
+    carouselByKey,
     categoryByKey,
     sections,
     lifestyle,

@@ -18,6 +18,7 @@ const GRNSchema = new mongoose.Schema(
     notes: String,
     rejectionReason: String,
     exceptions: [{ type: String }],
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

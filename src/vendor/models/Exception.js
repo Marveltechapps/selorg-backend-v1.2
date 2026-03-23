@@ -7,6 +7,7 @@ const ExceptionSchema = new mongoose.Schema(
     description: String,
     status: { type: String, default: 'OPEN' },
     resolvedAt: Date,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

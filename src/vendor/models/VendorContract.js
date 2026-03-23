@@ -49,6 +49,7 @@ const vendorContractSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    hubKey: { type: String, trim: true, index: true },
   },
   {
     timestamps: true,

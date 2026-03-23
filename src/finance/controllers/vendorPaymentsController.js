@@ -2,6 +2,7 @@ const vendorPaymentsService = require('../services/vendorPaymentsService');
 const Vendor = require('../models/Vendor');
 const { asyncHandler } = require('../../core/middleware');
 const cacheInvalidation = require('../cacheInvalidation');
+const { mergeHubFilter } = require('../../vendor/constants/hubScope');
 
 class VendorPaymentsController {
   getPayablesSummary = asyncHandler(async (req, res) => {
@@ -50,7 +51,9 @@ class VendorPaymentsController {
   });
 
   uploadInvoice = asyncHandler(async (req, res) => {
-    const vendor = req.body.vendorId ? await Vendor.findById(req.body.vendorId).lean() : null;
+    const vendor = req.body.vendorId
+      ? await Vendor.findOne(mergeHubFilter({ _id: req.body.vendorId })).lean()
+      : null;
     const payload = {
       ...req.body,
       vendorName: vendor?.name || req.body.vendorName || 'Unknown Vendor',

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken, requireRole, cacheMiddleware } = require('../../core/middleware');
 const appConfig = require('../../config/app');
+const { bindVendorHubContext } = require('../middleware/vendorHubContext');
 
 // Import all vendor routes
 const authRoutes = require('./authRoutes');
@@ -23,7 +24,10 @@ router.use('/auth', authRoutes);
 // All other routes require JWT and role: vendor, admin, super_admin; cache GET responses
 const protectedRouter = express.Router();
 protectedRouter.use(authenticateToken, requireRole('vendor', 'admin', 'super_admin'));
-protectedRouter.use(cacheMiddleware(appConfig.cache.vendor));
+protectedRouter.use(bindVendorHubContext);
+protectedRouter.use(
+  cacheMiddleware(appConfig.cache.vendor, { cacheKeyExtra: (req) => (req.vendorHubKey ? `:${req.vendorHubKey}` : '') })
+);
 protectedRouter.use('/vendors', vendorRoutes);
 protectedRouter.use('/inbound', inboundRoutes);
 protectedRouter.use('/inventory', inventoryRoutes);

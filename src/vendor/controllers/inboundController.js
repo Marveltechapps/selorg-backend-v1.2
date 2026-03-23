@@ -1,9 +1,50 @@
 const inboundService = require('../services/inboundService');
+const { mergeHubFilter } = require('../constants/hubScope');
+const GRN = require('../models/GRN');
+const Shipment = require('../models/Shipment');
+const Exception = require('../models/Exception');
 
 async function getOverview(req, res, next) {
   try {
-    // simple aggregation of counts
-    const overview = { totalGRNsToday: 0, pendingApproval: 0, approvedGRNs: 0, rejectedGRNs: 0, inTransitShipments: 0, exceptions: 0 };
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    const createdToday = { createdAt: { $gte: start, $lte: end } };
+
+    const [
+      totalGRNsToday,
+      pendingApproval,
+      approvedGRNs,
+      rejectedGRNs,
+      inTransitShipments,
+      exceptions,
+    ] = await Promise.all([
+      GRN.countDocuments(mergeHubFilter(createdToday)),
+      GRN.countDocuments(mergeHubFilter({ status: 'PENDING' })),
+      GRN.countDocuments(
+        mergeHubFilter({ status: { $in: ['APPROVED', 'approved', 'Approved'] } })
+      ),
+      GRN.countDocuments(
+        mergeHubFilter({ status: { $in: ['REJECTED', 'rejected', 'Rejected'] } })
+      ),
+      Shipment.countDocuments(
+        mergeHubFilter({
+          status: { $in: ['IN_TRANSIT', 'in_transit', 'In Transit', 'IN TRANSIT'] },
+        })
+      ),
+      Exception.countDocuments(mergeHubFilter({})),
+    ]);
+
+    const overview = {
+      totalGRNsToday,
+      pendingApproval,
+      approvedGRNs,
+      rejectedGRNs,
+      inTransitShipments,
+      exceptions,
+    };
     res.json(overview);
   } catch (err) {
     next(err);
@@ -83,7 +124,7 @@ async function rejectGRN(req, res, next) {
 async function listShipments(req, res, next) {
   try {
     // simple passthrough
-    const data = await require('../models/Shipment').find({}).lean();
+    const data = await require('../models/Shipment').find(mergeHubFilter({})).lean();
     res.json({ data, pagination: { page: 1, limit: data.length, total: data.length, pages: 1 } });
   } catch (err) {
     next(err);

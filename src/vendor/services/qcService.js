@@ -1,4 +1,5 @@
 const QCCheck = require('../models/QCCheck');
+const { mergeHubFilter, hubFieldsForCreate } = require('../constants/hubScope');
 
 async function listQCChecks(query) {
   const page = Math.max(1, parseInt(query.page || 1));
@@ -6,19 +7,20 @@ async function listQCChecks(query) {
   const filter = {};
   if (query.vendorId) filter.vendorId = query.vendorId;
   if (query.status && query.status !== 'all') filter.status = query.status;
-  const total = await QCCheck.countDocuments(filter);
-  const data = await QCCheck.find(filter).skip((page - 1) * perPage).limit(perPage).lean();
+  const scoped = mergeHubFilter(filter);
+  const total = await QCCheck.countDocuments(scoped);
+  const data = await QCCheck.find(scoped).skip((page - 1) * perPage).limit(perPage).lean();
   return { pagination: { page, perPage, total, totalPages: Math.ceil(total / perPage) }, data };
 }
 
 async function createQCCheck(payload) {
-  const check = new QCCheck(payload);
+  const check = new QCCheck({ ...payload, ...hubFieldsForCreate() });
   await check.save();
   return check.toObject();
 }
 
 async function getQCCheckById(id) {
-  const c = await QCCheck.findById(id).lean();
+  const c = await QCCheck.findOne(mergeHubFilter({ _id: id })).lean();
   if (!c) {
     const err = new Error('QC check not found');
     err.status = 404;
@@ -28,7 +30,7 @@ async function getQCCheckById(id) {
 }
 
 async function updateQCCheck(id, payload) {
-  const c = await QCCheck.findById(id);
+  const c = await QCCheck.findOne(mergeHubFilter({ _id: id }));
   if (!c) {
     const err = new Error('QC check not found');
     err.status = 404;

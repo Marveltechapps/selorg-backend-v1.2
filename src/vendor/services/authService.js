@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { resolveHubKeyFromUserDoc } = require('../constants/hubScope');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
@@ -33,6 +34,7 @@ async function authenticateUser(email, password, role) {
   const roleNormalized = (user.role && typeof user.role === 'string') ? user.role.toLowerCase().trim() : (user.role || '');
   const assignedStores = user.assignedStores || [];
   const primaryStoreId = user.primaryStoreId || (assignedStores.length > 0 ? assignedStores[0] : '');
+  const hubKey = resolveHubKeyFromUserDoc(user);
   const token = jwt.sign(
     {
       id: user._id.toString(),
@@ -42,6 +44,7 @@ async function authenticateUser(email, password, role) {
       name: user.name || '',
       assignedStores,
       primaryStoreId,
+      hubKey,
     },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }

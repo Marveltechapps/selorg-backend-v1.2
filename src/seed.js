@@ -52,6 +52,9 @@ const seed = async () => {
         password: hashedPassword,
         name: 'Vendor User',
         role: 'vendor',
+        hubKey: 'chennai-hub',
+        primaryStoreId: 'chennai-hub',
+        assignedStores: ['chennai-hub'],
       },
       {
         email: 'warehouse@selorg.com',

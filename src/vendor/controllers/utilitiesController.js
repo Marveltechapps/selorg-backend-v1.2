@@ -5,8 +5,7 @@ const AuditLog = require('../../production/models/AuditLog');
 const VendorContract = require('../models/VendorContract');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
-
-const VENDOR_STORE_ID = process.env.VENDOR_UTILITIES_STORE_ID || 'VENDOR-UTILITIES';
+const { mergeHubFilter, hubFieldsForCreate, getEffectiveHubKey } = require('../constants/hubScope');
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -36,7 +35,7 @@ const bulkUpload = async (req, res) => {
 
     await BulkUpload.create({
       upload_id: uploadId,
-      store_id: VENDOR_STORE_ID,
+      store_id: getEffectiveHubKey(),
       file_name: req.file.originalname,
       total_rows: totalRows,
       processed_rows: processedRows,
@@ -66,7 +65,7 @@ const bulkUpload = async (req, res) => {
         processedRows,
         totalRows,
       },
-      store_id: VENDOR_STORE_ID,
+      store_id: getEffectiveHubKey(),
       ip_address: req.ip || req.connection?.remoteAddress,
     });
 
@@ -89,7 +88,7 @@ const getUploadHistory = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
 
-    const uploads = await BulkUpload.find({ store_id: VENDOR_STORE_ID })
+    const uploads = await BulkUpload.find({ store_id: getEffectiveHubKey() })
       .sort({ created_at: -1 })
       .limit(limit)
       .lean();
@@ -129,7 +128,7 @@ const getContracts = async (req, res) => {
       ];
     }
 
-    const contracts = await VendorContract.find(query).sort({ created_at: -1 }).lean();
+    const contracts = await VendorContract.find(mergeHubFilter(query)).sort({ created_at: -1 }).lean();
 
     const transformed = contracts.map((c) => ({
       id: c.contract_id,
@@ -187,6 +186,7 @@ const createContract = async (req, res) => {
       value: Number(value),
       status: status || 'pending',
       renewal_date: renewalDate,
+      ...hubFieldsForCreate(),
     });
 
     const now = new Date().toISOString();
@@ -200,7 +200,7 @@ const createContract = async (req, res) => {
       module: 'settings',
       action: 'CONTRACT_CREATED',
       details: { contractId, contractNumber, vendorName },
-      store_id: VENDOR_STORE_ID,
+      store_id: getEffectiveHubKey(),
       ip_address: req.ip || req.connection?.remoteAddress,
     });
 
@@ -230,12 +230,12 @@ const deleteContract = async (req, res) => {
   try {
     const { contractId } = req.params;
 
-    const contract = await VendorContract.findOne({ contract_id: contractId });
+    const contract = await VendorContract.findOne(mergeHubFilter({ contract_id: contractId }));
     if (!contract) {
       return res.status(404).json({ success: false, error: 'Contract not found' });
     }
 
-    await VendorContract.deleteOne({ contract_id: contractId });
+    await VendorContract.deleteOne(mergeHubFilter({ contract_id: contractId }));
 
     const now = new Date().toISOString();
     await AuditLog.create({
@@ -252,7 +252,7 @@ const deleteContract = async (req, res) => {
         contractNumber: contract.contract_number,
         vendorName: contract.vendor_name,
       },
-      store_id: VENDOR_STORE_ID,
+      store_id: getEffectiveHubKey(),
       ip_address: req.ip || req.connection?.remoteAddress,
     });
 
@@ -270,7 +270,7 @@ const getAuditLogs = async (req, res) => {
     const moduleFilter = req.query.module || 'all';
     const search = (req.query.search || '').trim().toLowerCase();
 
-    const query = { store_id: VENDOR_STORE_ID };
+    const query = { store_id: getEffectiveHubKey() };
     if (moduleFilter !== 'all') {
       query.module = moduleFilter;
     }
@@ -318,7 +318,7 @@ const exportAuditLogs = async (req, res) => {
     }
 
     const query = {
-      store_id: VENDOR_STORE_ID,
+      store_id: getEffectiveHubKey(),
       timestamp: {
         $gte: new Date(from).toISOString(),
         $lte: new Date(to).toISOString(),

@@ -1,5 +1,20 @@
 const mongoose = require('mongoose');
 
+/** Inline blocks inside a sub-page (no further nesting — keeps payload bounded). */
+const leafContentItemSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ['banner', 'video', 'image', 'text', 'products'], required: true },
+    order: { type: Number, default: 0 },
+    imageUrl: String,
+    videoUrl: String,
+    text: String,
+    link: String,
+    isNavigable: { type: Boolean, default: true },
+    productIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'CustomerProduct' }],
+  },
+  { _id: true }
+);
+
 const contentItemSchema = new mongoose.Schema(
   {
     type: { type: String, enum: ['banner', 'video', 'image', 'text', 'products'], required: true },
@@ -7,7 +22,15 @@ const contentItemSchema = new mongoose.Schema(
     imageUrl: String,
     videoUrl: String,
     text: String,
+    /** Optional title for a tappable inline block’s sub-page */
+    blockTitle: String,
+    /** Optional tap target for inline banner/image blocks when isNavigable is true */
+    link: String,
+    /** When false, inline banner/image is decorative only (no tap). Default true. */
+    isNavigable: { type: Boolean, default: true },
     productIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'CustomerProduct' }],
+    /** When tappable: same layout as main landing (hero = imageUrl, then these blocks). */
+    nestedContentItems: [leafContentItemSchema],
   },
   { _id: true }
 );
@@ -15,7 +38,16 @@ const contentItemSchema = new mongoose.Schema(
 const bannerSchema = new mongoose.Schema(
   {
     siteId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerSite', default: null },
-    slot: { type: String, enum: ['hero', 'mid', 'category'], default: 'hero' },
+    /** Banner type (placement + semantics). Drives hero vs in-feed lane without changing app layout sizes. */
+    slot: {
+      type: String,
+      enum: ['hero', 'small', 'mid', 'large', 'info', 'category'],
+      default: 'hero',
+    },
+    /** Admin intent: single slide vs intended for carousel rows (section may add multiple IDs). */
+    presentationMode: { type: String, enum: ['single', 'carousel'], default: 'single' },
+    /** When false, home feed banner is display-only (no tap / detail). */
+    isNavigable: { type: Boolean, default: true },
     title: String,
     imageUrl: { type: String, required: true },
     mediaId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerMedia', default: null },

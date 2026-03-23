@@ -1,9 +1,15 @@
+const mongoose = require('mongoose');
 const vendorService = require('../services/vendorService');
 const vendorMetricsService = require('../services/vendorMetricsService');
 const purchaseOrderService = require('../services/purchaseOrderService');
 const qcService = require('../services/qcService');
 const alertService = require('../services/alertService');
 const { validationResult } = require('express-validator');
+const PurchaseOrder = require('../models/PurchaseOrder');
+const Alert = require('../models/Alert');
+const GRN = require('../models/GRN');
+const VendorRating = require('../models/VendorRating');
+const { mergeHubFilter } = require('../constants/hubScope');
 
 async function createVendor(req, res, next) {
   try {
@@ -12,6 +18,9 @@ async function createVendor(req, res, next) {
     const vendor = await vendorService.createVendor(req.body);
     res.status(201).json(vendor);
   } catch (err) {
+    if (err.status === 400 || err.status === 409) {
+      return res.status(err.status).json({ code: err.status, message: err.message });
+    }
     next(err);
   }
 }
@@ -136,66 +145,174 @@ async function getVendorSummary(req, res, next) {
     const QCCheck = require('../models/QCCheck');
     const Certificate = require('../models/Certificate');
 
-    // Active vendors count
-    const activeVendors = await Vendor.countDocuments({ status: 'active' });
-    const totalVendors = await Vendor.countDocuments({});
-    const pendingVendors = await Vendor.countDocuments({ status: 'under_review' });
+    const activeVendors = await Vendor.countDocuments(mergeHubFilter({ status: 'active' }));
+    const totalVendors = await Vendor.countDocuments(mergeHubFilter({}));
+    const pendingVendors = await Vendor.countDocuments(
+      mergeHubFilter({
+        status: { $in: ['pending', 'under_review'] },
+      })
+    );
 
-    // Delivery Timeliness
-    const totalDeliveries = await Shipment.countDocuments({
-      estimatedArrival: { $exists: true },
-      deliveredAt: { $exists: true }
-    });
-    const onTimeDeliveries = await Shipment.countDocuments({
-      estimatedArrival: { $exists: true },
-      deliveredAt: { $exists: true },
-      $expr: { $lte: ['$deliveredAt', '$estimatedArrival'] }
-    });
-    const deliveryTimeliness = totalDeliveries === 0
-      ? 0
-      : Math.round((onTimeDeliveries / totalDeliveries) * 1000) / 10;
+    const totalDeliveries = await Shipment.countDocuments(
+      mergeHubFilter({
+        estimatedArrival: { $exists: true, $ne: null },
+        deliveredAt: { $exists: true, $ne: null },
+      })
+    );
+    const onTimeDeliveries = await Shipment.countDocuments(
+      mergeHubFilter({
+        estimatedArrival: { $exists: true, $ne: null },
+        deliveredAt: { $exists: true, $ne: null },
+        $expr: { $lte: ['$deliveredAt', '$estimatedArrival'] },
+      })
+    );
+    const deliveryTimeliness =
+      totalDeliveries === 0
+        ? null
+        : Math.round((onTimeDeliveries / totalDeliveries) * 1000) / 10;
 
-    // Product Quality (QC Pass Rate)
-    const totalQC = await QCCheck.countDocuments({});
-    const passedQC = await QCCheck.countDocuments({
-      status: { $in: ['approved', 'passed', 'pass'] }
-    });
-    const productQuality = totalQC === 0
-      ? 0
-      : Math.round((passedQC / totalQC) * 1000) / 10;
+    const totalQC = await QCCheck.countDocuments(mergeHubFilter({}));
+    const passedQC = await QCCheck.countDocuments(
+      mergeHubFilter({
+        status: { $in: ['approved', 'passed', 'pass', 'APPROVED', 'PASSED', 'PASS'] },
+      })
+    );
+    const rejectedQC = await QCCheck.countDocuments(
+      mergeHubFilter({
+        status: { $in: ['rejected', 'failed', 'fail', 'REJECTED', 'FAILED', 'FAIL'] },
+      })
+    );
+    const productQuality =
+      totalQC === 0 ? null : Math.round((passedQC / totalQC) * 1000) / 10;
+    const rejectionRate =
+      totalQC === 0 ? null : Math.round((rejectedQC / totalQC) * 1000) / 10;
 
-    // Rejection Rate
-    const rejectedQC = await QCCheck.countDocuments({
-      status: { $in: ['rejected', 'failed', 'fail'] }
-    });
-    const rejectionRate = totalQC === 0
-      ? 0
-      : Math.round((rejectedQC / totalQC) * 1000) / 10;
+    const vendorsWithValidDocs = await Certificate.distinct('vendorId', mergeHubFilter({ status: 'valid' }));
+    const complianceStatus =
+      activeVendors === 0
+        ? null
+        : Math.round((vendorsWithValidDocs.length / activeVendors) * 1000) / 10;
 
-    // Compliance Status
-    const vendorsWithValidDocs = await Certificate.distinct('vendorId', {
-      status: 'valid'
-    });
-    const complianceStatus = activeVendors === 0
-      ? 0
-      : Math.round((vendorsWithValidDocs.length / activeVendors) * 1000) / 10;
-    // Avg PO Response Hours - PurchaseOrder model does not have acknowledgedAt/acceptedAt in schema
-    // so we default to 0 until such a field is available in the DB.
-    const avgPOResponseHours = 0;
+    const totalGRNs = await GRN.countDocuments(mergeHubFilter({}));
+    const approvedGRNs = await GRN.countDocuments(mergeHubFilter({ status: 'APPROVED' }));
+    const slaCompliance =
+      totalGRNs === 0 ? null : Math.round((approvedGRNs / totalGRNs) * 1000) / 10;
+
+    const openPOStatuses = [
+      'pending_approval',
+      'approved',
+      'sent',
+      'on_hold',
+      'partially_received',
+    ];
+    const openPOFilter = {
+      archived: { $ne: true },
+      status: { $in: openPOStatuses },
+    };
+    const openPOs = await PurchaseOrder.countDocuments(mergeHubFilter(openPOFilter));
+    const openPOAgg = await PurchaseOrder.aggregate([
+      { $match: mergeHubFilter(openPOFilter) },
+      { $group: { _id: null, value: { $sum: { $ifNull: ['$totals.grandTotal', 0] } } } },
+    ]);
+    const openPOValue =
+      openPOAgg.length && openPOAgg[0].value != null ? openPOAgg[0].value : 0;
+
+    const criticalAlerts = await Alert.countDocuments(
+      mergeHubFilter({
+        status: 'open',
+        severity: 'critical',
+      })
+    );
+
+    const respondedPOs = await PurchaseOrder.find(
+      mergeHubFilter({
+        status: {
+          $in: ['approved', 'sent', 'partially_received', 'fully_received'],
+        },
+      })
+    )
+      .select('createdAt updatedAt')
+      .lean();
+    let avgPOResponseHours = null;
+    if (respondedPOs.length > 0) {
+      let sumH = 0;
+      let n = 0;
+      for (const p of respondedPOs) {
+        const ms = new Date(p.updatedAt) - new Date(p.createdAt);
+        if (ms >= 0) {
+          sumH += ms / (1000 * 60 * 60);
+          n += 1;
+        }
+      }
+      if (n > 0) avgPOResponseHours = Math.round((sumH / n) * 10) / 10;
+    }
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+    const recentShipments = await Shipment.find(
+      mergeHubFilter({
+        deliveredAt: { $gte: thirtyDaysAgo, $exists: true, $ne: null },
+        estimatedArrival: { $exists: true, $ne: null },
+      })
+    )
+      .select('deliveredAt estimatedArrival')
+      .lean();
+
+    const byDay = new Map();
+    for (const s of recentShipments) {
+      if (!s.deliveredAt) continue;
+      const day = new Date(s.deliveredAt).toISOString().slice(0, 10);
+      if (!byDay.has(day)) byDay.set(day, { total: 0, onTime: 0 });
+      const b = byDay.get(day);
+      b.total += 1;
+      if (new Date(s.deliveredAt) <= new Date(s.estimatedArrival)) b.onTime += 1;
+    }
+    const slaTrend = Array.from(byDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, v]) => ({
+        date,
+        sla: Math.round((v.onTime / v.total) * 1000) / 10,
+      }));
+
+    const topRated = await VendorRating.find(mergeHubFilter({}))
+      .sort({ overallRating: -1 })
+      .limit(5)
+      .lean();
+    const topIds = topRated.map((r) => r.vendorId).filter(Boolean);
+    let topPerformers = [];
+    if (topIds.length) {
+      const oidIds = topIds
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      if (oidIds.length) {
+        const named = await Vendor.find(mergeHubFilter({ _id: { $in: oidIds } }))
+          .select('name vendorName')
+          .lean();
+        const nameById = Object.fromEntries(
+          named.map((v) => [String(v._id), v.vendorName || v.name])
+        );
+        topPerformers = topIds
+          .map((id) => nameById[id])
+          .filter((n) => typeof n === 'string' && n.length > 0);
+      }
+    }
 
     res.json({
       activeVendors,
       totalVendors,
       pendingVendors,
-      slaCompliance: deliveryTimeliness,
-      openPOs: 0,
-      criticalAlerts: 0,
+      slaCompliance,
+      openPOs,
+      openPOValue,
+      criticalAlerts,
       deliveryTimeliness,
       productQuality,
       complianceStatus,
       rejectionRate,
       avgPOResponseHours,
-      topPerformers: []
+      topPerformers,
+      slaTrend,
+      generatedAt: new Date().toISOString(),
     });
   } catch (err) {
     next(err);

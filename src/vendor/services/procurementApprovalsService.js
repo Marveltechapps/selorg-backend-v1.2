@@ -1,5 +1,6 @@
 const ProcurementApproval = require('../models/ProcurementApproval');
 const logger = require('../../core/utils/logger');
+const { mergeHubFilter } = require('../constants/hubScope');
 
 function toTask(doc) {
   if (!doc) return null;
@@ -31,15 +32,19 @@ async function getSummary() {
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const [pendingRequestsCount, approvedTodayCount, rejectedTodayCount] = await Promise.all([
-      ProcurementApproval.countDocuments({ status: 'pending' }),
-      ProcurementApproval.countDocuments({
-        status: 'approved',
-        approvedAt: { $gte: today, $lt: tomorrow },
-      }),
-      ProcurementApproval.countDocuments({
-        status: 'rejected',
-        approvedAt: { $gte: today, $lt: tomorrow },
-      }),
+      ProcurementApproval.countDocuments(mergeHubFilter({ status: 'pending' })),
+      ProcurementApproval.countDocuments(
+        mergeHubFilter({
+          status: 'approved',
+          approvedAt: { $gte: today, $lt: tomorrow },
+        })
+      ),
+      ProcurementApproval.countDocuments(
+        mergeHubFilter({
+          status: 'rejected',
+          approvedAt: { $gte: today, $lt: tomorrow },
+        })
+      ),
     ]);
 
     return {
@@ -68,7 +73,7 @@ async function listTasks(filters = {}) {
       query.valueAmount = { $gte: minValue };
     }
 
-    const docs = await ProcurementApproval.find(query)
+    const docs = await ProcurementApproval.find(mergeHubFilter(query))
       .sort({ priority: -1, createdAt: -1 })
       .limit(200)
       .lean();
@@ -82,7 +87,7 @@ async function listTasks(filters = {}) {
 
 async function getTaskById(id) {
   try {
-    const doc = await ProcurementApproval.findById(id).lean();
+    const doc = await ProcurementApproval.findOne(mergeHubFilter({ _id: id })).lean();
     if (!doc) return null;
     return toTask({ ...doc, _id: doc._id });
   } catch (error) {
@@ -93,7 +98,7 @@ async function getTaskById(id) {
 
 async function submitDecision(id, payload, userId = 'system') {
   try {
-    const task = await ProcurementApproval.findById(id);
+    const task = await ProcurementApproval.findOne(mergeHubFilter({ _id: id }));
     if (!task) {
       throw new Error('Task not found');
     }

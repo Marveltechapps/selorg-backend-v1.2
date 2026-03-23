@@ -45,7 +45,7 @@ homeConfigSchema.path('trendingSearches').validate(function validateTrending(v) 
   return !Array.isArray(v) || v.length <= 10;
 }, 'trendingSearches cannot exceed 10 items');
 
-const KEY_PREFIX_PATTERN = /^(collections|deals|wellbeing|banner_main|banner_sub|section)_[a-zA-Z0-9_-]+$/;
+const KEY_PREFIX_PATTERN = /^(collections|deals|wellbeing|banner_main|banner_sub|banner|section)_[a-zA-Z0-9_-]+$/;
 
 /** Validate section keys against allowlist. Use in controller before update. */
 function validateSectionKeys(keys) {

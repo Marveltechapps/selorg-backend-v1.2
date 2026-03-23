@@ -25,6 +25,7 @@ const PurchaseOrderSchema = new mongoose.Schema(
     expectedDeliveryDate: Date,
     createdBy: String,
     archived: { type: Boolean, default: false },
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

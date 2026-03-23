@@ -11,6 +11,7 @@ const InventoryItemSchema = new mongoose.Schema(
     location: String,
     agingDays: { type: Number, default: 0 },
     lastUpdated: Date,
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );

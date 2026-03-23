@@ -38,6 +38,7 @@ const ProcurementApprovalSchema = new mongoose.Schema(
     decisionNote: { type: String, default: null },
     approvedAt: { type: Date, default: null },
     approvedBy: { type: String, default: null },
+    hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true, collection: 'procurement_approvals' }
 );
