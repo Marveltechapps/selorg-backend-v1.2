@@ -2,6 +2,51 @@ const mongoose = require('mongoose');
 
 const PAYMENT_TERMS = ['30 days', '45 days', '60 days'];
 
+// Typed vendor metadata for the procurement/onboarding workflow.
+// `strict: false` ensures we don't drop legacy/unknown metadata keys.
+const VendorMetadataSchema = new mongoose.Schema(
+  {
+    registrationNumber: { type: String },
+    onboardingSource: {
+      type: String,
+      enum: ['direct', 'referral', 'field_sales', 'platform', 'existing'],
+      default: 'direct',
+    },
+    serviceableZones: [{ type: String }],
+    paymentTerms: {
+      type: String,
+      enum: ['advance', 'net7', 'net15', 'net30', 'net45', 'cod'],
+      default: 'net15',
+    },
+    creditLimit: { type: Number, default: 0 },
+    leadTimeDays: { type: Number, default: 2 },
+    minimumOrderValue: { type: Number, default: 0 },
+    deliveryWindows: [{ type: String }],
+    slaTargetPercent: { type: Number, default: 90 },
+    substitutionPolicy: {
+      type: String,
+      enum: ['allowed', 'not_allowed', 'case_by_case'],
+      default: 'case_by_case',
+    },
+    returnPolicy: {
+      type: String,
+      enum: ['full', 'partial', 'none'],
+      default: 'partial',
+    },
+    specialInstructions: { type: String },
+    categoryLimits: [
+      {
+        category: String,
+        minQty: Number,
+        maxQty: Number,
+        unit: String,
+        leadTimeDays: Number,
+      },
+    ],
+  },
+  { _id: false, strict: false }
+);
+
 const ContactSchema = new mongoose.Schema(
   {
     name: { type: String, trim: true },
@@ -49,7 +94,7 @@ const VendorSchema = new mongoose.Schema(
     sla: { type: Number, default: 0 },
     activeRelationships: { type: Number, default: 0 },
     onboarding: { type: mongoose.Schema.Types.Mixed },
-    metadata: { type: mongoose.Schema.Types.Mixed },
+    metadata: VendorMetadataSchema,
     archived: { type: Boolean, default: false },
     /** Procurement hub / tenant (default Chennai hub in app code) */
     hubKey: { type: String, trim: true, index: true },

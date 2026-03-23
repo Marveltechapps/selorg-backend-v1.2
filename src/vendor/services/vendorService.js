@@ -21,7 +21,8 @@ function normalizeVendorCreatePayload(payload) {
   const vendorCode = String(p.vendorCode ?? p.code ?? '').trim();
   const gstinRaw = p.taxInfo?.gstin ?? p.taxInfo?.GSTIN ?? p.metadata?.gstNumber ?? '';
   const gstin = String(gstinRaw).trim();
-  const paymentTerms = String(p.paymentTerms ?? '').trim();
+  const paymentTermsRaw = p.paymentTerms ?? p.metadata?.paymentTerms ?? '';
+  const paymentTerms = String(paymentTermsRaw).trim();
   const currencyRaw = String(p.currencyCode ?? 'INR').trim().toUpperCase() || 'INR';
   const currencyCode = currencyRaw.slice(0, 3);
 
@@ -58,19 +59,34 @@ function validateVendorCreate(n) {
   if (!n.vendorCode) errs.push('vendorCode is required');
   if (!n.vendorName) errs.push('vendorName is required');
   if (n.vendorName.length > 100) errs.push('vendorName must be at most 100 characters');
-  if (!n.taxInfo.gstin) errs.push('taxInfo.gstin is required');
-  if (!PAYMENT_TERMS.includes(n.paymentTerms)) {
-    errs.push(`paymentTerms must be one of: ${PAYMENT_TERMS.join(', ')}`);
+  const status = String(n.status || '').toLowerCase();
+  const isDraft = status === 'draft';
+
+  // Draft vendors may be saved with incomplete wizard data.
+  if (!isDraft) {
+    if (!n.taxInfo.gstin) errs.push('taxInfo.gstin is required');
+
+    const PAYMENT_TERM_CODES = ['advance', 'net7', 'net15', 'net30', 'net45', 'cod'];
+    const allowedPaymentTerms = [...PAYMENT_TERMS, ...PAYMENT_TERM_CODES];
+    if (!allowedPaymentTerms.includes(n.paymentTerms)) {
+      errs.push(`paymentTerms must be one of: ${allowedPaymentTerms.join(', ')}`);
+    }
+
+    if (!n.address.line1) errs.push('address.line1 is required');
+    if (!n.address.city) errs.push('address.city is required');
+    if (!n.address.state) errs.push('address.state is required');
+    if (!n.address.country) errs.push('address.country is required');
+    if (!n.address.zipCode) errs.push('address.zipCode is required');
+
+    if (!n.contact.name) errs.push('contact.name is required');
+    if (!n.contact.phone) errs.push('contact.phone is required');
+    if (!n.contact.email) errs.push('contact.email is required');
   }
-  if (!n.address.line1) errs.push('address.line1 is required');
-  if (!n.address.city) errs.push('address.city is required');
-  if (!n.address.state) errs.push('address.state is required');
-  if (!n.address.country) errs.push('address.country is required');
-  if (!n.address.zipCode) errs.push('address.zipCode is required');
-  if (!n.contact.name) errs.push('contact.name is required');
-  if (!n.contact.phone) errs.push('contact.phone is required');
-  if (!n.contact.email) errs.push('contact.email is required');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n.contact.email)) errs.push('contact.email must be a valid email');
+
+  // Only validate email format if it's present (drafts may omit it).
+  if (n.contact.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n.contact.email)) {
+    errs.push('contact.email must be a valid email');
+  }
   return errs;
 }
 
@@ -94,18 +110,22 @@ async function createVendor(payload) {
     throw err;
   }
 
-  const dupEmail = await Vendor.findOne({ 'contact.email': n.contact.email }).lean();
-  if (dupEmail) {
-    const err = new Error(`A vendor with email '${n.contact.email}' already exists`);
-    err.status = 409;
-    throw err;
+  if (n.contact.email) {
+    const dupEmail = await Vendor.findOne({ 'contact.email': n.contact.email }).lean();
+    if (dupEmail) {
+      const err = new Error(`A vendor with email '${n.contact.email}' already exists`);
+      err.status = 409;
+      throw err;
+    }
   }
 
-  const dupPhone = await Vendor.findOne(mergeHubFilter({ 'contact.phone': n.contact.phone })).lean();
-  if (dupPhone) {
-    const err = new Error(`A vendor with phone '${n.contact.phone}' already exists`);
-    err.status = 409;
-    throw err;
+  if (n.contact.phone) {
+    const dupPhone = await Vendor.findOne(mergeHubFilter({ 'contact.phone': n.contact.phone })).lean();
+    if (dupPhone) {
+      const err = new Error(`A vendor with phone '${n.contact.phone}' already exists`);
+      err.status = 409;
+      throw err;
+    }
   }
 
   const vendor = new Vendor({
@@ -196,6 +216,19 @@ async function updateVendor(vendorId, payload) {
         : {};
     patch.metadata = { ...existing, ...patch.metadata };
   }
+
+  // Backward compatibility: if the wizard stored legacy fields inside
+  // `metadata.*`, project them onto top-level fields the rest of the code uses.
+  if (patch.metadata != null && typeof patch.metadata === 'object' && !Array.isArray(patch.metadata)) {
+    const meta = patch.metadata;
+    if (patch.taxInfo == null && meta.gstNumber != null) {
+      patch.taxInfo = { gstin: String(meta.gstNumber) };
+    }
+    if (patch.paymentTerms == null && meta.paymentTerms != null) {
+      patch.paymentTerms = String(meta.paymentTerms);
+    }
+  }
+
   Object.assign(vendor, patch);
   if (payload.vendorName != null && payload.name == null) vendor.name = payload.vendorName;
   if (payload.vendorCode != null && payload.code == null) vendor.code = payload.vendorCode;
