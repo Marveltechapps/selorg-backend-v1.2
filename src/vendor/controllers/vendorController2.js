@@ -20,6 +20,13 @@ async function createVendor(req, res, next) {
     const vendor = await vendorService.createVendor(req.body);
     res.status(201).json(vendor);
   } catch (err) {
+    // Mongoose duplicate key (e.g. unique sparse index collisions) can otherwise bubble up as 500.
+    if (err && (err.code === 11000 || err.name === 'MongoServerError')) {
+      return res.status(409).json({
+        code: 409,
+        message: err.message || 'Vendor already exists',
+      });
+    }
     if (err.status === 400 || err.status === 409) {
       return res.status(err.status).json({ code: err.status, message: err.message });
     }

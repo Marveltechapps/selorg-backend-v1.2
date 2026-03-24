@@ -37,7 +37,11 @@ function normalizeVendorCreatePayload(payload) {
 
   const c = p.contact || {};
   const contactName = String(c.name ?? '').trim();
-  const phone = String(c.phone ?? '').trim();
+  // Important: keep phone truly "missing" when empty.
+  // The Vendor model has a unique sparse index on `contact.phone`—storing `''`
+  // can cause E11000 duplicate key errors and currently those bubble up as 500s.
+  const phoneRaw = typeof c.phone === 'string' ? c.phone.trim() : '';
+  const phone = phoneRaw ? phoneRaw : undefined;
   const email = String(c.email ?? '').trim().toLowerCase();
 
   return {
