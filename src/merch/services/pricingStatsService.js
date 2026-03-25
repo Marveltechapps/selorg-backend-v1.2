@@ -17,8 +17,13 @@ async function getPricingStats() {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  const expiringSoon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const result = {
+    totalCoupons: 0,
+    totalRedemptions: 0,
+    avgDiscountValue: 0,
+    expiringSoonCoupons: 0,
     totalRevenue: 0,
     discountedRevenue: 0,
     totalDiscount: 0,
@@ -29,6 +34,23 @@ async function getPricingStats() {
   };
 
   try {
+    // Coupon-centric stats used by admin Pricing & Promo cards
+    const couponAgg = await PricingCoupon.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalCoupons: { $sum: 1 },
+          totalRedemptions: { $sum: { $ifNull: ['$usageCount', 0] } },
+          avgDiscountValue: { $avg: { $ifNull: ['$discountValue', 0] } },
+        },
+      },
+    ]);
+    if (couponAgg.length > 0) {
+      result.totalCoupons = couponAgg[0].totalCoupons || 0;
+      result.totalRedemptions = couponAgg[0].totalRedemptions || 0;
+      result.avgDiscountValue = Math.round((couponAgg[0].avgDiscountValue || 0) * 100) / 100;
+    }
+
     // Active discounts count
     const activeDiscounts = await DiscountCampaign.countDocuments({
       status: 'active',
@@ -46,6 +68,12 @@ async function getPricingStats() {
       ],
     });
     result.activeCoupons = activeCoupons;
+
+    const expiringSoonCoupons = await PricingCoupon.countDocuments({
+      $or: [{ status: 'active' }, { isActive: true }],
+      endDate: { $gte: now, $lte: expiringSoon },
+    });
+    result.expiringSoonCoupons = expiringSoonCoupons;
 
     // Order aggregates if Order model available
     if (Order) {

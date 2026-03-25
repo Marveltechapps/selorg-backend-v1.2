@@ -34,6 +34,28 @@ const VendorMetadataSchema = new mongoose.Schema(
       default: 'partial',
     },
     specialInstructions: { type: String },
+    inviteToken: { type: String, default: null },
+    inviteExpiresAt: { type: String, default: null },
+    inviteStatus: {
+      type: String,
+      enum: ['pending_response', 'completed', null],
+      default: null,
+    },
+    inviteSentAt: { type: String, default: null },
+    inviteEmailPreviewUrl: { type: String, default: null },
+    profileCompletedAt: { type: String, default: null },
+    gstNumber: { type: String, default: '' },
+    panNumber: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    accountType: { type: String, default: 'Current' },
+    bankAccount: { type: String, default: '' },
+    ifscCode: { type: String, default: '' },
+    accountHolder: { type: String, default: '' },
+    selectedCategories: { type: Array, default: [] },
+    productType: { type: String, default: '' },
+    registrationNumber: { type: String, default: '' },
+    description: { type: String, default: '' },
+    documents: { type: Array, default: [] },
     categoryLimits: [
       {
         category: String,
@@ -72,7 +94,8 @@ const AddressSchema = new mongoose.Schema(
 
 const TaxInfoSchema = new mongoose.Schema(
   {
-    gstin: { type: String, trim: true },
+    gstin: { type: String, trim: true, default: '' },
+    pan: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
@@ -82,7 +105,7 @@ const VendorSchema = new mongoose.Schema(
     vendorCode: { type: String, trim: true },
     vendorName: { type: String, trim: true, maxlength: 100 },
     taxInfo: { type: TaxInfoSchema, default: () => ({}) },
-    paymentTerms: { type: String, default: null },
+    paymentTerms: { type: String, default: '30 days' },
     address: { type: AddressSchema, default: () => ({}) },
     contact: { type: ContactSchema, default: () => ({}) },
     currencyCode: { type: String, uppercase: true, maxlength: 3, default: 'INR' },

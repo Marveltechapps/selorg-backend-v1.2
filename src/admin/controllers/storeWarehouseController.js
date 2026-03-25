@@ -6,6 +6,103 @@ const { asyncHandler } = require('../../core/middleware');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 const cacheInvalidation = require('../cacheInvalidation');
 const mongoose = require('mongoose');
+const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const STATUS_VALUES = ['active', 'offline', 'inactive', 'maintenance'];
+const SERVICE_STATUS_VALUES = ['Full', 'Partial', 'None'];
+
+const toTitleDay = (key = '') => {
+  const v = String(key).trim().toLowerCase();
+  return v ? `${v[0].toUpperCase()}${v.slice(1)}` : '';
+};
+
+function normalizeOperationalHours(hours) {
+  if (!hours || typeof hours !== 'object') return undefined;
+  const src = hours instanceof Map ? Object.fromEntries(hours) : hours;
+  const normalized = {};
+  Object.entries(src).forEach(([k, v]) => {
+    const day = toTitleDay(k);
+    if (!day) return;
+    normalized[day] = {
+      open: v?.open ?? '09:00',
+      close: v?.close ?? '21:00',
+      isOpen: typeof v?.isOpen === 'boolean' ? v.isOpen : true,
+    };
+  });
+  return normalized;
+}
+
+function validateOperationalHours(hours) {
+  if (!hours) return;
+  const src = hours instanceof Map ? Object.fromEntries(hours) : hours;
+  const keys = Object.keys(src);
+  if (keys.length === 0) return;
+  const hasAllDays = DAY_KEYS.every((day) => Object.prototype.hasOwnProperty.call(src, day));
+  if (!hasAllDays) {
+    throw new ErrorResponse('operationalHours must include all 7 days: Monday-Sunday', 400);
+  }
+  DAY_KEYS.forEach((day) => {
+    const slot = src[day];
+    if (!slot || typeof slot.open !== 'string' || typeof slot.close !== 'string' || typeof slot.isOpen !== 'boolean') {
+      throw new ErrorResponse(`operationalHours.${day} must include open, close and isOpen`, 400);
+    }
+  });
+}
+
+function validateCode(code, fieldName = 'Code') {
+  if (!code || !String(code).trim()) {
+    throw new ErrorResponse(`${fieldName} is required`, 400);
+  }
+  const normalized = String(code).trim().toUpperCase();
+  if (!/^[A-Z0-9-]{1,20}$/.test(normalized)) {
+    throw new ErrorResponse(`${fieldName} must be uppercase alphanumeric with hyphens only (max 20 chars)`, 400);
+  }
+  return normalized;
+}
+
+function validateLocationAndCapacity(body, fallback = {}) {
+  const cityId = body.cityId ?? fallback.cityId;
+  const zoneId = body.zoneId ?? fallback.zoneId;
+  const latitude = body.latitude ?? fallback.latitude;
+  const longitude = body.longitude ?? fallback.longitude;
+  const maxCapacity = Number(body.maxCapacity ?? fallback.maxCapacity ?? 100);
+  const currentLoad = Number(body.currentLoad ?? fallback.currentLoad ?? 0);
+  const deliveryRadius = Number(body.deliveryRadius ?? fallback.deliveryRadius ?? 5);
+  const status = String(body.status ?? fallback.status ?? 'active');
+  const serviceStatus = body.serviceStatus ?? fallback.serviceStatus;
+  const email = body.email ?? fallback.email;
+
+  if (!cityId || !mongoose.Types.ObjectId.isValid(cityId)) {
+    throw new ErrorResponse('Valid cityId is required', 400);
+  }
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    throw new ErrorResponse('Latitude is required and must be between -90 and 90', 400);
+  }
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new ErrorResponse('Longitude is required and must be between -180 and 180', 400);
+  }
+  if (!STATUS_VALUES.includes(status)) {
+    throw new ErrorResponse(`status must be one of: ${STATUS_VALUES.join(', ')}`, 400);
+  }
+  if (serviceStatus && !SERVICE_STATUS_VALUES.includes(serviceStatus)) {
+    throw new ErrorResponse(`serviceStatus must be one of: ${SERVICE_STATUS_VALUES.join(', ')}`, 400);
+  }
+  if (!Number.isFinite(deliveryRadius) || deliveryRadius < 1 || deliveryRadius > 100) {
+    throw new ErrorResponse('deliveryRadius must be between 1 and 100', 400);
+  }
+  if (!Number.isFinite(maxCapacity) || maxCapacity < 0) {
+    throw new ErrorResponse('maxCapacity must be a non-negative number', 400);
+  }
+  if (!Number.isFinite(currentLoad) || currentLoad < 0 || currentLoad > maxCapacity) {
+    throw new ErrorResponse('currentLoad must be >= 0 and <= maxCapacity', 400);
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+    throw new ErrorResponse('email must be a valid email address', 400);
+  }
+
+  return { cityId, zoneId, lat, lng, maxCapacity, currentLoad, deliveryRadius, status };
+}
 
 function transformStore(doc) {
   if (!doc) return null;
@@ -111,21 +208,8 @@ const storeWarehouseController = {
 
   createStore: asyncHandler(async (req, res) => {
     const body = { ...req.body };
-    if (!body.code || !String(body.code).trim()) {
-      throw new ErrorResponse('Store code is required', 400);
-    }
-    body.code = String(body.code).trim();
-
-    if (body.type === 'dark_store') {
-      const lat = parseFloat(body.latitude);
-      const lng = parseFloat(body.longitude);
-      if (isNaN(lat) || isNaN(lng)) {
-        throw new ErrorResponse('Latitude and Longitude are required for darkstores', 400);
-      }
-      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        throw new ErrorResponse('Invalid coordinates', 400);
-      }
-    }
+    body.code = validateCode(body.code, 'Store code');
+    const validated = validateLocationAndCapacity(body);
 
     if (body.code) {
       const existing = await Store.findOne({ code: body.code.trim() });
@@ -134,18 +218,26 @@ const storeWarehouseController = {
       }
     }
 
-    if (body.cityId && mongoose.Types.ObjectId.isValid(body.cityId)) {
-      const city = await City.findById(body.cityId);
-      if (!city) throw new ErrorResponse('City not found', 400);
-    }
-    if (body.zoneId && mongoose.Types.ObjectId.isValid(body.zoneId)) {
-      const zone = await Zone.findById(body.zoneId);
+    const city = await City.findById(validated.cityId).lean();
+    if (!city) throw new ErrorResponse('City not found', 400);
+    if (validated.zoneId) {
+      if (!mongoose.Types.ObjectId.isValid(validated.zoneId)) throw new ErrorResponse('zoneId is invalid', 400);
+      const zone = await Zone.findById(validated.zoneId).lean();
       if (!zone) throw new ErrorResponse('Zone not found', 400);
+      if (String(zone.cityId) !== String(validated.cityId)) {
+        throw new ErrorResponse('zoneId must belong to the selected cityId', 400);
+      }
     }
 
-    if (body.operationalHours && typeof body.operationalHours === 'object' && !(body.operationalHours instanceof Map)) {
-      body.operationalHours = new Map(Object.entries(body.operationalHours));
-    }
+    const normalizedHours = normalizeOperationalHours(body.operationalHours);
+    validateOperationalHours(normalizedHours);
+    if (normalizedHours) body.operationalHours = new Map(Object.entries(normalizedHours));
+    body.latitude = validated.lat;
+    body.longitude = validated.lng;
+    body.maxCapacity = validated.maxCapacity;
+    body.currentLoad = validated.currentLoad;
+    body.deliveryRadius = validated.deliveryRadius;
+    body.status = validated.status;
 
     const store = await Store.create(body);
     await cacheInvalidation.invalidateStores().catch(() => {});
@@ -165,38 +257,37 @@ const storeWarehouseController = {
     }
 
     const body = { ...req.body };
-
-    const effectiveType = body.type || store.type;
-    if (effectiveType === 'dark_store') {
-      const lat = parseFloat(body.latitude ?? store.latitude);
-      const lng = parseFloat(body.longitude ?? store.longitude);
-      if (isNaN(lat) || isNaN(lng)) {
-        throw new ErrorResponse('Latitude and Longitude are required for darkstores', 400);
-      }
-      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        throw new ErrorResponse('Invalid coordinates', 400);
-      }
-    }
+    const validated = validateLocationAndCapacity(body, store);
 
     if (body.code && body.code !== store.code) {
-      const existing = await Store.findOne({ code: body.code.trim(), _id: { $ne: req.params.id } });
+      body.code = validateCode(body.code, 'Store code');
+      const existing = await Store.findOne({ code: body.code, _id: { $ne: req.params.id } });
       if (existing) {
         throw new ErrorResponse('Store code already exists', 409);
       }
     }
 
-    if (body.cityId && mongoose.Types.ObjectId.isValid(body.cityId)) {
-      const city = await City.findById(body.cityId);
-      if (!city) throw new ErrorResponse('City not found', 400);
-    }
-    if (body.zoneId && mongoose.Types.ObjectId.isValid(body.zoneId)) {
-      const zone = await Zone.findById(body.zoneId);
+    const city = await City.findById(validated.cityId).lean();
+    if (!city) throw new ErrorResponse('City not found', 400);
+    const finalZoneId = validated.zoneId ?? store.zoneId;
+    if (finalZoneId) {
+      if (!mongoose.Types.ObjectId.isValid(finalZoneId)) throw new ErrorResponse('zoneId is invalid', 400);
+      const zone = await Zone.findById(finalZoneId).lean();
       if (!zone) throw new ErrorResponse('Zone not found', 400);
+      if (String(zone.cityId) !== String(validated.cityId)) {
+        throw new ErrorResponse('zoneId must belong to the selected cityId', 400);
+      }
     }
 
-    if (body.operationalHours && typeof body.operationalHours === 'object' && !(body.operationalHours instanceof Map)) {
-      body.operationalHours = new Map(Object.entries(body.operationalHours));
-    }
+    const normalizedHours = normalizeOperationalHours(body.operationalHours);
+    validateOperationalHours(normalizedHours);
+    if (normalizedHours) body.operationalHours = new Map(Object.entries(normalizedHours));
+    body.latitude = validated.lat;
+    body.longitude = validated.lng;
+    body.maxCapacity = validated.maxCapacity;
+    body.currentLoad = validated.currentLoad;
+    body.deliveryRadius = validated.deliveryRadius;
+    body.status = validated.status;
 
     const updated = await Store.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true })
       .populate('cityId', 'name code')
@@ -240,7 +331,7 @@ const storeWarehouseController = {
 
   // Warehouses (Store with type=warehouse)
   listWarehouses: asyncHandler(async (req, res) => {
-    const { search, status, page = 1, limit = 50 } = req.query;
+    const { search, status, page = 1, limit = 20 } = req.query;
     const filter = { type: 'warehouse' };
     if (status) filter.status = status;
     if (search && search.trim()) {
@@ -320,20 +411,29 @@ const storeWarehouseController = {
 
   createWarehouse: asyncHandler(async (req, res) => {
     const body = { ...req.body, type: 'warehouse' };
-    if (!body.code || !String(body.code).trim()) {
-      throw new ErrorResponse('Warehouse code is required', 400);
-    }
-    body.code = String(body.code).trim();
+    body.code = validateCode(body.code, 'Warehouse code');
+    const validated = validateLocationAndCapacity(body);
     const existing = await Store.findOne({ code: body.code });
     if (existing) throw new ErrorResponse('Warehouse code already exists', 409);
-    if (body.cityId && mongoose.Types.ObjectId.isValid(body.cityId)) {
-      const city = await City.findById(body.cityId);
-      if (!city) throw new ErrorResponse('City not found', 400);
-    }
-    if (body.zoneId && mongoose.Types.ObjectId.isValid(body.zoneId)) {
-      const zone = await Zone.findById(body.zoneId);
+    const city = await City.findById(validated.cityId).lean();
+    if (!city) throw new ErrorResponse('City not found', 400);
+    if (validated.zoneId) {
+      if (!mongoose.Types.ObjectId.isValid(validated.zoneId)) throw new ErrorResponse('zoneId is invalid', 400);
+      const zone = await Zone.findById(validated.zoneId).lean();
       if (!zone) throw new ErrorResponse('Zone not found', 400);
+      if (String(zone.cityId) !== String(validated.cityId)) {
+        throw new ErrorResponse('zoneId must belong to the selected cityId', 400);
+      }
     }
+    const normalizedHours = normalizeOperationalHours(body.operationalHours);
+    validateOperationalHours(normalizedHours);
+    if (normalizedHours) body.operationalHours = new Map(Object.entries(normalizedHours));
+    body.latitude = validated.lat;
+    body.longitude = validated.lng;
+    body.maxCapacity = validated.maxCapacity;
+    body.currentLoad = validated.currentLoad;
+    body.deliveryRadius = validated.deliveryRadius;
+    body.status = validated.status;
     const store = await Store.create(body);
     await cacheInvalidation.invalidateStores().catch(() => {});
     const populated = await Store.findById(store._id)
@@ -366,10 +466,32 @@ const storeWarehouseController = {
     if (!store) throw new ErrorResponse('Warehouse not found', 404);
     const body = { ...req.body };
     delete body.type;
+    const validated = validateLocationAndCapacity(body, store);
     if (body.code) {
-      const existing = await Store.findOne({ code: body.code.trim(), _id: { $ne: req.params.id } });
+      body.code = validateCode(body.code, 'Warehouse code');
+      const existing = await Store.findOne({ code: body.code, _id: { $ne: req.params.id } });
       if (existing) throw new ErrorResponse('Warehouse code already exists', 409);
     }
+    const city = await City.findById(validated.cityId).lean();
+    if (!city) throw new ErrorResponse('City not found', 400);
+    const finalZoneId = validated.zoneId ?? store.zoneId;
+    if (finalZoneId) {
+      if (!mongoose.Types.ObjectId.isValid(finalZoneId)) throw new ErrorResponse('zoneId is invalid', 400);
+      const zone = await Zone.findById(finalZoneId).lean();
+      if (!zone) throw new ErrorResponse('Zone not found', 400);
+      if (String(zone.cityId) !== String(validated.cityId)) {
+        throw new ErrorResponse('zoneId must belong to the selected cityId', 400);
+      }
+    }
+    const normalizedHours = normalizeOperationalHours(body.operationalHours);
+    validateOperationalHours(normalizedHours);
+    if (normalizedHours) body.operationalHours = new Map(Object.entries(normalizedHours));
+    body.latitude = validated.lat;
+    body.longitude = validated.lng;
+    body.maxCapacity = validated.maxCapacity;
+    body.currentLoad = validated.currentLoad;
+    body.deliveryRadius = validated.deliveryRadius;
+    body.status = validated.status;
     Object.assign(store, body);
     await store.save();
     await cacheInvalidation.invalidateStores().catch(() => {});
@@ -401,9 +523,10 @@ const storeWarehouseController = {
   deleteWarehouse: asyncHandler(async (req, res) => {
     const store = await Store.findOne({ _id: req.params.id, type: 'warehouse' });
     if (!store) throw new ErrorResponse('Warehouse not found', 404);
-    await Store.findByIdAndDelete(req.params.id);
+    store.status = 'inactive';
+    await store.save();
     await cacheInvalidation.invalidateStores().catch(() => {});
-    res.json({ success: true, message: 'Warehouse deleted' });
+    res.json({ success: true, message: 'Warehouse deactivated' });
   }),
 
   // Staff

@@ -255,6 +255,9 @@ async function getIncidents(cityId = DEFAULT_CITY_ID, status = 'ongoing') {
     affectedCustomers: inc.affectedCustomers,
     status: inc.status,
     resolvedAt: inc.resolvedAt,
+    storeId: inc.storeId || null,
+    storeName: inc.storeName || null,
+    outageReason: inc.outageReason || null,
     timeline: inc.timeline || [],
     actions: inc.actions || [],
   }));

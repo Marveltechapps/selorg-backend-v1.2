@@ -7,6 +7,9 @@ const AdminUser = require('../models/User');
 const { asyncHandler } = require('../../core/middleware');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 const mongoose = require('mongoose');
+const CITY_CODE_REGEX = /^[A-Z]{3}$/;
+
+const normalizeZoneStatus = (status) => String(status ?? '').toLowerCase();
 
 // --- Cities ---
 const listCities = asyncHandler(async (req, res) => {
@@ -62,7 +65,10 @@ const createCity = asyncHandler(async (req, res) => {
   const { code, name, state, country } = req.body;
   if (!code || !String(code).trim()) throw new ErrorResponse('City code is required', 400);
   if (!name || !String(name).trim()) throw new ErrorResponse('City name is required', 400);
-  const codeTrim = String(code).trim();
+  const codeTrim = String(code).trim().toUpperCase();
+  if (!CITY_CODE_REGEX.test(codeTrim)) {
+    throw new ErrorResponse('City code must be uppercase 3-letter code (e.g. BLR)', 400);
+  }
   const existing = await City.findOne({ code: codeTrim });
   if (existing) throw new ErrorResponse('City code already exists', 409);
   const city = await City.create({
@@ -79,8 +85,11 @@ const updateCity = asyncHandler(async (req, res) => {
   if (!city) throw new ErrorResponse('City not found', 404);
   const { code, name, state, country, isActive } = req.body;
   if (code !== undefined) {
-    const codeTrim = String(code).trim();
+    const codeTrim = String(code).trim().toUpperCase();
     if (!codeTrim) throw new ErrorResponse('City code cannot be empty', 400);
+    if (!CITY_CODE_REGEX.test(codeTrim)) {
+      throw new ErrorResponse('City code must be uppercase 3-letter code (e.g. BLR)', 400);
+    }
     const existing = await City.findOne({ code: codeTrim, _id: { $ne: req.params.id } });
     if (existing) throw new ErrorResponse('City code already exists', 409);
     city.code = codeTrim;
@@ -96,16 +105,20 @@ const updateCity = asyncHandler(async (req, res) => {
 const deleteCity = asyncHandler(async (req, res) => {
   const city = await City.findById(req.params.id);
   if (!city) throw new ErrorResponse('City not found', 404);
-  const storeCount = await Store.countDocuments({ cityId: city._id });
-  if (storeCount > 0) {
-    throw new ErrorResponse(
-      `Cannot delete city: ${storeCount} store(s) reference it. Remove or reassign stores first.`,
-      400
-    );
-  }
+  const [storeCount, activeZoneCount] = await Promise.all([
+    Store.countDocuments({ cityId: city._id, status: { $in: ['active', 'offline', 'maintenance'] } }),
+    Zone.countDocuments({ cityId: city._id, status: { $in: ['Active', 'active', 'Pending', 'testing'] } }),
+  ]);
   city.isActive = false;
   await city.save();
-  res.json({ success: true, message: 'City deactivated' });
+  const warningParts = [];
+  if (storeCount > 0) warningParts.push(`${storeCount} active store(s) still reference this city`);
+  if (activeZoneCount > 0) warningParts.push(`${activeZoneCount} active zone(s) still reference this city`);
+  res.json({
+    success: true,
+    message: warningParts.length ? `City deactivated with warnings: ${warningParts.join('; ')}` : 'City deactivated',
+    warning: warningParts.length ? warningParts.join('; ') : undefined,
+  });
 });
 
 // --- Zones ---
@@ -113,7 +126,7 @@ const listZones = asyncHandler(async (req, res) => {
   const { cityId, status, search, page = 1, limit = 50 } = req.query;
   const filter = {};
   if (cityId && mongoose.Types.ObjectId.isValid(cityId)) filter.cityId = cityId;
-  if (status) filter.status = status;
+  if (status) filter.status = { $regex: `^${String(status).trim()}$`, $options: 'i' };
   if (search && search.trim()) {
     const s = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     filter.$or = [
@@ -124,7 +137,7 @@ const listZones = asyncHandler(async (req, res) => {
   const skip = Math.max(0, (parseInt(page, 10) - 1) * parseInt(limit, 10));
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
   const [zones, total] = await Promise.all([
-    Zone.find(filter).populate('cityId', 'name code').sort({ name: 1 }).skip(skip).limit(limitNum).lean(),
+    Zone.find(filter).populate('cityId', 'name code state').sort({ name: 1 }).skip(skip).limit(limitNum).lean(),
     Zone.countDocuments(filter),
   ]);
   const totalPages = Math.ceil(total / limitNum);
@@ -137,8 +150,9 @@ const listZones = asyncHandler(async (req, res) => {
       code: z.code,
       cityId: z.cityId?._id ?? z.cityId,
       cityName: z.cityId?.name,
+      cityState: z.cityId?.state,
       type: z.type,
-      status: z.status,
+      status: normalizeZoneStatus(z.status),
       color: z.color,
       areaSqKm: z.areaSqKm,
       defaultCapacity: z.defaultCapacity,
@@ -150,7 +164,7 @@ const listZones = asyncHandler(async (req, res) => {
 });
 
 const getZone = asyncHandler(async (req, res) => {
-  const zone = await Zone.findById(req.params.id).populate('cityId', 'name code').lean();
+  const zone = await Zone.findById(req.params.id).populate('cityId', 'name code state').lean();
   if (!zone) throw new ErrorResponse('Zone not found', 404);
   res.json({
     success: true,
@@ -158,6 +172,8 @@ const getZone = asyncHandler(async (req, res) => {
       id: zone._id.toString(),
       ...zone,
       cityName: zone.cityId?.name,
+      cityState: zone.cityId?.state,
+      status: normalizeZoneStatus(zone.status),
     },
   });
 });
@@ -178,17 +194,28 @@ const createZone = asyncHandler(async (req, res) => {
     areaSqKm: areaSqKm != null ? Number(areaSqKm) : 0,
     defaultCapacity: defaultCapacity != null ? Number(defaultCapacity) : undefined,
   });
-  const populated = await Zone.findById(zone._id).populate('cityId', 'name code').lean();
-  res.status(201).json({ success: true, data: { id: populated._id.toString(), ...populated, cityName: populated.cityId?.name } });
+  const populated = await Zone.findById(zone._id).populate('cityId', 'name code state').lean();
+  res.status(201).json({
+    success: true,
+    data: {
+      id: populated._id.toString(),
+      ...populated,
+      cityName: populated.cityId?.name,
+      cityState: populated.cityId?.state,
+    },
+  });
 });
 
 const updateZone = asyncHandler(async (req, res) => {
   const zone = await Zone.findById(req.params.id);
   if (!zone) throw new ErrorResponse('Zone not found', 404);
-  const { name, code, cityId, type, status, color, areaSqKm, defaultCapacity } = req.body;
+  const { name, code, cityId, type, status, color, areaSqKm, defaultCapacity, confirmCityChange } = req.body;
   if (name !== undefined) zone.name = String(name).trim();
   if (code !== undefined) zone.code = code ? String(code).trim() : undefined;
   if (cityId && mongoose.Types.ObjectId.isValid(cityId)) {
+    if (String(zone.cityId) !== String(cityId) && confirmCityChange !== true) {
+      throw new ErrorResponse('Changing zone cityId is destructive. Set confirmCityChange=true to proceed.', 400);
+    }
     const city = await City.findById(cityId);
     if (!city) throw new ErrorResponse('City not found', 400);
     zone.cityId = cityId;
@@ -199,8 +226,17 @@ const updateZone = asyncHandler(async (req, res) => {
   if (areaSqKm !== undefined) zone.areaSqKm = Number(areaSqKm);
   if (defaultCapacity !== undefined) zone.defaultCapacity = defaultCapacity != null ? Number(defaultCapacity) : undefined;
   await zone.save();
-  const populated = await Zone.findById(zone._id).populate('cityId', 'name code').lean();
-  res.json({ success: true, data: { id: populated._id.toString(), ...populated, cityName: populated.cityId?.name } });
+  const populated = await Zone.findById(zone._id).populate('cityId', 'name code state').lean();
+  res.json({
+    success: true,
+    data: {
+      id: populated._id.toString(),
+      ...populated,
+      cityName: populated.cityId?.name,
+      cityState: populated.cityId?.state,
+      status: normalizeZoneStatus(populated.status),
+    },
+  });
 });
 
 const deleteZone = asyncHandler(async (req, res) => {
@@ -213,8 +249,10 @@ const deleteZone = asyncHandler(async (req, res) => {
       400
     );
   }
-  await Zone.findByIdAndDelete(req.params.id);
-  res.json({ success: true, message: 'Zone deleted' });
+  zone.status = 'inactive';
+  zone.isVisible = false;
+  await zone.save();
+  res.json({ success: true, message: 'Zone deactivated' });
 });
 
 // --- Managers (for dropdowns) ---

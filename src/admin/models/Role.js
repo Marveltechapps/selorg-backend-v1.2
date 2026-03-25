@@ -13,6 +13,34 @@ const RoleSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    templateKey: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      sparse: true,
+      index: true,
+    },
+    isTemplate: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    isSystemTemplate: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    templateVersion: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    riskLevel: {
+      type: String,
+      enum: ['low', 'medium', 'high'],
+      default: 'medium',
+      index: true,
+    },
     roleType: {
       type: String,
       enum: ['system', 'custom'],
@@ -48,6 +76,7 @@ const RoleSchema = new mongoose.Schema(
 // Index for common queries
 RoleSchema.index({ roleType: 1, isActive: 1 });
 RoleSchema.index({ accessScope: 1, isActive: 1 });
+RoleSchema.index({ isTemplate: 1, isSystemTemplate: 1, isActive: 1 });
 
 // Virtual for user count (will be populated from User model)
 RoleSchema.virtual('userCount', {

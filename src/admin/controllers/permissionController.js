@@ -1,6 +1,7 @@
 const Permission = require('../models/Permission');
 const logger = require('../../core/utils/logger');
 const cacheInvalidation = require('../cacheInvalidation');
+const { logAdminAction } = require('../services/adminAudit.service');
 
 /**
  * Get all permissions
@@ -33,6 +34,53 @@ const getPermissions = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error fetching permissions', {
+      error: error.message,
+      stack: error.stack,
+      requestId: req.id,
+    });
+    next(error);
+  }
+};
+
+/**
+ * Get permissions in matrix format grouped by module.
+ */
+const getPermissionsMatrix = async (req, res, next) => {
+  try {
+    const permissions = await Permission.find({ isActive: true })
+      .sort({ module: 1, action: 1, displayName: 1 })
+      .lean();
+
+    const modulesMap = permissions.reduce((acc, permission) => {
+      const moduleName = permission.module || 'general';
+      if (!acc[moduleName]) acc[moduleName] = [];
+      acc[moduleName].push({
+        id: permission._id.toString(),
+        name: permission.name,
+        displayName: permission.displayName,
+        description: permission.description || '',
+        action: permission.action || 'view',
+        riskLevel: permission.riskLevel || 'low',
+        dependsOn: permission.dependsOn || [],
+      });
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        modules: Object.entries(modulesMap).map(([module, entries]) => ({
+          module,
+          permissions: entries,
+        })),
+      },
+      meta: {
+        requestId: req.id,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error('Error fetching permissions matrix', {
       error: error.message,
       stack: error.stack,
       requestId: req.id,
@@ -90,7 +138,7 @@ const getPermissionById = async (req, res, next) => {
  */
 const createPermission = async (req, res, next) => {
   try {
-    const { name, displayName, module, description, category } = req.body;
+    const { name, displayName, module, description, category, action, riskLevel, dependsOn } = req.body;
 
     // Validate required fields
     if (!name || !displayName || !module) {
@@ -129,6 +177,9 @@ const createPermission = async (req, res, next) => {
       module,
       description: description || '',
       category: category || 'read',
+      action: action || 'view',
+      riskLevel: riskLevel || 'low',
+      dependsOn: Array.isArray(dependsOn) ? dependsOn : [],
     };
 
     const permission = await Permission.create(permissionData);
@@ -144,6 +195,14 @@ const createPermission = async (req, res, next) => {
     });
 
     await cacheInvalidation.invalidatePermissions().catch(() => {});
+    await logAdminAction({
+      action: 'permission_created',
+      entityType: 'permission',
+      entityId: permission._id.toString(),
+      userId: req.user?.userId,
+      details: { name: permission.name, module: permission.module },
+      req,
+    });
 
     res.status(201).json({
       success: true,
@@ -169,7 +228,7 @@ const createPermission = async (req, res, next) => {
 const updatePermission = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { displayName, module, description, category, isActive } = req.body;
+    const { displayName, module, description, category, action, riskLevel, dependsOn, isActive } = req.body;
 
     const permission = await Permission.findById(id);
     if (!permission) {
@@ -191,6 +250,9 @@ const updatePermission = async (req, res, next) => {
     if (module) permission.module = module;
     if (description !== undefined) permission.description = description;
     if (category) permission.category = category;
+    if (action) permission.action = action;
+    if (riskLevel) permission.riskLevel = riskLevel;
+    if (dependsOn && Array.isArray(dependsOn)) permission.dependsOn = dependsOn;
     if (isActive !== undefined) permission.isActive = isActive;
 
     await permission.save();
@@ -206,6 +268,14 @@ const updatePermission = async (req, res, next) => {
     });
 
     await cacheInvalidation.invalidatePermissions().catch(() => {});
+    await logAdminAction({
+      action: 'permission_updated',
+      entityType: 'permission',
+      entityId: permission._id.toString(),
+      userId: req.user?.userId,
+      details: { name: permission.name, module: permission.module },
+      req,
+    });
 
     res.json({
       success: true,
@@ -256,6 +326,14 @@ const deletePermission = async (req, res, next) => {
     });
 
     await cacheInvalidation.invalidatePermissions().catch(() => {});
+    await logAdminAction({
+      action: 'permission_deleted',
+      entityType: 'permission',
+      entityId: id,
+      userId: req.user?.userId,
+      details: { name: permission.name, module: permission.module },
+      req,
+    });
 
     res.json({
       success: true,
@@ -277,6 +355,7 @@ const deletePermission = async (req, res, next) => {
 
 module.exports = {
   getPermissions,
+  getPermissionsMatrix,
   getPermissionById,
   createPermission,
   updatePermission,

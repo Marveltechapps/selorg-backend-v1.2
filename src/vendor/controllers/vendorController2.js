@@ -366,15 +366,19 @@ async function sendInviteEmail(req, res, next) {
       },
     });
 
-    vendor.status = 'invited';
-    vendor.stage = 'invited';
-    if (!vendor.metadata) vendor.metadata = {};
-    vendor.metadata.inviteSentAt = new Date().toISOString();
-    if (result.previewUrl) {
-      vendor.metadata.inviteEmailPreviewUrl = result.previewUrl;
+    // Re-load vendor to avoid overwriting invite token metadata saved by inviteService.
+    const freshVendor = await Vendor.findById(vendorId);
+    if (freshVendor) {
+      freshVendor.status = 'invited';
+      freshVendor.stage = 'invited';
+      if (!freshVendor.metadata) freshVendor.metadata = {};
+      freshVendor.metadata.inviteSentAt = new Date().toISOString();
+      if (result.previewUrl) {
+        freshVendor.metadata.inviteEmailPreviewUrl = result.previewUrl;
+      }
+      freshVendor.markModified('metadata');
+      await freshVendor.save();
     }
-    vendor.markModified('metadata');
-    await vendor.save();
 
     res.json({
       success: true,

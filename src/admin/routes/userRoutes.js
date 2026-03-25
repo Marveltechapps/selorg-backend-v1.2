@@ -12,6 +12,7 @@ router.use(authenticateToken);
 
 // Managers list (for Master Data dropdowns) - must be before /:id
 router.get('/managers', cacheMiddleware(appConfig.cache.admin.users), asyncHandler(masterDataController.listManagers));
+router.get('/me', asyncHandler(userController.getCurrentUserProfile));
 
 // Get users - requires view_users permission
 router.get('/', requirePermission('view_users'), cacheMiddleware(appConfig.cache.admin.users), asyncHandler(userController.getUsers));
@@ -19,6 +20,10 @@ router.get('/:id', requirePermission('view_users'), cacheMiddleware(appConfig.ca
 
 // Bulk operations - must be before /:id
 router.post('/bulk', requirePermission('edit_users'), asyncHandler(userController.bulkUserAction));
+
+// Email verification flow for user creation
+router.post('/verification/send-otp', requirePermission('create_users'), asyncHandler(userController.sendCreateUserOtp));
+router.post('/verification/verify-otp', requirePermission('create_users'), asyncHandler(userController.verifyCreateUserOtp));
 
 // Create/update/delete users - requires manage_users permission
 router.post('/', requirePermission('create_users'), asyncHandler(userController.createUser));

@@ -21,6 +21,8 @@ function normalizeVendorCreatePayload(payload) {
   const vendorCode = String(p.vendorCode ?? p.code ?? '').trim();
   const gstinRaw = p.taxInfo?.gstin ?? p.taxInfo?.GSTIN ?? p.metadata?.gstNumber ?? '';
   const gstin = String(gstinRaw).trim();
+  const panRaw = p.taxInfo?.pan ?? p.metadata?.panNumber ?? '';
+  const pan = String(panRaw).trim();
   const paymentTermsRaw = p.paymentTerms ?? p.metadata?.paymentTerms ?? '';
   const paymentTerms = String(paymentTermsRaw).trim();
   const currencyRaw = String(p.currencyCode ?? 'INR').trim().toUpperCase() || 'INR';
@@ -34,6 +36,7 @@ function normalizeVendorCreatePayload(payload) {
   const state = String(addr.state ?? '').trim();
   const country = String(addr.country ?? 'India').trim() || 'India';
   const zipCode = String(addr.zipCode ?? addr.pincode ?? '').trim();
+  const pincode = String(addr.pincode ?? addr.zipCode ?? '').trim();
 
   const c = p.contact || {};
   const contactName = String(c.name ?? '').trim();
@@ -47,10 +50,10 @@ function normalizeVendorCreatePayload(payload) {
   return {
     vendorName,
     vendorCode,
-    taxInfo: { gstin },
+    taxInfo: { gstin, pan },
     paymentTerms,
     currencyCode,
-    address: { line1, line2, line3, city, state, country, zipCode },
+    address: { line1, line2, line3, city, state, country, zipCode, pincode },
     contact: { name: contactName, phone, email },
     status: p.status || 'pending',
     onboarding: p.onboarding,
@@ -65,13 +68,14 @@ function validateVendorCreate(n) {
   if (n.vendorName.length > 100) errs.push('vendorName must be at most 100 characters');
   const status = String(n.status || '').toLowerCase();
   const isDraft = status === 'draft';
+  const isInvited = status === 'invited';
 
-  // Draft vendors may be saved with incomplete wizard data.
-  if (!isDraft) {
+  // Draft / invited vendors may be saved with incomplete wizard data.
+  if (!isDraft && !isInvited) {
     if (!n.taxInfo.gstin) errs.push('taxInfo.gstin is required');
 
     const PAYMENT_TERM_CODES = ['advance', 'net7', 'net15', 'net30', 'net45', 'cod'];
-    const allowedPaymentTerms = [...PAYMENT_TERMS, ...PAYMENT_TERM_CODES];
+    const allowedPaymentTerms = [...PAYMENT_TERMS, ...PAYMENT_TERM_CODES, '15 days', '7 days'];
     if (!allowedPaymentTerms.includes(n.paymentTerms)) {
       errs.push(`paymentTerms must be one of: ${allowedPaymentTerms.join(', ')}`);
     }
@@ -138,7 +142,7 @@ async function createVendor(payload) {
     vendorName: n.vendorName,
     name: n.vendorName,
     code: n.vendorCode,
-    taxInfo: n.taxInfo,
+    taxInfo: { gstin: n.taxInfo.gstin, pan: n.taxInfo.pan || '' },
     paymentTerms: n.paymentTerms,
     currencyCode: n.currencyCode,
     address: {
@@ -149,6 +153,7 @@ async function createVendor(payload) {
       state: n.address.state,
       country: n.address.country,
       zipCode: n.address.zipCode,
+      pincode: n.address.pincode || n.address.zipCode,
     },
     contact: {
       name: n.contact.name,

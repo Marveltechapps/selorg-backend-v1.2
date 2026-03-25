@@ -95,7 +95,10 @@ router.post('/complete-profile', async (req, res) => {
     if (!vendor.metadata) vendor.metadata = {};
     Object.assign(vendor.metadata, {
       vendorType: vendorData.vendorType || vendor.metadata.vendorType,
-      category: vendorData.category || vendor.metadata.category,
+      category:
+        vendorData.category ||
+        (vendorData.selectedCategories && vendorData.selectedCategories[0]) ||
+        vendor.metadata.category,
       gstNumber: vendorData.gstNumber || '',
       panNumber: vendorData.panNumber || '',
       bankName: vendorData.bankName || '',
@@ -109,13 +112,21 @@ router.post('/complete-profile', async (req, res) => {
       description: vendorData.description || '',
       profileCompletedAt: new Date().toISOString(),
       inviteStatus: 'completed',
-      // Keep inviteToken so subsequent validation can return "already used".
-      inviteToken: token,
+      inviteToken: null,
     });
 
     vendor.status = 'pending';
     vendor.stage = 'new_request';
     vendor.markModified('metadata');
+    vendor.markModified('metadata.gstNumber');
+    vendor.markModified('metadata.bankName');
+    vendor.markModified('metadata.selectedCategories');
+    console.log('=== SAVING VENDOR PROFILE ===');
+    console.log('GST:', vendor.metadata.gstNumber);
+    console.log('Bank:', vendor.metadata.bankName);
+    console.log('Categories:', vendor.metadata.selectedCategories);
+    console.log('Product Type:', vendor.metadata.productType);
+    console.log('==============================');
     await vendor.save();
 
     res.json({

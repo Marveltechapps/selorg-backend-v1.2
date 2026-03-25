@@ -21,10 +21,28 @@ const PermissionSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    action: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: 'view',
+      index: true,
+    },
     description: {
       type: String,
       trim: true,
     },
+    riskLevel: {
+      type: String,
+      enum: ['low', 'medium', 'high'],
+      default: 'low',
+      index: true,
+    },
+    dependsOn: [{
+      type: String,
+      trim: true,
+      lowercase: true,
+    }],
     category: {
       type: String,
       enum: ['read', 'write', 'delete', 'admin'],
@@ -45,6 +63,7 @@ const PermissionSchema = new mongoose.Schema(
 // Index for common queries
 PermissionSchema.index({ module: 1, isActive: 1 });
 PermissionSchema.index({ category: 1, isActive: 1 });
+PermissionSchema.index({ module: 1, action: 1, isActive: 1 });
 
 PermissionSchema.set('toJSON', {
   transform: function(doc, ret) {

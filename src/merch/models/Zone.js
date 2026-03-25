@@ -9,7 +9,7 @@ const ALL_STATUSES = ['Active', 'Inactive', 'Pending', 'active', 'inactive', 'te
 const ZoneSchema = new Schema({
   name: { type: String, required: true },
   code: { type: String, sparse: true },
-  cityId: { type: Schema.Types.ObjectId, ref: 'City' },
+  cityId: { type: Schema.Types.ObjectId, ref: 'City', required: true },
   type: { type: String, enum: ALL_TYPES, default: 'standard' },
   status: { type: String, enum: ALL_STATUSES, default: 'active' },
   isVisible: { type: Boolean, default: true },
@@ -58,8 +58,26 @@ const ZoneSchema = new Schema({
   metadata: { type: Schema.Types.Mixed },
 }, { timestamps: true });
 
+ZoneSchema.pre('validate', function zonePreValidate(next) {
+  if (!this.center && Array.isArray(this.polygon) && this.polygon.length > 0) {
+    const sum = this.polygon.reduce(
+      (acc, point) => ({
+        lat: acc.lat + Number(point.lat || 0),
+        lng: acc.lng + Number(point.lng || 0),
+      }),
+      { lat: 0, lng: 0 }
+    );
+    this.center = {
+      lat: sum.lat / this.polygon.length,
+      lng: sum.lng / this.polygon.length,
+    };
+  }
+  next();
+});
+
 ZoneSchema.index({ cityId: 1 });
 ZoneSchema.index({ status: 1 });
 ZoneSchema.index({ city: 1 });
+ZoneSchema.index({ code: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.models.Zone || mongoose.model('Zone', ZoneSchema);

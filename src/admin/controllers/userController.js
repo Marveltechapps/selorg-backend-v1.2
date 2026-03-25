@@ -4,8 +4,15 @@ const Role = require('../models/Role');
 const VendorUser = require('../../vendor/models/User');
 const AuditLog = require('../../common-models/AuditLog');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const logger = require('../../core/utils/logger');
 const cacheInvalidation = require('../cacheInvalidation');
+const UserEmailVerification = require('../models/UserEmailVerification');
+const {
+  sendAdminUserOtpEmail,
+  sendAdminUserCreatedEmail,
+  sendAdminCreationConfirmationEmail,
+} = require('../services/userOnboardingEmailService');
 
 const DASHBOARD_ROLES = ['darkstore', 'production', 'merch', 'rider', 'finance', 'warehouse', 'admin', 'vendor'];
 
@@ -40,6 +47,20 @@ async function auditAdminAction(req, moduleName, action, entityType, entityId, d
   } catch (err) {
     logger.warn('AuditLog create failed', { err: err.message, action });
   }
+}
+
+const OTP_EXPIRY_MINUTES = 10;
+const OTP_MAX_ATTEMPTS = 5;
+
+function generateOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashOtp(email, otp) {
+  return crypto
+    .createHash('sha256')
+    .update(`${email.toLowerCase()}|${otp}|${process.env.OTP_HASH_SECRET || 'selorg-admin-otp'}`)
+    .digest('hex');
 }
 
 /**
@@ -155,6 +176,75 @@ const getUserById = async (req, res, next) => {
 };
 
 /**
+ * Get currently authenticated admin user profile
+ */
+const getCurrentUserProfile = async (req, res, next) => {
+  try {
+    const userId = req.user?.userId;
+    const email = req.user?.email ? String(req.user.email).toLowerCase() : null;
+
+    let user = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      user = await User.findById(userId).lean();
+    }
+
+    if (!user && email) {
+      user = await User.findOne({ email }).lean();
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'Current user profile not found',
+        },
+        meta: {
+          requestId: req.id,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    let role = null;
+    const roleIdValue =
+      typeof user.roleId === 'string'
+        ? user.roleId
+        : user.roleId && typeof user.roleId === 'object' && user.roleId.toString
+          ? user.roleId.toString()
+          : null;
+    if (roleIdValue && mongoose.Types.ObjectId.isValid(roleIdValue)) {
+      role = await Role.findById(roleIdValue).select('name description accessScope').lean();
+    }
+    const deriveAvatar = (name) =>
+      (name || 'U').split(' ').map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || 'U';
+
+    return res.json({
+      success: true,
+      data: {
+        ...user,
+        id: user._id.toString(),
+        roleName: role?.name,
+        accessLevel: role?.accessScope === 'global' ? 'Full Access' :
+                     role?.accessScope === 'zone' ? 'Zone Limited' : 'Store Limited',
+        avatar: deriveAvatar(user.name),
+      },
+      meta: {
+        requestId: req.id,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error('Error fetching current user profile', {
+      error: error.message,
+      stack: error.stack,
+      requestId: req.id,
+    });
+    next(error);
+  }
+};
+
+/**
  * Create new user
  */
 const createUser = async (req, res, next) => {
@@ -172,6 +262,7 @@ const createUser = async (req, res, next) => {
       notes,
       assignedStores,
       primaryStoreId,
+      emailVerifiedToken,
     } = req.body;
 
     // Validate required fields
@@ -203,6 +294,33 @@ const createUser = async (req, res, next) => {
           timestamp: new Date().toISOString(),
         },
       });
+    }
+
+    if (emailVerifiedToken) {
+      const verification = await UserEmailVerification.findOne({
+        _id: emailVerifiedToken,
+        email: email.toLowerCase(),
+        verifiedAt: { $ne: null },
+        consumedAt: null,
+        expiresAt: { $gt: new Date() },
+      });
+
+      if (!verification) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'EMAIL_NOT_VERIFIED',
+            message: 'Email verification is invalid or expired. Please verify the email again.',
+          },
+          meta: {
+            requestId: req.id,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
+      verification.consumedAt = new Date();
+      await verification.save();
     }
 
     // Validate role if provided
@@ -243,6 +361,7 @@ const createUser = async (req, res, next) => {
       assignedStores: assignedStores || [],
       primaryStoreId: primaryStoreId || '',
       status: 'active',
+      emailVerified: Boolean(emailVerifiedToken),
     };
 
     const user = await User.create(userData);
@@ -283,6 +402,32 @@ const createUser = async (req, res, next) => {
 
     await cacheInvalidation.invalidateUsers().catch(() => {});
 
+    const roleName = role?.name || 'N/A';
+    await sendAdminUserCreatedEmail({
+      to: user.email,
+      name: user.name,
+      roleName,
+      department: user.department,
+    }).catch((emailErr) => {
+      logger.warn('Failed to send user created email to new user', {
+        email: user.email,
+        err: emailErr.message,
+      });
+    });
+
+    await sendAdminCreationConfirmationEmail({
+      to: req.user?.email,
+      createdUserEmail: user.email,
+      createdUserName: user.name,
+      roleName,
+      department: user.department,
+    }).catch((emailErr) => {
+      logger.warn('Failed to send user created confirmation email to admin', {
+        adminEmail: req.user?.email,
+        err: emailErr.message,
+      });
+    });
+
     const deriveAvatar = (name) =>
       (name || 'U').split(' ').map(n => n[0]).filter(Boolean).join('').toUpperCase().slice(0, 2) || 'U';
 
@@ -306,6 +451,155 @@ const createUser = async (req, res, next) => {
       stack: error.stack,
       requestId: req.id,
     });
+    next(error);
+  }
+};
+
+/**
+ * Send OTP for admin user email verification
+ */
+const sendCreateUserOtp = async (req, res, next) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Email is required' },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        error: { code: 'USER_EXISTS', message: 'User with this email already exists' },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const otp = generateOtp();
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+    const verification = await UserEmailVerification.create({
+      email: normalizedEmail,
+      otpHash: hashOtp(normalizedEmail, otp),
+      requestedByUserId: req.user?.userId || null,
+      expiresAt,
+    });
+
+    try {
+      await sendAdminUserOtpEmail({
+        to: normalizedEmail,
+        otp,
+        expiresInMinutes: OTP_EXPIRY_MINUTES,
+        requestedByEmail: req.user?.email,
+      });
+    } catch (emailError) {
+      logger.error('Failed to send admin user OTP email', {
+        error: emailError.message,
+        code: emailError.code,
+        response: emailError.response,
+        email: normalizedEmail,
+        requestId: req.id,
+      });
+
+      // Avoid leaving stale OTP rows when SMTP delivery fails.
+      await UserEmailVerification.deleteOne({ _id: verification._id }).catch(() => {});
+
+      return res.status(502).json({
+        success: false,
+        error: {
+          code: 'EMAIL_DELIVERY_FAILED',
+          message: 'Unable to send OTP email. Please verify SMTP settings and try again.',
+        },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    await auditAdminAction(req, 'admin', 'user_create_otp_sent', 'UserEmailVerification', verification._id, {
+      email: normalizedEmail,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        verificationRequestId: verification._id.toString(),
+        expiresAt: expiresAt.toISOString(),
+      },
+      meta: { requestId: req.id, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Verify OTP for admin user email verification
+ */
+const verifyCreateUserOtp = async (req, res, next) => {
+  try {
+    const { email, otp, verificationRequestId } = req.body || {};
+    if (!email || !otp || !verificationRequestId) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'email, otp and verificationRequestId are required' },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const verification = await UserEmailVerification.findOne({
+      _id: verificationRequestId,
+      email: normalizedEmail,
+      expiresAt: { $gt: new Date() },
+      consumedAt: null,
+    });
+
+    if (!verification) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'OTP_INVALID', message: 'OTP request is invalid or expired. Please resend OTP.' },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    if (verification.attempts >= OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({
+        success: false,
+        error: { code: 'OTP_ATTEMPTS_EXCEEDED', message: 'Maximum OTP attempts exceeded. Please resend OTP.' },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    const isMatch = verification.otpHash === hashOtp(normalizedEmail, String(otp).trim());
+    if (!isMatch) {
+      verification.attempts += 1;
+      await verification.save();
+      return res.status(400).json({
+        success: false,
+        error: { code: 'OTP_INVALID', message: 'Invalid OTP' },
+        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      });
+    }
+
+    verification.verifiedAt = new Date();
+    await verification.save();
+
+    await auditAdminAction(req, 'admin', 'user_create_otp_verified', 'UserEmailVerification', verification._id, {
+      email: normalizedEmail,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        emailVerifiedToken: verification._id.toString(),
+        email: normalizedEmail,
+      },
+      meta: { requestId: req.id, timestamp: new Date().toISOString() },
+    });
+  } catch (error) {
     next(error);
   }
 };
@@ -740,6 +1034,9 @@ const bulkUserAction = async (req, res, next) => {
 module.exports = {
   getUsers,
   getUserById,
+  getCurrentUserProfile,
+  sendCreateUserOtp,
+  verifyCreateUserOtp,
   createUser,
   updateUser,
   deleteUser,

@@ -11,6 +11,7 @@ router.use(authenticateToken);
 router.use(requirePermission('manage_roles'));
 
 router.get('/', cacheMiddleware(appConfig.cache.admin.permissions), asyncHandler(permissionController.getPermissions));
+router.get('/matrix', cacheMiddleware(appConfig.cache.admin.permissions), asyncHandler(permissionController.getPermissionsMatrix));
 router.get('/:id', cacheMiddleware(appConfig.cache.admin.permissions), asyncHandler(permissionController.getPermissionById));
 router.post('/', asyncHandler(permissionController.createPermission));
 router.put('/:id', asyncHandler(permissionController.updatePermission));
