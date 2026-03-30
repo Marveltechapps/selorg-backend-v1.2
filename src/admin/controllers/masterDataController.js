@@ -11,6 +11,48 @@ const CITY_CODE_REGEX = /^[A-Z]{3}$/;
 
 const normalizeZoneStatus = (status) => String(status ?? '').toLowerCase();
 
+function coerceJsonArray(val) {
+  if (val == null) return undefined;
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string' && val.trim()) {
+    try {
+      const p = JSON.parse(val);
+      return Array.isArray(p) ? p : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function coerceJsonObject(val) {
+  if (val == null) return undefined;
+  if (typeof val === 'object' && !Array.isArray(val)) return val;
+  if (typeof val === 'string' && val.trim()) {
+    try {
+      const p = JSON.parse(val);
+      return p && typeof p === 'object' && !Array.isArray(p) ? p : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function parseCityMetadata(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return null;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new ErrorResponse('metadata must be valid JSON', 400);
+    }
+  }
+  return undefined;
+}
+
 // --- Cities ---
 const listCities = asyncHandler(async (req, res) => {
   const { isActive, search, page = 1, limit = 50 } = req.query;
@@ -42,6 +84,7 @@ const listCities = asyncHandler(async (req, res) => {
       state: c.state,
       country: c.country,
       isActive: c.isActive,
+      metadata: c.metadata,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     })),
@@ -62,7 +105,7 @@ const getCity = asyncHandler(async (req, res) => {
 });
 
 const createCity = asyncHandler(async (req, res) => {
-  const { code, name, state, country } = req.body;
+  const { code, name, state, country, metadata: metadataRaw } = req.body;
   if (!code || !String(code).trim()) throw new ErrorResponse('City code is required', 400);
   if (!name || !String(name).trim()) throw new ErrorResponse('City name is required', 400);
   const codeTrim = String(code).trim().toUpperCase();
@@ -71,11 +114,13 @@ const createCity = asyncHandler(async (req, res) => {
   }
   const existing = await City.findOne({ code: codeTrim });
   if (existing) throw new ErrorResponse('City code already exists', 409);
+  const metadata = metadataRaw !== undefined ? parseCityMetadata(metadataRaw) : undefined;
   const city = await City.create({
     code: codeTrim,
     name: String(name).trim(),
     state: state ? String(state).trim() : undefined,
     country: country ? String(country).trim() : 'India',
+    ...(metadata !== undefined ? { metadata } : {}),
   });
   res.status(201).json({ success: true, data: { id: city._id.toString(), ...city.toObject() } });
 });
@@ -83,7 +128,7 @@ const createCity = asyncHandler(async (req, res) => {
 const updateCity = asyncHandler(async (req, res) => {
   const city = await City.findById(req.params.id);
   if (!city) throw new ErrorResponse('City not found', 404);
-  const { code, name, state, country, isActive } = req.body;
+  const { code, name, state, country, isActive, metadata: metadataRaw } = req.body;
   if (code !== undefined) {
     const codeTrim = String(code).trim().toUpperCase();
     if (!codeTrim) throw new ErrorResponse('City code cannot be empty', 400);
@@ -98,6 +143,9 @@ const updateCity = asyncHandler(async (req, res) => {
   if (state !== undefined) city.state = state ? String(state).trim() : undefined;
   if (country !== undefined) city.country = country ? String(country).trim() : city.country;
   if (isActive !== undefined) city.isActive = isActive === true || isActive === 'true';
+  if (metadataRaw !== undefined) {
+    city.metadata = parseCityMetadata(metadataRaw);
+  }
   await city.save();
   res.json({ success: true, data: { id: city._id.toString(), ...city.toObject() } });
 });
@@ -184,7 +232,7 @@ const createZone = asyncHandler(async (req, res) => {
   if (!cityId || !mongoose.Types.ObjectId.isValid(cityId)) throw new ErrorResponse('Valid cityId is required', 400);
   const city = await City.findById(cityId);
   if (!city) throw new ErrorResponse('City not found', 400);
-  const zone = await Zone.create({
+  const zonePayload = {
     name: String(name).trim(),
     code: code ? String(code).trim() : undefined,
     cityId,
@@ -193,7 +241,37 @@ const createZone = asyncHandler(async (req, res) => {
     color: color || '#3b82f6',
     areaSqKm: areaSqKm != null ? Number(areaSqKm) : 0,
     defaultCapacity: defaultCapacity != null ? Number(defaultCapacity) : undefined,
-  });
+  };
+  const points = coerceJsonArray(req.body.points);
+  if (points) zonePayload.points = points;
+  const polygon = coerceJsonArray(req.body.polygon);
+  if (polygon) zonePayload.polygon = polygon;
+  const center = coerceJsonObject(req.body.center);
+  if (center && (center.lat != null || center.lng != null)) {
+    zonePayload.center = { lat: Number(center.lat), lng: Number(center.lng) };
+  }
+  if (req.body.city !== undefined) zonePayload.city = req.body.city ? String(req.body.city).trim() : undefined;
+  if (req.body.region !== undefined) zonePayload.region = req.body.region ? String(req.body.region).trim() : undefined;
+  if (req.body.isVisible !== undefined) {
+    zonePayload.isVisible = req.body.isVisible === true || req.body.isVisible === 'true';
+  }
+  if (req.body.promoCount != null && req.body.promoCount !== '') {
+    zonePayload.promoCount = Number(req.body.promoCount);
+  }
+  const settings = coerceJsonObject(req.body.settings);
+  if (settings) zonePayload.settings = settings;
+  const analytics = coerceJsonObject(req.body.analytics);
+  if (analytics) zonePayload.analytics = analytics;
+  if (req.body.createdBy !== undefined) {
+    zonePayload.createdBy = req.body.createdBy ? String(req.body.createdBy).trim() : undefined;
+  }
+  if (req.body.metadata !== undefined) {
+    const m = coerceJsonObject(req.body.metadata);
+    if (m !== undefined) zonePayload.metadata = m;
+    else if (req.body.metadata === null || req.body.metadata === '') zonePayload.metadata = undefined;
+    else if (typeof req.body.metadata === 'object') zonePayload.metadata = req.body.metadata;
+  }
+  const zone = await Zone.create(zonePayload);
   const populated = await Zone.findById(zone._id).populate('cityId', 'name code state').lean();
   res.status(201).json({
     success: true,
@@ -225,6 +303,44 @@ const updateZone = asyncHandler(async (req, res) => {
   if (color !== undefined) zone.color = color;
   if (areaSqKm !== undefined) zone.areaSqKm = Number(areaSqKm);
   if (defaultCapacity !== undefined) zone.defaultCapacity = defaultCapacity != null ? Number(defaultCapacity) : undefined;
+  const pointsUpd = coerceJsonArray(req.body.points);
+  if (pointsUpd !== undefined) zone.points = pointsUpd;
+  const polygonUpd = coerceJsonArray(req.body.polygon);
+  if (polygonUpd !== undefined) zone.polygon = polygonUpd;
+  const centerUpd = coerceJsonObject(req.body.center);
+  if (centerUpd !== undefined) {
+    zone.center = {
+      lat: centerUpd.lat != null ? Number(centerUpd.lat) : undefined,
+      lng: centerUpd.lng != null ? Number(centerUpd.lng) : undefined,
+    };
+  }
+  if (req.body.city !== undefined) zone.city = req.body.city ? String(req.body.city).trim() : undefined;
+  if (req.body.region !== undefined) zone.region = req.body.region ? String(req.body.region).trim() : undefined;
+  if (req.body.isVisible !== undefined) {
+    zone.isVisible = req.body.isVisible === true || req.body.isVisible === 'true';
+  }
+  if (req.body.promoCount !== undefined) {
+    zone.promoCount = req.body.promoCount === '' || req.body.promoCount == null ? 0 : Number(req.body.promoCount);
+  }
+  const settingsUpd = coerceJsonObject(req.body.settings);
+  if (settingsUpd) {
+    const cur = zone.toObject().settings || {};
+    zone.settings = { ...cur, ...settingsUpd };
+  }
+  const analyticsUpd = coerceJsonObject(req.body.analytics);
+  if (analyticsUpd) {
+    const curA = zone.toObject().analytics || {};
+    zone.analytics = { ...curA, ...analyticsUpd };
+  }
+  if (req.body.createdBy !== undefined) {
+    zone.createdBy = req.body.createdBy ? String(req.body.createdBy).trim() : undefined;
+  }
+  if (req.body.metadata !== undefined) {
+    const m = coerceJsonObject(req.body.metadata);
+    if (m !== undefined) zone.metadata = m;
+    else if (req.body.metadata === null || req.body.metadata === '') zone.metadata = undefined;
+    else if (typeof req.body.metadata === 'object') zone.metadata = req.body.metadata;
+  }
   await zone.save();
   const populated = await Zone.findById(zone._id).populate('cityId', 'name code state').lean();
   res.json({

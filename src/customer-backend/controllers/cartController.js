@@ -47,7 +47,8 @@ async function updateCartItem(req, res) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const result = await updateItem(userId, req.params.itemId, req.body.quantity);
+    const { quantity, productId, variantId } = req.body || {};
+    const result = await updateItem(userId, req.params.itemId, quantity, { productId, variantId });
     if (result.error) {
       const status = result.error === 'Item not found' || result.error === 'Cart not found' ? 404 : 400;
       res.status(status).json({ success: false, message: result.error });
@@ -60,6 +61,32 @@ async function updateCartItem(req, res) {
   }
 }
 
+/** PUT /cart/items — update quantity by productId + variantId (no line-item id required). */
+async function updateCartItemByProductVariant(req, res) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+    const { quantity, productId, variantId } = req.body || {};
+    if (!productId || quantity == null) {
+      res.status(400).json({ success: false, message: 'productId and quantity required' });
+      return;
+    }
+    const result = await updateItem(userId, null, quantity, { productId, variantId });
+    if (result.error) {
+      const status = result.error === 'Item not found' || result.error === 'Cart not found' ? 404 : 400;
+      res.status(status).json({ success: false, message: result.error });
+      return;
+    }
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    console.error('cart updateCartItemByProductVariant error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
 async function removeCartItem(req, res) {
   try {
     const userId = req.user?._id;
@@ -67,7 +94,8 @@ async function removeCartItem(req, res) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const result = await removeItem(userId, req.params.itemId);
+    const { productId, variantId } = req.body || {};
+    const result = await removeItem(userId, req.params.itemId, { productId, variantId });
     if (result.error) {
       res.status(404).json({ success: false, message: result.error });
       return;
@@ -94,4 +122,11 @@ async function clear(req, res) {
   }
 }
 
-module.exports = { getCart, addCartItem, updateCartItem, removeCartItem, clear };
+module.exports = {
+  getCart,
+  addCartItem,
+  updateCartItem,
+  updateCartItemByProductVariant,
+  removeCartItem,
+  clear,
+};

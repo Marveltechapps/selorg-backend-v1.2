@@ -1,13 +1,16 @@
 const WarehouseEquipment = require('../models/WarehouseEquipment');
 const EquipmentIssue = require('../models/EquipmentIssue');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Equipment & Assets Service
  */
 const equipmentService = {
-  listDevices: async () => {
-    const devices = await WarehouseEquipment.find({ type: 'hsd-device' }).sort({ id: 1 }).lean();
+  listDevices: async (warehouseKey) => {
+    const devices = await WarehouseEquipment.find(
+      mergeWarehouseFilter({ type: 'hsd-device' }, warehouseKey)
+    ).sort({ id: 1 }).lean();
     // Transform to match frontend Device interface
     return devices.map(d => ({
       id: d.id,
@@ -19,14 +22,18 @@ const equipmentService = {
     }));
   },
 
-  getDeviceById: async (id) => {
-    const device = await WarehouseEquipment.findOne({ id, type: 'hsd-device' });
+  getDeviceById: async (warehouseKey, id) => {
+    const device = await WarehouseEquipment.findOne(
+      mergeWarehouseFilter({ id, type: 'hsd-device' }, warehouseKey)
+    );
     if (!device) throw new ErrorResponse(`Device not found with id ${id}`, 404);
     return device;
   },
 
-  listMachinery: async () => {
-    const machinery = await WarehouseEquipment.find({ type: { $ne: 'hsd-device' } }).sort({ type: 1, id: 1 }).lean();
+  listMachinery: async (warehouseKey) => {
+    const machinery = await WarehouseEquipment.find(
+      mergeWarehouseFilter({ type: { $ne: 'hsd-device' } }, warehouseKey)
+    ).sort({ type: 1, id: 1 }).lean();
     // Transform to match frontend Equipment interface
     return machinery.map(m => ({
       id: m.id,
@@ -40,15 +47,16 @@ const equipmentService = {
     }));
   },
 
-  addEquipment: async (data) => {
-    const id = data.equipmentId || data.id || `EQP-${(await WarehouseEquipment.countDocuments() + 1).toString().padStart(3, '0')}`;
+  addEquipment: async (warehouseKey, data) => {
+    const id = data.equipmentId || data.id || `EQP-${(await WarehouseEquipment.countDocuments(warehouseKeyMatch(warehouseKey)) + 1).toString().padStart(3, '0')}`;
     const doc = await WarehouseEquipment.create({
       id,
       name: data.name || 'New Equipment',
       type: data.type || 'forklift',
       status: data.status === 'idle' ? 'idle' : 'active',
       zone: data.zone,
-      operator: data.operator
+      operator: data.operator,
+      ...warehouseFieldsForCreate(warehouseKey),
     });
     return {
       id: doc.id,
@@ -61,20 +69,20 @@ const equipmentService = {
     };
   },
 
-  getEquipmentById: async (id) => {
-    const equipment = await WarehouseEquipment.findOne({ id });
+  getEquipmentById: async (warehouseKey, id) => {
+    const equipment = await WarehouseEquipment.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!equipment) throw new ErrorResponse(`Equipment not found with id ${id}`, 404);
     return equipment;
   },
 
-  reportIssue: async (id, issueData) => {
-    const equipment = await WarehouseEquipment.findOne({ id });
+  reportIssue: async (warehouseKey, id, issueData) => {
+    const equipment = await WarehouseEquipment.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!equipment) throw new ErrorResponse(`Equipment not found with id ${id}`, 404);
     
     equipment.status = 'maintenance';
     await equipment.save();
 
-    const count = await EquipmentIssue.countDocuments();
+    const count = await EquipmentIssue.countDocuments(warehouseKeyMatch(warehouseKey));
     const issueId = `ISS-${(count + 1).toString().padStart(3, '0')}`;
     
     return await EquipmentIssue.create({
@@ -83,18 +91,21 @@ const equipmentService = {
       reportedBy: issueData.reportedBy || 'System',
       description: issueData.description,
       severity: issueData.severity || 'medium',
-      status: 'open'
+      status: 'open',
+      ...warehouseFieldsForCreate(warehouseKey),
     });
   },
 
-  resolveIssue: async (id) => {
-    const equipment = await WarehouseEquipment.findOne({ id });
+  resolveIssue: async (warehouseKey, id) => {
+    const equipment = await WarehouseEquipment.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!equipment) throw new ErrorResponse(`Equipment not found with id ${id}`, 404);
     
     equipment.status = 'active';
     await equipment.save();
 
-    const issue = await EquipmentIssue.findOne({ equipmentId: id, status: { $ne: 'resolved' } });
+    const issue = await EquipmentIssue.findOne(
+      mergeWarehouseFilter({ equipmentId: id, status: { $ne: 'resolved' } }, warehouseKey)
+    );
     if (issue) {
       issue.status = 'resolved';
       issue.resolvedAt = new Date();
@@ -104,8 +115,8 @@ const equipmentService = {
     return equipment;
   },
 
-  exportEquipment: async () => {
-    const equipment = await WarehouseEquipment.find();
+  exportEquipment: async (warehouseKey) => {
+    const equipment = await WarehouseEquipment.find(warehouseKeyMatch(warehouseKey));
     const csv = `id,name,type,status,location\n${equipment.map(e => `${e.id},${e.name},${e.type},${e.status},${e.location || ''}`).join('\n')}`;
     return csv;
   }

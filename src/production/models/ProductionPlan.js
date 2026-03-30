@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const productionPlanSchema = new mongoose.Schema(
   {
+    // Hub scope (e.g. Chennai Hub). Production UI always sends `storeId`.
+    store_id: { type: String, required: false, index: true },
     product: { type: String, required: true },
     line: { type: String, required: true },
     startDate: { type: Date, required: true },
@@ -14,5 +16,6 @@ const productionPlanSchema = new mongoose.Schema(
 
 productionPlanSchema.index({ status: 1 });
 productionPlanSchema.index({ startDate: 1, endDate: 1 });
+productionPlanSchema.index({ store_id: 1, startDate: 1 });
 
 module.exports = mongoose.models.ProductionPlan || mongoose.model('ProductionPlan', productionPlanSchema, 'prod_planning_schedule');

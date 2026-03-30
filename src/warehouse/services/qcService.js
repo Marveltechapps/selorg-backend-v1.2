@@ -5,14 +5,17 @@ const ComplianceCheck = require('../models/ComplianceCheck');
 const SampleTest = require('../models/SampleTest');
 const BatchRejection = require('../models/BatchRejection');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc QC & Compliance Service
  */
 const qcService = {
   // --- Inspections ---
-  listInspections: async () => {
-    const inspections = await QCInspection.find().sort({ createdAt: -1 }).lean();
+  listInspections: async (warehouseKey) => {
+    const inspections = await QCInspection.find(warehouseKeyMatch(warehouseKey))
+      .sort({ createdAt: -1 })
+      .lean();
     return inspections.map(i => ({
       id: i.id,
       inspectionId: i.inspectionId || i.id,
@@ -27,16 +30,16 @@ const qcService = {
     }));
   },
 
-  createInspection: async (data) => {
+  createInspection: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await QCInspection.countDocuments();
+      const count = await QCInspection.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `INS-${(count + 1).toString().padStart(3, '0')}`;
     }
-    return await QCInspection.create(data);
+    return await QCInspection.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
-  getInspectionById: async (id) => {
-    const i = await QCInspection.findOne({ id }).lean();
+  getInspectionById: async (warehouseKey, id) => {
+    const i = await QCInspection.findOne(mergeWarehouseFilter({ id }, warehouseKey)).lean();
     if (!i) throw new ErrorResponse(`Inspection not found with id ${id}`, 404);
     return {
       id: i.id,
@@ -52,8 +55,8 @@ const qcService = {
     };
   },
 
-  updateInspection: async (id, data) => {
-    const inspection = await QCInspection.findOne({ id });
+  updateInspection: async (warehouseKey, id, data) => {
+    const inspection = await QCInspection.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!inspection) throw new ErrorResponse(`Inspection not found with id ${id}`, 404);
     Object.assign(inspection, data);
     await inspection.save();
@@ -61,8 +64,8 @@ const qcService = {
   },
 
   // --- Temperature Logs ---
-  listTemperatureLogs: async () => {
-    const logs = await TemperatureLog.find().sort({ createdAt: -1 }).lean();
+  listTemperatureLogs: async (warehouseKey) => {
+    const logs = await TemperatureLog.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
     return logs.map(l => ({
       id: l.id,
       zone: l.zone,
@@ -73,16 +76,16 @@ const qcService = {
     }));
   },
 
-  createTemperatureLog: async (data) => {
+  createTemperatureLog: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await TemperatureLog.countDocuments();
+      const count = await TemperatureLog.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `TEMP-${(count + 1).toString().padStart(3, '0')}`;
     }
-    return await TemperatureLog.create(data);
+    return await TemperatureLog.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
-  getTempChartData: async (id, period = '24h') => {
-    const log = await TemperatureLog.findOne({ id });
+  getTempChartData: async (warehouseKey, id, period = '24h') => {
+    const log = await TemperatureLog.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!log) throw new ErrorResponse(`Log not found with id ${id}`, 404);
     
     // Generate historical points from DB or simulate based on current log
@@ -111,8 +114,8 @@ const qcService = {
   },
 
   // --- Rejections ---
-  listRejections: async () => {
-    const rejections = await BatchRejection.find().sort({ createdAt: -1 }).lean();
+  listRejections: async (warehouseKey) => {
+    const rejections = await BatchRejection.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
     return rejections.map(r => ({
       id: r.id,
       batch: r.batchId,
@@ -124,9 +127,9 @@ const qcService = {
     }));
   },
 
-  logRejection: async (data) => {
+  logRejection: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await BatchRejection.countDocuments();
+      const count = await BatchRejection.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `REJ-${(count + 1).toString().padStart(3, '0')}`;
     }
     const mappedData = {
@@ -137,12 +140,12 @@ const qcService = {
       itemsCount: data.itemsCount ?? data.items ?? 0,
       rejectedBy: data.rejectedBy || data.inspector || 'System'
     };
-    return await BatchRejection.create(mappedData);
+    return await BatchRejection.create({ ...mappedData, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
   // --- Compliance Docs ---
-  listComplianceDocs: async () => {
-    const docs = await ComplianceDoc.find().sort({ createdAt: -1 }).lean();
+  listComplianceDocs: async (warehouseKey) => {
+    const docs = await ComplianceDoc.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
     return docs.map(d => ({
       id: d.id,
       docId: d.docId || d.id,
@@ -154,8 +157,8 @@ const qcService = {
     }));
   },
 
-  getComplianceDoc: async (id) => {
-    const d = await ComplianceDoc.findOne({ id }).lean();
+  getComplianceDoc: async (warehouseKey, id) => {
+    const d = await ComplianceDoc.findOne(mergeWarehouseFilter({ id }, warehouseKey)).lean();
     if (!d) throw new ErrorResponse(`Document not found with id ${id}`, 404);
     return {
       id: d.id,
@@ -169,8 +172,8 @@ const qcService = {
   },
 
   // --- Sample Tests ---
-  listSamples: async () => {
-    const samples = await SampleTest.find().sort({ createdAt: -1 }).lean();
+  listSamples: async (warehouseKey) => {
+    const samples = await SampleTest.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
     return samples.map(s => ({
       id: s.id,
       sampleId: s.sampleId || s.id,
@@ -183,9 +186,9 @@ const qcService = {
     }));
   },
 
-  createSample: async (data) => {
+  createSample: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await SampleTest.countDocuments();
+      const count = await SampleTest.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `SMP-${(count + 1).toString().padStart(3, '0')}`;
     }
     const mappedData = {
@@ -198,11 +201,11 @@ const qcService = {
       tester: data.tester || data.testedBy || 'System',
       testDate: data.testDate || data.date ? new Date(data.testDate || data.date) : new Date()
     };
-    return await SampleTest.create(mappedData);
+    return await SampleTest.create({ ...mappedData, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
-  updateSample: async (id, data) => {
-    const sample = await SampleTest.findOne({ id });
+  updateSample: async (warehouseKey, id, data) => {
+    const sample = await SampleTest.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!sample) throw new ErrorResponse(`Sample test not found with id ${id}`, 404);
     // Map result to schema if needed (SampleTest has result field)
     if (data.result !== undefined) sample.result = data.result;
@@ -211,8 +214,8 @@ const qcService = {
   },
 
   // --- Compliance Checks ---
-  listComplianceChecks: async () => {
-    const checks = await ComplianceCheck.find().sort({ category: 1, name: 1 }).lean();
+  listComplianceChecks: async (warehouseKey) => {
+    const checks = await ComplianceCheck.find(warehouseKeyMatch(warehouseKey)).sort({ category: 1, name: 1 }).lean();
     return checks.map(c => ({
       id: c.id,
       name: c.name,
@@ -223,8 +226,8 @@ const qcService = {
     }));
   },
 
-  toggleComplianceCheck: async (id, completed, completedBy = 'System') => {
-    const check = await ComplianceCheck.findOne({ id });
+  toggleComplianceCheck: async (warehouseKey, id, completed, completedBy = 'System') => {
+    const check = await ComplianceCheck.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!check) throw new ErrorResponse(`Compliance check not found with id ${id}`, 404);
     check.completed = completed;
     check.completedAt = completed ? new Date() : undefined;

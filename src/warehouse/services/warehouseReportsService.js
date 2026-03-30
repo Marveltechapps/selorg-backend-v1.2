@@ -2,12 +2,13 @@ const GRN = require('../models/GRN');
 const Picklist = require('../models/Picklist');
 const InventoryItem = require('../models/InventoryItem');
 const Staff = require('../models/Staff');
+const { mergeWarehouseFilter, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Warehouse Reports & Analytics Service
  */
 const warehouseReportsService = {
-  getSLAMetrics: async (range = 'today') => {
+  getSLAMetrics: async (warehouseKey, range = 'today') => {
     // Mock SLA metrics
     return {
       period: range,
@@ -23,9 +24,11 @@ const warehouseReportsService = {
     };
   },
 
-  getInventoryHealth: async () => {
-    const totalItems = await InventoryItem.countDocuments();
-    const lowStockItems = await InventoryItem.countDocuments({ currentStock: { $lte: 10 } }); // Simple threshold
+  getInventoryHealth: async (warehouseKey) => {
+    const totalItems = await InventoryItem.countDocuments(warehouseKeyMatch(warehouseKey));
+    const lowStockItems = await InventoryItem.countDocuments(
+      mergeWarehouseFilter({ currentStock: { $lte: 10 } }, warehouseKey)
+    ); // Simple threshold
     
     return {
       healthScore: 92.5,

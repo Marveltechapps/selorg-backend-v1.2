@@ -24,6 +24,10 @@ const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
       return next();
     }
 
+    if (!ttlSeconds || ttlSeconds <= 0) {
+      return next();
+    }
+
     if (appConfig.disableCache) {
       return next();
     }

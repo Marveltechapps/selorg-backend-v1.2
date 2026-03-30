@@ -15,6 +15,7 @@ const ATTENDANCE_STATUS = [
 
 const attendanceSchema = new mongoose.Schema(
   {
+    warehouseKey: { type: String, trim: true, index: true },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     punchIn: { type: Date, required: true },
     punchOut: { type: Date },
@@ -44,6 +45,7 @@ const attendanceSchema = new mongoose.Schema(
 );
 
 attendanceSchema.index({ userId: 1, punchIn: -1 });
+attendanceSchema.index({ warehouseKey: 1, punchIn: -1 });
 
 // Use PickerAttendance to avoid conflict with production/models/Attendance.js
 // Use collection 'picker_attendance' to keep picker data separate from production attendance

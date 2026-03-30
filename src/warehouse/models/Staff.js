@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const StaffSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   name: {
@@ -65,6 +65,8 @@ const StaffSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'staff',
 });
+
+StaffSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 StaffSchema.index({ role: 1, status: 1 });
 StaffSchema.index({ zone: 1 });

@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const WarehouseReportSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
+  warehouseKey: { type: String, trim: true, index: true },
+  id: { type: String, required: true, index: true },
   date: { type: Date, required: true },
   metrics: {
     inboundQueue: { type: Number, default: 0 },
@@ -15,6 +16,8 @@ const WarehouseReportSchema = new mongoose.Schema({
     coldStorage: { type: Number, default: 0 }
   }
 }, { timestamps: true, collection: 'warehouse_daily_reports' });
+
+WarehouseReportSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 module.exports = mongoose.models.WarehouseReport || mongoose.model('WarehouseReport', WarehouseReportSchema);
 

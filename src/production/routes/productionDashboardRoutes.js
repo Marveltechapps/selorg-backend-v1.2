@@ -22,7 +22,8 @@ const BulkUpload = require('../models/BulkUpload');
 const AuditLog = require('../models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 
-const DEFAULT_FACTORY = process.env.DEFAULT_FACTORY_ID || 'FAC-Austin-01';
+const DEFAULT_FACTORY =
+  process.env.DASHBOARD_HUB_KEY || process.env.DEFAULT_FACTORY_ID || 'chennai-hub';
 
 const storage = multer.memoryStorage();
 const upload = multer({

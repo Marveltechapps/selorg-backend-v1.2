@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const GRN = require('../models/GRN');
 const DockSlot = require('../models/DockSlot');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const warehouseNotificationService = require('./warehouseNotificationService');
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Inbound Operations Service
@@ -11,7 +13,7 @@ const inboundService = {
   /**
    * List GRNs with optional filters
    */
-  listGRNs: async (filters = {}) => {
+  listGRNs: async (warehouseKey, filters = {}) => {
     const {
       status,
       page = 1,
@@ -22,8 +24,9 @@ const inboundService = {
     if (status) query.status = status;
 
     const skip = (page - 1) * limit;
-    const total = await GRN.countDocuments(query);
-    const items = await GRN.find(query)
+    const scopedQuery = mergeWarehouseFilter(query, warehouseKey);
+    const total = await GRN.countDocuments(scopedQuery);
+    const items = await GRN.find(scopedQuery)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -41,23 +44,25 @@ const inboundService = {
   /**
    * Create a new GRN
    */
-  createGRN: async (grnData) => {
+  createGRN: async (warehouseKey, grnData) => {
     // Generate a simple ID if not provided (e.g., GRN-123)
     if (!grnData.id) {
-      const count = await GRN.countDocuments();
+      const count = await GRN.countDocuments(warehouseKeyMatch(warehouseKey));
       grnData.id = `GRN-${(count + 1).toString().padStart(3, '0')}`;
     }
-    return await GRN.create(grnData);
+    const grn = await GRN.create({ ...grnData, ...warehouseFieldsForCreate(warehouseKey) });
+    warehouseNotificationService.notifyGrnCreated(warehouseKey, grn).catch(() => {});
+    return grn;
   },
 
   /**
    * Get GRN by ID (supports string id e.g. GRN-001 or MongoDB ObjectId)
    */
-  getGRNById: async (id) => {
+  getGRNById: async (warehouseKey, id) => {
     const query = mongoose.Types.ObjectId.isValid(id) && String(id).length === 24
       ? { $or: [{ id }, { _id: new mongoose.Types.ObjectId(id) }] }
       : { id };
-    const grn = await GRN.findOne(query);
+    const grn = await GRN.findOne(mergeWarehouseFilter(query, warehouseKey));
     if (!grn) throw new ErrorResponse(`GRN not found with id ${id}`, 404);
     return grn;
   },
@@ -65,11 +70,11 @@ const inboundService = {
   /**
    * Start counting for a GRN
    */
-  startCounting: async (id) => {
+  startCounting: async (warehouseKey, id) => {
     const query = mongoose.Types.ObjectId.isValid(id) && String(id).length === 24
       ? { $or: [{ id }, { _id: new mongoose.Types.ObjectId(id) }] }
       : { id };
-    const grn = await GRN.findOne(query);
+    const grn = await GRN.findOne(mergeWarehouseFilter(query, warehouseKey));
     if (!grn) throw new ErrorResponse(`GRN not found with id ${id}`, 404);
     
     grn.status = 'in-progress';
@@ -80,43 +85,45 @@ const inboundService = {
   /**
    * Complete a GRN
    */
-  completeGRN: async (id) => {
+  completeGRN: async (warehouseKey, id) => {
     const query = mongoose.Types.ObjectId.isValid(id) && String(id).length === 24
       ? { $or: [{ id }, { _id: new mongoose.Types.ObjectId(id) }] }
       : { id };
-    const grn = await GRN.findOne(query);
+    const grn = await GRN.findOne(mergeWarehouseFilter(query, warehouseKey));
     if (!grn) throw new ErrorResponse(`GRN not found with id ${id}`, 404);
     
     grn.status = 'completed';
     await grn.save();
+    warehouseNotificationService.notifyGrnCompleted(warehouseKey, grn).catch(() => {});
     return grn;
   },
 
   /**
    * Log discrepancy for a GRN
    */
-  logDiscrepancy: async (id, discrepancyData) => {
+  logDiscrepancy: async (warehouseKey, id, discrepancyData) => {
     const query = mongoose.Types.ObjectId.isValid(id) && String(id).length === 24
       ? { $or: [{ id }, { _id: new mongoose.Types.ObjectId(id) }] }
       : { id };
-    const grn = await GRN.findOne(query);
+    const grn = await GRN.findOne(mergeWarehouseFilter(query, warehouseKey));
     if (!grn) throw new ErrorResponse(`GRN not found with id ${id}`, 404);
 
     grn.status = 'discrepancy';
     if (discrepancyData?.notes) grn.discrepancyNotes = discrepancyData.notes;
     if (discrepancyData?.type) grn.discrepancyType = discrepancyData.type;
     await grn.save();
+    warehouseNotificationService.notifyGrnDiscrepancy(warehouseKey, grn).catch(() => {});
     return grn;
   },
 
   /**
    * List Dock Slots
    */
-  listDocks: async (pagination = {}) => {
+  listDocks: async (warehouseKey, pagination = {}) => {
     const { page = 1, limit = 50 } = pagination;
     const skip = (page - 1) * limit;
-    const total = await DockSlot.countDocuments();
-    const items = await DockSlot.find()
+    const total = await DockSlot.countDocuments(warehouseKeyMatch(warehouseKey));
+    const items = await DockSlot.find(warehouseKeyMatch(warehouseKey))
       .sort({ name: 1 })
       .skip(skip)
       .limit(limit)
@@ -133,8 +140,8 @@ const inboundService = {
   /**
    * Update Dock status
    */
-  updateDock: async (id, dockData) => {
-    const dock = await DockSlot.findOne({ id });
+  updateDock: async (warehouseKey, id, dockData) => {
+    const dock = await DockSlot.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!dock) throw new ErrorResponse(`Dock not found with id ${id}`, 404);
     
     Object.assign(dock, dockData);

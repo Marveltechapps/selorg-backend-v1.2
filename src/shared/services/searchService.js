@@ -1,24 +1,46 @@
 const Order = require('../../darkstore/models/Order');
 const SKU = require('../../merch/models/SKU');
-// const User = require('../../admin/models/User'); // User model may not exist, commenting out for now
+const AdminUser = require('../../admin/models/User');
 const Vendor = require('../../vendor/models/Vendor');
 const Rider = require('../../rider/models/Rider');
-// const Inventory = require('../../darkstore/models/Inventory');
-const logger = require('../../core/utils/logger'); // Inventory model may not exist, commenting out for now
+const InventoryItem = require('../../warehouse/models/InventoryItem');
+const RecentSearch = require('../models/RecentSearch');
+const logger = require('../../core/utils/logger');
+const { mergeWarehouseFilter, warehouseKeyMatch } = require('../../warehouse/constants/warehouseScope');
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeDashboard(dashboard) {
+  const d = String(dashboard || '').toLowerCase();
+  if (d === 'admin' || d === 'warehouse') return d;
+  return '';
+}
+
+function warehouseStoreScope(user) {
+  if (!user || typeof user !== 'object') return null;
+  const stores = [];
+  if (Array.isArray(user.assignedStores)) stores.push(...user.assignedStores);
+  if (user.primaryStoreId) stores.push(user.primaryStoreId);
+  const uniq = [...new Set(stores.filter(Boolean))];
+  if (uniq.length === 0) return null;
+  return { store_id: { $in: uniq } };
+}
 
 /**
- * Global Search Service
- * Searches across all modules and returns unified results
+ * Global Search Service — DB-backed only; dashboard scopes which modules run.
  */
 class GlobalSearchService {
   /**
-   * Perform global search across all modules
-   * @param {string} query - Search query
-   * @param {string} type - Type filter (all, orders, products, users, vendors, riders, inventory)
-   * @param {number} limit - Results limit per module
-   * @param {string} userId - User ID for recent searches tracking
+   * @param {string} query
+   * @param {string} type - all | orders | products | users | vendors | riders | inventory
+   * @param {number} limit
+   * @param {string|null} userId
+   * @param {string} dashboard - '' | admin | warehouse
+   * @param {object|null} user - req.user (for warehouse store scoping)
    */
-  async globalSearch(query, type = 'all', limit = 10, userId = null) {
+  async globalSearch(query, type = 'all', limit = 10, userId = null, dashboard = '', user = null) {
     if (!query || query.trim().length < 2) {
       return {
         query,
@@ -37,7 +59,9 @@ class GlobalSearchService {
 
     const startTime = Date.now();
     const searchTerm = query.trim();
-    const searchRegex = new RegExp(searchTerm, 'i');
+    const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
+    const d = normalizeDashboard(dashboard);
+    const storeScope = d === 'warehouse' ? warehouseStoreScope(user) : null;
 
     const results = {
       orders: [],
@@ -48,22 +72,28 @@ class GlobalSearchService {
       inventory: [],
     };
 
+    const want = (mod) => type === 'all' || type === mod;
+    const wantUsers = want('users') && d !== 'warehouse';
+
     try {
-      // Parallel search across all modules
       const searchPromises = [];
 
-      // Search Orders
-      if (type === 'all' || type === 'orders') {
+      if (want('orders')) {
+        let orderFilter = {
+          $or: [
+            { order_id: searchRegex },
+            { customer_name: searchRegex },
+            { customer_phone: searchRegex },
+            { 'items.sku': searchRegex },
+            { 'items.name': searchRegex },
+            { 'items.productName': searchRegex },
+          ],
+        };
+        if (storeScope) {
+          orderFilter = { $and: [storeScope, orderFilter] };
+        }
         searchPromises.push(
-          Order.find({
-            $or: [
-              { order_id: searchRegex },
-              { customer_name: searchRegex },
-              { customer_phone: searchRegex },
-              { 'items.sku': searchRegex },
-              { 'items.name': searchRegex },
-            ],
-          })
+          Order.find(orderFilter)
             .limit(limit)
             .lean()
             .then((orders) => {
@@ -74,37 +104,38 @@ class GlobalSearchService {
                 subtitle: order.customer_name || 'Unknown Customer',
                 status: order.status,
                 metadata: {
-                  amount: order.total_amount,
+                  amount: order.total_amount ?? order.total_bill,
                   items: order.items?.length || 0,
                   created_at: order.created_at,
+                  store_id: order.store_id,
                 },
               }));
             })
         );
       }
 
-      // Search Products
-      if (type === 'all' || type === 'products') {
+      if (want('products')) {
         searchPromises.push(
           SKU.find({
             $or: [
               { name: searchRegex },
-              { sku: searchRegex },
-              { barcode: searchRegex },
-              { description: searchRegex },
+              { code: searchRegex },
+              { brand: searchRegex },
+              { category: searchRegex },
+              { tags: searchRegex },
             ],
           })
             .limit(limit)
             .lean()
             .then((products) => {
               results.products = products.map((product) => ({
-                id: product.sku || product.id,
+                id: product.code || String(product._id),
                 type: 'product',
                 title: product.name,
-                subtitle: product.sku || 'No SKU',
-                status: product.status,
+                subtitle: product.code || '',
+                status: product.marginStatus || '',
                 metadata: {
-                  price: product.price,
+                  price: product.sellingPrice,
                   stock: product.stock,
                   category: product.category,
                 },
@@ -113,85 +144,126 @@ class GlobalSearchService {
         );
       }
 
-      // Search Users
-      if (type === 'all' || type === 'users') {
+      if (wantUsers) {
         searchPromises.push(
-          Promise.resolve([]).then((users) => {
-            results.users = [];
+          AdminUser.find({
+            $or: [
+              { name: searchRegex },
+              { email: searchRegex },
+              { role: searchRegex },
+              { department: searchRegex },
+            ],
           })
+            .select('-password')
+            .limit(limit)
+            .lean()
+            .then((users) => {
+              results.users = users.map((u) => ({
+                id: String(u._id),
+                type: 'user',
+                title: u.name || u.email,
+                subtitle: u.email || '',
+                status: u.status || '',
+                metadata: {
+                  role: u.role,
+                  department: u.department,
+                },
+              }));
+            })
         );
       }
 
-      // Search Vendors
-      if (type === 'all' || type === 'vendors') {
+      if (want('vendors')) {
         searchPromises.push(
           Vendor.find({
             $or: [
+              { vendorName: searchRegex },
               { name: searchRegex },
-              { vendor_code: searchRegex },
-              { contact_email: searchRegex },
-              { contact_phone: searchRegex },
+              { vendorCode: searchRegex },
+              { code: searchRegex },
+              { 'contact.email': searchRegex },
+              { 'contact.phone': searchRegex },
             ],
           })
             .limit(limit)
             .lean()
             .then((vendors) => {
               results.vendors = vendors.map((vendor) => ({
-                id: vendor.vendor_code || vendor.id,
+                id: vendor.vendorCode || vendor.code || String(vendor._id),
                 type: 'vendor',
-                title: vendor.name,
-                subtitle: vendor.vendor_code || 'No Code',
+                title: vendor.vendorName || vendor.name || 'Vendor',
+                subtitle: vendor.vendorCode || vendor.code || '',
                 status: vendor.status,
                 metadata: {
-                  contact: vendor.contact_email || vendor.contact_phone,
-                  rating: vendor.rating,
+                  contact: vendor.contact?.email || vendor.contact?.phone || '',
+                  stage: vendor.stage,
                 },
               }));
             })
         );
       }
 
-      // Search Riders
-      if (type === 'all' || type === 'riders') {
+      if (want('riders')) {
         searchPromises.push(
           Rider.find({
             $or: [
               { name: searchRegex },
-              { rider_id: searchRegex },
-              { phone: searchRegex },
-              { vehicle_number: searchRegex },
+              { id: searchRegex },
+              { zone: searchRegex },
+              { currentOrderId: searchRegex },
             ],
           })
             .limit(limit)
             .lean()
             .then((riders) => {
               results.riders = riders.map((rider) => ({
-                id: rider.rider_id || rider.id,
+                id: rider.id || String(rider._id),
                 type: 'rider',
                 title: rider.name,
-                subtitle: rider.rider_id || 'No ID',
+                subtitle: rider.zone || rider.id || '',
                 status: rider.status,
                 metadata: {
-                  phone: rider.phone,
-                  vehicle: rider.vehicle_number,
+                  zone: rider.zone,
+                  currentOrderId: rider.currentOrderId,
                 },
               }));
             })
         );
       }
 
-      // Search Inventory
-      if (type === 'all' || type === 'inventory') {
+      if (want('inventory')) {
         searchPromises.push(
-          Promise.resolve([]).then((inventory) => {
-            results.inventory = [];
+          InventoryItem.find({
+            $or: [
+              { sku: searchRegex },
+              { productName: searchRegex },
+              { location: searchRegex },
+              { id: searchRegex },
+              { category: searchRegex },
+            ],
           })
+            .limit(limit)
+            .lean()
+            .then((rows) => {
+              results.inventory = rows.map((row) => ({
+                id: row.id || row.sku,
+                type: 'inventory',
+                title: row.productName || row.sku,
+                subtitle: `${row.sku || ''} · ${row.location || ''}`.trim(),
+                status: row.currentStock != null ? String(row.currentStock) : '',
+                metadata: {
+                  sku: row.sku,
+                  location: row.location,
+                  currentStock: row.currentStock,
+                  lastUpdated: row.lastUpdated,
+                },
+              }));
+            })
         );
       }
 
       await Promise.all(searchPromises);
 
-      // Calculate total
       const total =
         results.orders.length +
         results.products.length +
@@ -202,9 +274,8 @@ class GlobalSearchService {
 
       const took = Date.now() - startTime;
 
-      // Save recent search (if userId provided)
       if (userId && total > 0) {
-        this.saveRecentSearch(userId, query, total);
+        await this.saveRecentSearch(userId, query, total, d);
       }
 
       return {
@@ -220,22 +291,29 @@ class GlobalSearchService {
   }
 
   /**
-   * Get search suggestions based on query
+   * Prefix suggestions from live collections; scope by dashboard.
    */
-  async getSuggestions(query, limit = 5) {
+  async getSuggestions(query, limit = 5, dashboard = '', user = null) {
     if (!query || query.trim().length < 2) {
       return [];
     }
 
     const searchTerm = query.trim();
-    const searchRegex = new RegExp(`^${searchTerm}`, 'i');
+    const prefix = new RegExp(`^${escapeRegex(searchTerm)}`, 'i');
+    const d = normalizeDashboard(dashboard);
+    const cap = Math.max(1, Math.min(20, limit));
+    const storeScope = d === 'warehouse' ? warehouseStoreScope(user) : null;
+    const warehouseKey = d === 'warehouse' ? user?.warehouseKey : null;
 
     try {
       const suggestions = [];
 
-      // Get suggestions from orders
-      const orders = await Order.find({ order_id: searchRegex })
-        .limit(limit)
+      let orderQuery = { order_id: prefix };
+      if (storeScope) {
+        orderQuery = { $and: [storeScope, orderQuery] };
+      }
+      const orders = await Order.find(orderQuery)
+        .limit(cap)
         .select('order_id customer_name')
         .lean();
 
@@ -247,48 +325,133 @@ class GlobalSearchService {
         });
       });
 
-      // Get suggestions from products
-      const products = await SKU.find({ name: searchRegex })
-        .limit(limit)
-        .select('name sku')
+      const products = await SKU.find({
+        $or: [{ name: prefix }, { code: prefix }],
+      })
+        .limit(cap)
+        .select('name code')
         .lean();
 
       products.forEach((product) => {
         suggestions.push({
-          text: product.name,
+          text: product.name || product.code,
           type: 'product',
           category: 'Products',
         });
       });
 
-      return suggestions.slice(0, limit * 2);
+      if (d !== 'warehouse') {
+        const vendors = await Vendor.find({
+          $or: [
+            { vendorName: prefix },
+            { name: prefix },
+            { vendorCode: prefix },
+            { code: prefix },
+          ],
+        })
+          .limit(cap)
+          .select('vendorName name vendorCode code')
+          .lean();
+
+        vendors.forEach((v) => {
+          suggestions.push({
+            text: v.vendorCode || v.code || v.vendorName || v.name,
+            type: 'vendor',
+            category: 'Vendors',
+          });
+        });
+
+        const riders = await Rider.find({
+          $or: [{ name: prefix }, { id: prefix }],
+        })
+          .limit(cap)
+          .select('name id')
+          .lean();
+
+        riders.forEach((r) => {
+          suggestions.push({
+            text: r.id || r.name,
+            type: 'rider',
+            category: 'Riders',
+          });
+        });
+
+        const users = await AdminUser.find({
+          $or: [{ name: prefix }, { email: prefix }],
+        })
+          .select('name email')
+          .limit(cap)
+          .lean();
+
+        users.forEach((u) => {
+          suggestions.push({
+            text: u.email || u.name,
+            type: 'user',
+            category: 'Users',
+          });
+        });
+      }
+
+      if (d === 'warehouse' || d === 'admin' || d === '') {
+        let invQuery = {
+          $or: [{ sku: prefix }, { productName: prefix }, { id: prefix }],
+        };
+
+        if (d === 'warehouse' && warehouseKey) {
+          invQuery = mergeWarehouseFilter(invQuery, warehouseKey);
+        }
+
+        const inv = await InventoryItem.find(invQuery)
+          .limit(cap)
+          .select('sku productName id')
+          .lean();
+
+        inv.forEach((row) => {
+          suggestions.push({
+            text: row.sku || row.productName || row.id,
+            type: 'inventory',
+            category: 'Inventory',
+          });
+        });
+      }
+
+      return suggestions.slice(0, cap * 2);
     } catch (error) {
       logger.error('Error getting suggestions:', error);
       return [];
     }
   }
 
-  /**
-   * Save recent search
-   */
-  async saveRecentSearch(userId, query, resultCount) {
+  async saveRecentSearch(userId, query, resultCount, dashboard = '') {
     try {
-      // In a real implementation, save to RecentSearch collection
-      // For now, we'll just log it
-      logger.info(`Recent search saved: User ${userId} searched "${query}" (${resultCount} results)`);
+      const uid = userId != null ? String(userId) : '';
+      if (!uid) return;
+      const d = normalizeDashboard(dashboard);
+      const dashKey = d === 'admin' || d === 'warehouse' ? d : '';
+      await RecentSearch.findOneAndUpdate(
+        { userId: uid, dashboard: dashKey, query: query.trim() },
+        { $set: { resultCount, updatedAt: new Date() } },
+        { upsert: true }
+      );
     } catch (error) {
       logger.error('Error saving recent search:', error);
     }
   }
 
-  /**
-   * Get recent searches for a user
-   */
-  async getRecentSearches(userId, limit = 10) {
+  async getRecentSearches(userId, limit = 10, dashboard = '') {
     try {
-      // In a real implementation, fetch from RecentSearch collection
-      // For now, return empty array
-      return [];
+      const uid = userId != null ? String(userId) : '';
+      if (!uid) return [];
+      const d = normalizeDashboard(dashboard);
+      const dashKey = d === 'admin' || d === 'warehouse' ? d : '';
+
+      const rows = await RecentSearch.find({ userId: uid, dashboard: dashKey })
+        .sort({ updatedAt: -1 })
+        .limit(Math.max(1, Math.min(50, limit)))
+        .select('query')
+        .lean();
+
+      return rows.map((r) => r.query).filter(Boolean);
     } catch (error) {
       logger.error('Error getting recent searches:', error);
       return [];

@@ -163,7 +163,8 @@ async function createOrder(userId, body) {
   const matchedStoreObjectId = await resolveStoreId(ADYAR_STORE_ID);
 
   const resolvedMethodType = paymentMethodType || (paymentMethodId ? 'card' : 'cash');
-  const paymentStatus = resolvedMethodType === 'cash' ? 'cod_pending' : 'paid';
+  // Online payments are backend-led (Worldline). Mark as pending until gateway confirms.
+  const paymentStatus = resolvedMethodType === 'cash' ? 'cod_pending' : 'pending';
 
   const order = await Order.create({
     userId: new mongoose.Types.ObjectId(userId),
@@ -349,7 +350,7 @@ async function createOrder(userId, body) {
         };
         const methodDisplay = methodDisplayMap[paymentType] || paymentType;
         const gatewayRef = paymentType === 'cash' ? `COD-${Date.now()}` : `GW-${Date.now()}`;
-        const initialStatus = paymentType === 'cash' ? 'pending' : 'success';
+        const initialStatus = paymentType === 'cash' ? 'pending' : 'pending';
 
         try {
           await CustomerPayment.create({
@@ -372,7 +373,7 @@ async function createOrder(userId, body) {
         const txnTimestamp = new Date().toISOString();
         const txnIdStr = `TXN-${Date.now()}`;
         const maskedDetails = paymentType === 'card' ? '****' : paymentType.toUpperCase();
-        const gateway = paymentType === 'cash' ? 'cod' : 'internal';
+        const gateway = paymentType === 'cash' ? 'cod' : 'worldline';
 
         try {
           const liveTxn = await LiveTransaction.create({

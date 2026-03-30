@@ -6,20 +6,21 @@ const mongoose = require('mongoose');
 const PickerAttendance = require('../../picker/models/attendance.model');
 const PickerUser = require('../../picker/models/user.model');
 const PickerShift = require('../../picker/models/shift.model');
+const { mergeWarehouseFilter } = require('../constants/warehouseScope');
 
 /**
  * Get live attendance for a date.
  * @param {Object} opts - { date (YYYY-MM-DD or Date), site (optional) }
  * @returns {Promise<Array>} Rows: pickerName, shift, punchIn, duration, lateByMinutes, overtimeMinutes, status
  */
-async function getLiveAttendance(opts = {}) {
+async function getLiveAttendance(warehouseKey, opts = {}) {
   const dateStr = opts.date || new Date().toISOString().split('T')[0];
   const date = typeof dateStr === 'string' ? new Date(dateStr + 'T00:00:00') : new Date(dateStr);
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
   const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59);
   const site = opts.site ? String(opts.site).trim() : null;
 
-  const match = { punchIn: { $gte: dayStart, $lte: dayEnd } };
+  const match = mergeWarehouseFilter({ punchIn: { $gte: dayStart, $lte: dayEnd } }, warehouseKey);
   const attendances = await PickerAttendance.find(match)
     .sort({ punchIn: -1 })
     .lean();
@@ -29,9 +30,14 @@ async function getLiveAttendance(opts = {}) {
 
   const [users, shifts] = await Promise.all([
     PickerUser.find({ _id: { $in: userIds } }).select('name phone').lean(),
-    PickerShift.find({
-      $or: [{ _id: { $in: shiftIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) } }, { id: { $in: shiftIds } }],
-    }).lean(),
+    PickerShift.find(
+      mergeWarehouseFilter({
+        $or: [
+          { _id: { $in: shiftIds.filter((id) => mongoose.Types.ObjectId.isValid(id)) } },
+          { id: { $in: shiftIds } },
+        ],
+      }, warehouseKey)
+    ).lean(),
   ]);
 
   const userMap = users.reduce((acc, u) => {

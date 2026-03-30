@@ -1,6 +1,7 @@
 const AccessLog = require('../models/AccessLog');
 const InventoryItem = require('../models/InventoryItem');
 const StorageLocation = require('../models/StorageLocation');
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * Parse CSV buffer to rows. Expects header: SKU, Name, Category, Price, Quantity (or similar)
@@ -24,7 +25,7 @@ function parseCSV(buffer) {
  * @desc Warehouse Utilities Service
  */
 const utilitiesService = {
-  uploadSKUs: async (file) => {
+  uploadSKUs: async (warehouseKey, file) => {
     if (!file || !file.buffer) {
       throw new Error('No file or file buffer provided');
     }
@@ -43,7 +44,7 @@ const utilitiesService = {
       }
       try {
         await InventoryItem.findOneAndUpdate(
-          { sku },
+          mergeWarehouseFilter({ sku }, warehouseKey),
           {
             id: sku,
             sku,
@@ -55,6 +56,7 @@ const utilitiesService = {
             location: 'TBD',
             value: price * qty,
             lastUpdated: new Date(),
+            ...warehouseFieldsForCreate(warehouseKey),
           },
           { upsert: true, new: true }
         );
@@ -71,18 +73,18 @@ const utilitiesService = {
     };
   },
 
-  getZones: async () => {
-    const zones = await StorageLocation.distinct('zone');
+  getZones: async (warehouseKey) => {
+    const zones = await StorageLocation.distinct('zone', warehouseKeyMatch(warehouseKey));
     return (zones || []).filter(z => z != null && String(z).trim()).sort();
   },
 
-  getAccessLogs: async (filters = {}) => {
+  getAccessLogs: async (warehouseKey, filters = {}) => {
     const query = {};
     if (filters.user) query.user = filters.user;
     if (filters.startDate && filters.endDate) {
       query.timestamp = { $gte: new Date(filters.startDate), $lte: new Date(filters.endDate) };
     }
-    return await AccessLog.find(query).sort({ timestamp: -1 });
+    return await AccessLog.find(mergeWarehouseFilter(query, warehouseKey)).sort({ timestamp: -1 });
   },
 
   generateLabels: async (data) => {
@@ -94,7 +96,7 @@ const utilitiesService = {
     };
   },
 
-  reassignBins: async (data) => {
+  reassignBins: async (warehouseKey, data) => {
     const fromZone = data.fromZone || data.from_zone || '';
     const toZone = data.toZone || data.to_zone || '';
     const skuFilter = data.skuFilter || data.sku_filter || '';
@@ -105,7 +107,7 @@ const utilitiesService = {
     if (skuFilter) {
       query.sku = { $regex: skuFilter, $options: 'i' };
     }
-    const locations = await StorageLocation.find(query).lean();
+    const locations = await StorageLocation.find(mergeWarehouseFilter(query, warehouseKey)).lean();
     let itemsMoved = 0;
     for (const loc of locations) {
       await StorageLocation.updateOne(

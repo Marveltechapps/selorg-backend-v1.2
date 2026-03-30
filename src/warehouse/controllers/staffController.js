@@ -11,10 +11,10 @@ const cacheInvalidation = require('../cacheInvalidation');
 const getStaffSummary = async (req, res, next) => {
   try {
     const { value: summary } = await getCachedOrCompute(
-      'staff:summary',
+      `staff:summary:${req.user?.warehouseKey || 'unknown'}`,
       appConfig.cache.staff,
       async () => {
-        const staff = await workforceService.listStaff();
+        const staff = await workforceService.listStaff(req.user.warehouseKey);
         return {
           total: staff.length,
           active: staff.filter(s => s.status === 'active').length,
@@ -43,11 +43,30 @@ const listStaff = async (req, res, next) => {
       page: parseInt(req.query.page) || 1,
       limit: parseInt(req.query.limit) || 50,
     };
-    const cacheKey = `staff:list:${hashForKey(filters)}`;
+    const cacheKey = `staff:list:${req.user?.warehouseKey || 'unknown'}:${hashForKey(filters)}`;
     const { value: result } = await getCachedOrCompute(
       cacheKey,
       appConfig.cache.staff,
-      () => workforceService.listStaff(filters),
+      async () => {
+        const staff = await workforceService.listStaff(req.user.warehouseKey);
+        const q = filters.search ? String(filters.search).toLowerCase().trim() : '';
+
+        let filtered = staff;
+        if (filters.role) filtered = filtered.filter(s => s.role === filters.role);
+        if (filters.status) filtered = filtered.filter(s => s.status === filters.status);
+        if (filters.zone) filtered = filtered.filter(s => s.zone === filters.zone);
+        if (q) {
+          filtered = filtered.filter(s =>
+            [s.name, s.id, s.role, s.email].some(v =>
+              (v || '').toString().toLowerCase().includes(q)
+            )
+          );
+        }
+
+        const start = (filters.page - 1) * filters.limit;
+        const end = start + filters.limit;
+        return filtered.slice(start, end);
+      },
       res
     );
     res.status(200).json(result);
@@ -67,11 +86,37 @@ const listShifts = async (req, res, next) => {
       status: req.query.status,
       week: req.query.week ? parseInt(req.query.week) : null,
     };
-    const cacheKey = `staff:shifts:${hashForKey(filters)}`;
+    const cacheKey = `staff:shifts:${req.user?.warehouseKey || 'unknown'}:${hashForKey(filters)}`;
     const { value: result } = await getCachedOrCompute(
       cacheKey,
       appConfig.cache.staff,
-      () => workforceService.listShifts(filters),
+      async () => {
+        const shifts = await workforceService.listShifts(req.user.warehouseKey);
+
+        let filtered = shifts;
+        if (filters.date) {
+          filtered = filtered.filter(s => s.date === filters.date);
+        }
+        if (filters.staffId) {
+          filtered = filtered.filter(s => (s.staffAssigned || []).includes(filters.staffId));
+        }
+        if (filters.status) {
+          filtered = filtered.filter(s => s.status === filters.status);
+        }
+        if (filters.week != null) {
+          const isoWeek = d => {
+            const date = new Date(d);
+            const tmp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = tmp.getUTCDay() || 7;
+            tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+            return Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+          };
+          filtered = filtered.filter(s => isoWeek(s.date) === filters.week);
+        }
+
+        return filtered;
+      },
       res
     );
     res.status(200).json(result);
@@ -95,7 +140,7 @@ const createShift = async (req, res, next) => {
       });
     }
 
-    const shift = await workforceService.createShift(shiftData);
+    const shift = await workforceService.createShift(req.user.warehouseKey, shiftData);
     
     // Invalidate cache
     await cache.delByPattern('staff:*');
@@ -130,7 +175,7 @@ const createShift = async (req, res, next) => {
 const getShiftById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const shifts = await workforceService.listShifts();
+    const shifts = await workforceService.listShifts(req.user.warehouseKey);
     const shift = shifts.find(s => s.id === id);
     if (!shift) {
       return res.status(404).json({
@@ -153,7 +198,7 @@ const updateShift = async (req, res, next) => {
     const { id } = req.params;
     const updates = req.body;
 
-    const shift = await workforceService.updateShift(id, updates);
+    const shift = await workforceService.updateShift(req.user.warehouseKey, id, updates);
     
     // Invalidate cache
     await cache.delByPattern('staff:*');
@@ -181,7 +226,7 @@ const updateShift = async (req, res, next) => {
 const getShiftCoverage = async (req, res, next) => {
   try {
     const date = req.query.date;
-    const shifts = await workforceService.listShifts();
+    const shifts = await workforceService.listShifts(req.user.warehouseKey);
     const result = {
       date: date || new Date().toISOString().split('T')[0],
       totalShifts: shifts.length,
@@ -201,7 +246,7 @@ const getWeeklyRoster = async (req, res, next) => {
   try {
     const week = req.query.week ? parseInt(req.query.week) : null;
     const year = req.query.year ? parseInt(req.query.year) : null;
-    const shifts = await workforceService.listShifts();
+    const shifts = await workforceService.listShifts(req.user.warehouseKey);
     const result = {
       week: week || 1,
       year: year || new Date().getFullYear(),
@@ -249,7 +294,7 @@ const listAbsences = async (req, res, next) => {
       date: req.query.date,
       type: req.query.type,
     };
-    const leaveRequests = await workforceService.listLeaveRequests(filters);
+    const leaveRequests = await workforceService.listLeaveRequests(req.user.warehouseKey, filters);
     res.status(200).json(leaveRequests);
   } catch (error) {
     next(error);
@@ -271,7 +316,7 @@ const logAbsence = async (req, res, next) => {
       });
     }
 
-    const leaveRequest = await workforceService.createLeaveRequest({
+    const leaveRequest = await workforceService.createLeaveRequest(req.user.warehouseKey, {
       staffId: absenceData.staffId,
       leaveType: absenceData.type,
       startDate: absenceData.date,
@@ -329,7 +374,7 @@ const getStaffPerformance = async (req, res, next) => {
       order: req.query.order || 'desc',
       period: req.query.period || 'week',
     };
-    const performance = await workforceService.listPerformance(params);
+    const performance = await workforceService.listPerformance(req.user.warehouseKey, params);
     res.status(200).json(performance);
   } catch (error) {
     next(error);

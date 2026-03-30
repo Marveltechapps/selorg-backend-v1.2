@@ -11,6 +11,12 @@ router.get('/overview', adminAuth, cmsAdminController.getOverview);
 // Excel uploads (2 independent mastersheets)
 router.post('/upload/sku-master', adminAuth, uploadExcel({ maxFileSizeMB: 20 }), cmsAdminController.uploadSkuMaster);
 router.post('/upload/cms-pages', adminAuth, uploadExcel({ maxFileSizeMB: 10 }), cmsAdminController.uploadCmsPages);
+router.post(
+  '/upload/content-hub-master',
+  adminAuth,
+  uploadExcel({ maxFileSizeMB: 20 }),
+  cmsAdminController.uploadContentHubMaster
+);
 
 router.get('/pages', adminAuth, cmsAdminController.listPages);
 router.get('/pages/:id', adminAuth, cmsAdminController.getPage);

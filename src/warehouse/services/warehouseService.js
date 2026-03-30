@@ -7,32 +7,50 @@ const InventoryAdjustment = require('../models/InventoryAdjustment');
 const QCInspection = require('../models/QCInspection');
 const Staff = require('../models/Staff');
 const WarehouseEquipment = require('../models/WarehouseEquipment');
+const { mergeWarehouseFilter, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Warehouse Overview Service
  */
 const warehouseService = {
-  getMetrics: async () => {
+  getMetrics: async (warehouseKey) => {
     // Compute several live metrics from DB
-    const inboundQueue = await GRN.countDocuments({ status: { $in: ['pending', 'in-progress'] } });
-    const outboundQueue = await Picklist.countDocuments({ status: { $in: ['queued', 'assigned', 'picking'] } });
-    const criticalAlerts = await StockAlert.countDocuments({ priority: 'high' });
+    const inboundQueue = await GRN.countDocuments(
+      mergeWarehouseFilter({ status: { $in: ['pending', 'in-progress'] } }, warehouseKey)
+    );
+    const outboundQueue = await Picklist.countDocuments(
+      mergeWarehouseFilter({ status: { $in: ['queued', 'assigned', 'picking'] } }, warehouseKey)
+    );
+    const criticalAlerts = await StockAlert.countDocuments(
+      mergeWarehouseFilter({ priority: 'high' }, warehouseKey)
+    );
 
     // Inventory health: ratio of SKUs at or above minStock
-    const totalSKUs = await InventoryItem.countDocuments();
+    const totalSKUs = await InventoryItem.countDocuments(warehouseKeyMatch(warehouseKey));
     let inventoryHealth = 0;
     if (totalSKUs > 0) {
-      const healthySKUs = await InventoryItem.countDocuments({ $expr: { $gte: ['$currentStock', '$minStock'] } });
+      const healthySKUs = await InventoryItem.countDocuments(
+        mergeWarehouseFilter({ $expr: { $gte: ['$currentStock', '$minStock'] } }, warehouseKey)
+      );
       inventoryHealth = Math.round((healthySKUs / totalSKUs) * 1000) / 10; // one decimal percent
     }
 
     // Capacity utilization: overall bins and cold storage (by zone name containing 'cold')
-    const totalBins = await StorageLocation.countDocuments();
-    const occupiedBins = await StorageLocation.countDocuments({ status: 'occupied' });
+    const totalBins = await StorageLocation.countDocuments(warehouseKeyMatch(warehouseKey));
+    const occupiedBins = await StorageLocation.countDocuments(
+      mergeWarehouseFilter({ status: 'occupied' }, warehouseKey)
+    );
     const binsUtil = totalBins > 0 ? Math.round((occupiedBins / totalBins) * 1000) / 10 : 0;
 
-    const coldTotal = await StorageLocation.countDocuments({ zone: { $regex: 'cold', $options: 'i' } });
-    const coldOccupied = await StorageLocation.countDocuments({ zone: { $regex: 'cold', $options: 'i' }, status: 'occupied' });
+    const coldTotal = await StorageLocation.countDocuments(
+      mergeWarehouseFilter({ zone: { $regex: 'cold', $options: 'i' } }, warehouseKey)
+    );
+    const coldOccupied = await StorageLocation.countDocuments(
+      mergeWarehouseFilter(
+        { zone: { $regex: 'cold', $options: 'i' }, status: 'occupied' },
+        warehouseKey
+      )
+    );
     const coldUtil = coldTotal > 0 ? Math.round((coldOccupied / coldTotal) * 1000) / 10 : 0;
 
     // ambient/util for non-cold zones (fallback)
@@ -53,8 +71,10 @@ const warehouseService = {
     };
   },
 
-  getOrderFlow: async () => {
-    const picklists = await Picklist.find({ status: { $ne: 'completed' } })
+  getOrderFlow: async (warehouseKey) => {
+    const picklists = await Picklist.find(
+      mergeWarehouseFilter({ status: { $ne: 'completed' } }, warehouseKey)
+    )
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();
@@ -71,26 +91,40 @@ const warehouseService = {
     }));
   },
 
-  getDailyReport: async (date = new Date()) => {
+  getDailyReport: async (warehouseKey, date = new Date()) => {
     // Aggregate daily operational metrics from DB
     const start = new Date(date);
     start.setHours(0,0,0,0);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
 
-    const totalGRNsProcessed = await GRN.countDocuments({ status: 'completed', updatedAt: { $gte: start, $lt: end } });
-    const totalOrdersPicked = await Picklist.countDocuments({ status: 'completed', updatedAt: { $gte: start, $lt: end } });
-    const totalItemsAdjusted = await InventoryAdjustment.countDocuments({ timestamp: { $gte: start, $lt: end } });
+    const totalGRNsProcessed = await GRN.countDocuments(
+      mergeWarehouseFilter({ status: 'completed', updatedAt: { $gte: start, $lt: end } }, warehouseKey)
+    );
+    const totalOrdersPicked = await Picklist.countDocuments(
+      mergeWarehouseFilter({ status: 'completed', updatedAt: { $gte: start, $lt: end } }, warehouseKey)
+    );
+    const totalItemsAdjusted = await InventoryAdjustment.countDocuments(
+      mergeWarehouseFilter({ timestamp: { $gte: start, $lt: end } }, warehouseKey)
+    );
 
-    const qcTotal = await QCInspection.countDocuments({ date: { $gte: start, $lt: end } });
-    const qcPassed = qcTotal > 0 ? await QCInspection.countDocuments({ date: { $gte: start, $lt: end }, status: 'passed' }) : 0;
+    const qcTotal = await QCInspection.countDocuments(
+      mergeWarehouseFilter({ date: { $gte: start, $lt: end } }, warehouseKey)
+    );
+    const qcPassed = qcTotal > 0
+      ? await QCInspection.countDocuments(
+        mergeWarehouseFilter({ date: { $gte: start, $lt: end }, status: 'passed' }, warehouseKey)
+      )
+      : 0;
     const qcPassRate = qcTotal > 0 ? `${Math.round((qcPassed / qcTotal) * 1000) / 10}%` : 'N/A';
 
-    const activeStaff = await Staff.countDocuments({ status: { $in: ['active','Active'] } });
+    const activeStaff = await Staff.countDocuments(
+      mergeWarehouseFilter({ status: { $in: ['active','Active'] } }, warehouseKey)
+    );
 
     // Top performers (simple heuristic: staff with most completed picks today)
     const topPerformers = await Picklist.aggregate([
-      { $match: { status: 'completed', updatedAt: { $gte: start, $lt: end } } },
+      { $match: mergeWarehouseFilter({ status: 'completed', updatedAt: { $gte: start, $lt: end } }, warehouseKey) },
       { $group: { _id: '$picker', tasks: { $sum: 1 } } },
       { $sort: { tasks: -1 } },
       { $limit: 5 },
@@ -110,12 +144,13 @@ const warehouseService = {
     };
   },
 
-  getOperationsView: async () => {
+  getOperationsView: async (warehouseKey) => {
     // Build operational snapshot from DB
     const lastUpdate = new Date().toISOString();
 
     // Zones: group storage locations by zone for utilization
     const zonesAgg = await StorageLocation.aggregate([
+      { $match: warehouseKeyMatch(warehouseKey) },
       { $group: {
         _id: '$zone',
         total: { $sum: 1 },
@@ -139,6 +174,7 @@ const warehouseService = {
 
     // Equipment status summary
     const equipment = await WarehouseEquipment.aggregate([
+      { $match: warehouseKeyMatch(warehouseKey) },
       { $group: {
         _id: '$type',
         total: { $sum: 1 },
@@ -159,7 +195,7 @@ const warehouseService = {
     };
   },
 
-  getAnalyticsSummary: async () => {
+  getAnalyticsSummary: async (warehouseKey) => {
     // 1. Weekly Data (last 7 days)
     const weeklyData = [];
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -173,8 +209,12 @@ const warehouseService = {
       const end = new Date(start);
       end.setDate(end.getDate() + 1);
       
-      const inbound = await GRN.countDocuments({ status: 'completed', updatedAt: { $gte: start, $lt: end } });
-      const outbound = await Picklist.countDocuments({ status: 'completed', updatedAt: { $gte: start, $lt: end } });
+      const inbound = await GRN.countDocuments(
+        mergeWarehouseFilter({ status: 'completed', updatedAt: { $gte: start, $lt: end } }, warehouseKey)
+      );
+      const outbound = await Picklist.countDocuments(
+        mergeWarehouseFilter({ status: 'completed', updatedAt: { $gte: start, $lt: end } }, warehouseKey)
+      );
       
       weeklyData.push({
         day: days[start.getDay()],
@@ -185,9 +225,13 @@ const warehouseService = {
     }
 
     // 2. Storage Data
-    const totalLocations = await StorageLocation.countDocuments();
-    const occupied = await StorageLocation.countDocuments({ status: 'occupied' });
-    const restricted = await StorageLocation.countDocuments({ status: 'restricted' });
+    const totalLocations = await StorageLocation.countDocuments(warehouseKeyMatch(warehouseKey));
+    const occupied = await StorageLocation.countDocuments(
+      mergeWarehouseFilter({ status: 'occupied' }, warehouseKey)
+    );
+    const restricted = await StorageLocation.countDocuments(
+      mergeWarehouseFilter({ status: 'restricted' }, warehouseKey)
+    );
     const empty = totalLocations - occupied - restricted;
 
     const storageData = [
@@ -198,6 +242,7 @@ const warehouseService = {
 
     // 3. Inventory by Category
     const inventoryByCategory = await InventoryItem.aggregate([
+      { $match: warehouseKeyMatch(warehouseKey) },
       { $group: { _id: '$category', value: { $sum: '$currentStock' } } },
       { $project: { category: '$_id', value: 1, _id: 0 } },
       { $sort: { value: -1 } },
@@ -205,15 +250,21 @@ const warehouseService = {
     ]);
 
     // 4. Key Metrics (calculated from real data where possible)
-    const totalStaff = await Staff.countDocuments();
-    const activeStaff = await Staff.countDocuments({ status: 'Active' });
+    const totalStaff = await Staff.countDocuments(warehouseKeyMatch(warehouseKey));
+    const activeStaff = await Staff.countDocuments(
+      mergeWarehouseFilter({ status: 'Active' }, warehouseKey)
+    );
     const attendanceRate = totalStaff > 0 ? Math.round((activeStaff / totalStaff) * 100) : 0;
 
-    const totalCounted = await Picklist.countDocuments({ status: 'completed' });
+    const totalCounted = await Picklist.countDocuments(
+      mergeWarehouseFilter({ status: 'completed' }, warehouseKey)
+    );
     const accuracy = '99.8%'; // Placeholder for complex calc
 
-    const totalSKUs = await InventoryItem.countDocuments();
-    const stockouts = await InventoryItem.countDocuments({ $expr: { $lte: ['$currentStock', 0] } });
+    const totalSKUs = await InventoryItem.countDocuments(warehouseKeyMatch(warehouseKey));
+    const stockouts = await InventoryItem.countDocuments(
+      mergeWarehouseFilter({ $expr: { $lte: ['$currentStock', 0] } }, warehouseKey)
+    );
     const expiringSoon = 0; // Requires expiry field on InventoryItem if available
 
     const metrics = {

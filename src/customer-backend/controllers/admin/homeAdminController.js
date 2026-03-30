@@ -633,7 +633,22 @@ exports.reorderPromoBlocks = async (req, res) => {
 };
 
 exports.listProducts = async (req, res) => {
-  const { categoryId, status, stock, page, limit, search } = req.query;
+  const {
+    categoryId,
+    subcategoryId,
+    status,
+    stock,
+    page,
+    limit,
+    search,
+    classification,
+    featured,
+    brand,
+    priceMin,
+    priceMax,
+    gstMin,
+    gstMax,
+  } = req.query;
   const query = { deletedAt: null };
   const andParts = [];
 
@@ -651,12 +666,61 @@ exports.listProducts = async (req, res) => {
   }
 
   if (categoryId) {
+    // Backward-compatible behavior:
+    // - the existing UI historically passed `categoryId` even when filtering by subcategory
+    //   so we treat it as "either categoryId OR subcategoryId".
     andParts.push({
-      $or: [
-        { categoryId: categoryId },
-        { subcategoryId: categoryId },
-      ],
+      $or: [{ categoryId: categoryId }, { subcategoryId: categoryId }],
     });
+  }
+
+  if (subcategoryId) {
+    // New explicit filter: subcategoryId only.
+    andParts.push({ subcategoryId: subcategoryId });
+  }
+
+  if (classification && String(classification).trim() && classification !== 'all') {
+    query.classification = String(classification).trim();
+  }
+
+  if (featured != null && String(featured).trim() && String(featured).trim() !== 'all') {
+    const s = String(featured).trim().toLowerCase();
+    const parsed = s === 'true' || s === '1' || s === 'yes';
+    const parsed2 = s === 'false' || s === '0' || s === 'no';
+    if (!parsed2 && !parsed) {
+      // If it isn't a valid boolean, ignore the filter rather than failing the request.
+    } else {
+      query.featured = parsed;
+    }
+  }
+
+  if (brand && String(brand).trim()) {
+    const s = String(brand).trim();
+    const regex = new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    andParts.push({ brand: regex });
+  }
+
+  const toNumber = (v) => {
+    if (v == null) return null;
+    const n = typeof v === 'number' ? v : parseFloat(String(v));
+    return Number.isFinite(n) ? n : null;
+  };
+  const pMin = toNumber(priceMin);
+  const pMax = toNumber(priceMax);
+  if (pMin != null || pMax != null) {
+    const range = {};
+    if (pMin != null) range.$gte = pMin;
+    if (pMax != null) range.$lte = pMax;
+    andParts.push({ price: range });
+  }
+
+  const gMin = toNumber(gstMin);
+  const gMax = toNumber(gstMax);
+  if (gMin != null || gMax != null) {
+    const range = {};
+    if (gMin != null) range.$gte = gMin;
+    if (gMax != null) range.$lte = gMax;
+    andParts.push({ gstRate: range });
   }
 
   if (andParts.length > 0) {
@@ -798,6 +862,51 @@ const PRODUCT_UPDATE_KEYS = [
   'name', 'sku', 'description', 'brand', 'price', 'costPrice', 'originalPrice', 'gstRate',
   'stockQuantity', 'lowStockThreshold', 'imageUrl', 'images', 'status', 'featured',
   'attributes', 'tags', 'categoryId', 'subcategoryId', 'variants', 'order', 'quantity', 'discount',
+  // Extended structured fields (mastersheet import).
+  'associatedClientName',
+  'styleAttributes',
+  'style',
+  'skuSource',
+  'colour',
+  'material',
+  'upcEan',
+  'brandCode',
+  'taxCategory',
+  'dimensions',
+  'washAndCare',
+  'shippingAndReturns',
+  'lottableValidation',
+  'recvValidationCode',
+  'pickingInstructions',
+  'shippingInstructions',
+  'shippingCharges',
+  'handlingCharges',
+  'isArsApplicable',
+  'followStyle',
+  'arsCalculationMethod',
+  'fixedStock',
+  'modelStock',
+  'imageDescriptions',
+  'isUniqueBarcode',
+  'taxBreakup',
+  // Compliance / operational flags from mastersheet.
+  'qcRequired',
+  'backOrderAllowed',
+  'backOrderQty',
+  'serialTracking',
+  'stackable',
+  'hazardous',
+  'poisonous',
+  'skuRotation',
+  'rotateBy',
+  'thresholdAlertRequired',
+  'thresholdQty',
+  // Rich objects.
+  'shelfLife',
+  'meta',
+  'udf',
+  // Full fidelity import payload (optional).
+  'importRaw',
 ];
 exports.updateProduct = async (req, res) => {
   const body = {};
@@ -913,8 +1022,19 @@ exports.bulkUpdateProducts = async (req, res) => {
   const updateOp = {};
   if (Object.keys(setPayload).length > 0) updateOp.$set = setPayload;
   const stockIncrement = rawUpdates.stockIncrement;
+  const priceIncrement = rawUpdates.priceIncrement;
+  const priceMultiplier = rawUpdates.priceMultiplier;
+
   if (typeof stockIncrement === 'number' && stockIncrement !== 0) {
-    updateOp.$inc = { stockQuantity: stockIncrement };
+    updateOp.$inc = { ...(updateOp.$inc || {}), stockQuantity: stockIncrement };
+  }
+  if (typeof priceIncrement === 'number' && priceIncrement !== 0) {
+    updateOp.$inc = { ...(updateOp.$inc || {}), price: priceIncrement };
+  }
+  // Multiplier is applied multiplicatively on the existing `price` field.
+  // e.g. 1.10 => +10%, 0.90 => -10%
+  if (typeof priceMultiplier === 'number' && priceMultiplier !== 1) {
+    updateOp.$mul = { ...(updateOp.$mul || {}), price: priceMultiplier };
   }
 
   if (Object.keys(updateOp).length === 0) {

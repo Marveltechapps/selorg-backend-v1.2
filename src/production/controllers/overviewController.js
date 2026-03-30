@@ -3,13 +3,16 @@ const Factory = require('../models/Factory');
 const QCInspection = require('../models/QCInspection');
 const { generateId } = require('../../utils/helpers');
 
+const DEFAULT_FACTORY_ID =
+  process.env.DASHBOARD_HUB_KEY || process.env.DEFAULT_FACTORY_ID || 'chennai-hub';
+
 /**
  * GET /api/v1/production/overview
  * Returns overview KPIs and production lines for a factory
  */
 const getOverview = async (req, res) => {
   try {
-    const factoryId = req.query.factoryId || process.env.DEFAULT_FACTORY_ID;
+    const factoryId = req.query.factoryId || req.query.storeId || DEFAULT_FACTORY_ID;
     if (!factoryId) {
       return res.status(400).json({
         success: false,
@@ -82,14 +85,21 @@ const getOverview = async (req, res) => {
 const startBatch = async (req, res) => {
   try {
     const { lineId, product, targetQuantity } = req.body;
+    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId;
     if (!lineId || !product || !targetQuantity || targetQuantity < 1) {
       return res.status(400).json({
         success: false,
         error: 'lineId, product, and targetQuantity (positive number) are required',
       });
     }
+    if (!factoryId) {
+      return res.status(400).json({
+        success: false,
+        error: 'factoryId is required for hub-scoped line operations',
+      });
+    }
 
-    const line = await ProductionLine.findOne({ line_id: lineId });
+    const line = await ProductionLine.findOne({ line_id: lineId, factory_id: factoryId });
     if (!line) {
       return res.status(404).json({
         success: false,
@@ -138,14 +148,21 @@ const updateLine = async (req, res) => {
   try {
     const { lineId } = req.params;
     const { action } = req.body;
+    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId;
     if (!action || !['pause', 'resume', 'stop'].includes(action)) {
       return res.status(400).json({
         success: false,
         error: 'action (pause, resume, or stop) is required',
       });
     }
+    if (!factoryId) {
+      return res.status(400).json({
+        success: false,
+        error: 'factoryId is required for hub-scoped line operations',
+      });
+    }
 
-    const line = await ProductionLine.findOne({ line_id: lineId });
+    const line = await ProductionLine.findOne({ line_id: lineId, factory_id: factoryId });
     if (!line) {
       return res.status(404).json({
         success: false,
@@ -201,7 +218,8 @@ const updateLine = async (req, res) => {
  */
 const listFactories = async (req, res) => {
   try {
-    const factories = await Factory.find({}).lean();
+    const factoryId = req.query.factoryId || req.query.storeId || DEFAULT_FACTORY_ID;
+    const factories = await Factory.find({ factory_id: factoryId }).lean();
     const transformed = factories.map((f) => ({
       id: f.factory_id,
       name: f.name,

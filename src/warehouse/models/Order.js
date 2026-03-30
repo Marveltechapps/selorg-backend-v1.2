@@ -18,10 +18,14 @@ const TimelineEventSchema = new mongoose.Schema({
 }, { _id: false });
 
 const OrderSchema = new mongoose.Schema({
+  warehouseKey: {
+    type: String,
+    trim: true,
+    index: true,
+  },
   id: {
     type: String,
     required: true,
-    unique: true,
     match: /^ORD-[\d-]+$/,
     index: true,
   },
@@ -113,6 +117,8 @@ const OrderSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'orders',
 });
+
+OrderSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 // Ensure timeline is sorted by time
 OrderSchema.pre('save', function(next) {

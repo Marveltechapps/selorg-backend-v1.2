@@ -34,16 +34,15 @@ const CycleCountItemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const CycleCountSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   countId: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     index: true,
   },
@@ -97,6 +96,9 @@ const CycleCountSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'cycle_counts',
 });
+
+CycleCountSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
+CycleCountSchema.index({ warehouseKey: 1, countId: 1 }, { unique: true });
 
 // Indexes for performance
 CycleCountSchema.index({ zone: 1, status: 1 });

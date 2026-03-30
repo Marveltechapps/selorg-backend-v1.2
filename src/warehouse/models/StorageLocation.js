@@ -1,10 +1,14 @@
 const mongoose = require('mongoose');
 
 const StorageLocationSchema = new mongoose.Schema({
+  warehouseKey: {
+    type: String,
+    trim: true,
+    index: true,
+  },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   aisle: {
@@ -57,8 +61,12 @@ StorageLocationSchema.virtual('bin').get(function () {
   return this.shelf != null ? this.shelf : null;
 });
 
-// Compound index for location lookup
-StorageLocationSchema.index({ aisle: 1, rack: 1, shelf: 1 }, { unique: true });
+// Compound indexes for location lookup (tenant-safe)
+StorageLocationSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
+StorageLocationSchema.index(
+  { warehouseKey: 1, aisle: 1, rack: 1, shelf: 1 },
+  { unique: true }
+);
 StorageLocationSchema.index({ status: 1, zone: 1 });
 StorageLocationSchema.index({ sku: 1 });
 

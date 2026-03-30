@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const ShiftSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   staffId: {
@@ -62,6 +62,8 @@ const ShiftSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'shifts',
 });
+
+ShiftSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 ShiftSchema.index({ staffId: 1, date: 1 });
 ShiftSchema.index({ date: 1, status: 1 });

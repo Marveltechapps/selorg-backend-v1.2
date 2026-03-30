@@ -2,12 +2,28 @@ const WorkOrder = require('../models/WorkOrder');
 const productionToWarehouseService = require('../../shared/services/productionToWarehouseService');
 const logger = require('../../core/utils/logger');
 
+function getStoreId(req) {
+  return (
+    req.query?.storeId ||
+    req.body?.storeId ||
+    process.env.DEFAULT_STORE_ID ||
+    'chennai-hub'
+  );
+}
+
 const listWorkOrders = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const search = req.query.search || '';
     const query = search
-      ? { $or: [{ orderNumber: { $regex: search, $options: 'i' } }, { product: { $regex: search, $options: 'i' } }] }
-      : {};
+      ? {
+          store_id: storeId,
+          $or: [
+            { orderNumber: { $regex: search, $options: 'i' } },
+            { product: { $regex: search, $options: 'i' } },
+          ],
+        }
+      : { store_id: storeId };
     const orders = await WorkOrder.find(query).sort({ createdAt: -1 }).lean();
     res.status(200).json(
       orders.map((o) => ({
@@ -29,12 +45,14 @@ const listWorkOrders = async (req, res) => {
 
 const createWorkOrder = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const { product, quantity, line, priority, dueDate } = req.body || {};
     if (!product || quantity === undefined) {
       return res.status(400).json({ success: false, error: 'product and quantity are required' });
     }
     const orderNumber = `WO-${Math.floor(1000 + Math.random() * 9000)}`;
     const doc = await WorkOrder.create({
+      store_id: storeId,
       orderNumber,
       product,
       quantity: Number(quantity),
@@ -60,9 +78,10 @@ const createWorkOrder = async (req, res) => {
 
 const assignOperator = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const { id } = req.params;
     const { operator } = req.body || {};
-    const order = await WorkOrder.findById(id);
+    const order = await WorkOrder.findOne({ _id: id, store_id: storeId });
     if (!order) {
       return res.status(404).json({ success: false, error: 'Work order not found' });
     }
@@ -82,13 +101,14 @@ const assignOperator = async (req, res) => {
 
 const updateStatus = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const { id } = req.params;
     const { status } = req.body || {};
     const validStatuses = ['pending', 'in-progress', 'completed', 'on-hold'];
     if (!status || !validStatuses.includes(status)) {
       return res.status(400).json({ success: false, error: 'status must be pending, in-progress, completed, or on-hold' });
     }
-    const order = await WorkOrder.findById(id);
+    const order = await WorkOrder.findOne({ _id: id, store_id: storeId });
     if (!order) {
       return res.status(404).json({ success: false, error: 'Work order not found' });
     }
@@ -98,7 +118,6 @@ const updateStatus = async (req, res) => {
 
     // Production → Warehouse integration: when work order completes, add finished goods to warehouse inventory
     if (status === 'completed' && !wasCompleted) {
-      const storeId = req.query.storeId || req.body.storeId || process.env.DEFAULT_STORE_ID;
       productionToWarehouseService
         .onProductionRunComplete(order, {
           storeId,
@@ -140,8 +159,9 @@ const updateStatus = async (req, res) => {
 
 const getWorkOrder = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const { id } = req.params;
-    const order = await WorkOrder.findById(id).lean();
+    const order = await WorkOrder.findOne({ _id: id, store_id: storeId }).lean();
     if (!order) {
       return res.status(404).json({ success: false, error: 'Work order not found' });
     }

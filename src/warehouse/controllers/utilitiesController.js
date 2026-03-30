@@ -6,7 +6,7 @@ const { asyncHandler } = require('../../core/middleware');
  */
 const utilitiesController = {
   getZones: asyncHandler(async (req, res) => {
-    const zones = await utilitiesService.getZones();
+    const zones = await utilitiesService.getZones(req.user.warehouseKey);
     res.status(200).json({ success: true, data: zones });
   }),
 
@@ -14,12 +14,12 @@ const utilitiesController = {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
-    const result = await utilitiesService.uploadSKUs(req.file);
+    const result = await utilitiesService.uploadSKUs(req.user.warehouseKey, req.file);
     res.status(200).json({ success: true, ...result });
   }),
 
   getLogs: asyncHandler(async (req, res) => {
-    const logs = await utilitiesService.getAccessLogs(req.query);
+    const logs = await utilitiesService.getAccessLogs(req.user.warehouseKey, req.query);
     const data = logs.map(l => {
       const doc = l.toObject ? l.toObject() : l;
       return {
@@ -39,7 +39,7 @@ const utilitiesController = {
   }),
 
   reassignBins: asyncHandler(async (req, res) => {
-    const result = await utilitiesService.reassignBins(req.body);
+    const result = await utilitiesService.reassignBins(req.user.warehouseKey, req.body);
     res.status(200).json({ success: true, ...result });
   }),
 

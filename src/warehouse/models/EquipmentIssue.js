@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const EquipmentIssueSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
+  warehouseKey: { type: String, trim: true, index: true },
+  id: { type: String, required: true, index: true },
   equipmentId: { type: String, required: true, index: true },
   reportedBy: { type: String, required: true },
   description: { type: String, required: true },
@@ -11,6 +12,8 @@ const EquipmentIssueSchema = new mongoose.Schema({
   resolvedAt: { type: Date },
   resolutionNotes: { type: String }
 }, { timestamps: true, collection: 'warehouse_equipment_issues' });
+
+EquipmentIssueSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 module.exports = mongoose.models.EquipmentIssue || mongoose.model('EquipmentIssue', EquipmentIssueSchema);
 

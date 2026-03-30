@@ -50,6 +50,9 @@ const bannerSchema = new mongoose.Schema(
     isNavigable: { type: Boolean, default: true },
     title: String,
     imageUrl: { type: String, required: true },
+    /** Optional wide/display URL (customer app prefers over imageUrl for hero/mid banners). */
+    bannerImageUrl: { type: String, default: '' },
+    thumbnailUrl: { type: String, default: '' },
     mediaId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerMedia', default: null },
     link: String, // Legacy - kept for backward compatibility during migration
     redirectType: {
@@ -65,6 +68,8 @@ const bannerSchema = new mongoose.Schema(
     order: { type: Number, default: 0 },
     /** When redirectType is 'banner', tapping shows a landing page with these items (arrangeable) */
     contentItems: [contentItemSchema],
+    // Raw import payload from mastersheet rows (for full-fidelity storage/audit).
+    importRaw: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );

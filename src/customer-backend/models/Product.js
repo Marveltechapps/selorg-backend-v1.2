@@ -24,6 +24,9 @@ const productSchema = new mongoose.Schema(
     // Media
     images: [{ type: String }],
     imageUrl: { type: String, default: '' },
+    /** Optional tile-sized URL for carousels/lists (customer app prefers over imageUrl). */
+    thumbnailUrl: { type: String, default: '' },
+    cardImageUrl: { type: String, default: '' },
     additionalImages: [{ type: String }],
 
     // Pricing & tax
@@ -149,6 +152,71 @@ const productSchema = new mongoose.Schema(
       material: String,
       expiryDays: Number,
     },
+    associatedClientName: { type: String, default: '' },
+    styleAttributes: { type: String, default: '' },
+    style: { type: String, default: '' },
+    skuSource: { type: String, default: '' },
+    colour: { type: String, default: '' },
+    material: { type: String, default: '' },
+    upcEan: { type: String, default: '' },
+    taxCategory: { type: String, default: '' },
+    dimensions: {
+      type: new mongoose.Schema(
+        {
+          heightCm: { type: Number, default: 0 },
+          lengthCm: { type: Number, default: 0 },
+          widthCm: { type: Number, default: 0 },
+          cube: { type: Number, default: 0 },
+          weightKg: { type: Number, default: 0 },
+        },
+        { _id: false }
+      ),
+      default: () => ({ heightCm: 0, lengthCm: 0, widthCm: 0, cube: 0, weightKg: 0 }),
+    },
+    washAndCare: { type: String, default: '' },
+    shippingAndReturns: { type: String, default: '' },
+    lottableValidation: { type: String, default: '' },
+    recvValidationCode: { type: String, default: '' },
+    pickingInstructions: { type: String, default: '' },
+    shippingInstructions: { type: String, default: '' },
+    shippingCharges: { type: Number, default: 0 },
+    handlingCharges: { type: Number, default: 0 },
+    isArsApplicable: { type: Boolean, default: false },
+    followStyle: { type: String, default: '' },
+    arsCalculationMethod: { type: String, default: '' },
+    fixedStock: { type: Number, default: 0 },
+    modelStock: { type: Number, default: 0 },
+    imageDescriptions: [{ type: String }],
+    isUniqueBarcode: { type: Boolean, default: false },
+    taxBreakup: {
+      type: new mongoose.Schema(
+        {
+          sgstPercent: { type: Number, default: 0 },
+          cgstPercent: { type: Number, default: 0 },
+          igstPercent: { type: Number, default: 0 },
+          cessPercent: { type: Number, default: 0 },
+          sgstAmount: { type: Number, default: 0 },
+          cgstAmount: { type: Number, default: 0 },
+          igstAmount: { type: Number, default: 0 },
+          cessAmount: { type: Number, default: 0 },
+          priceInclGst: { type: Number, default: 0 },
+        },
+        { _id: false }
+      ),
+      default: () => ({
+        sgstPercent: 0,
+        cgstPercent: 0,
+        igstPercent: 0,
+        cessPercent: 0,
+        sgstAmount: 0,
+        cgstAmount: 0,
+        igstAmount: 0,
+        cessAmount: 0,
+        priceInclGst: 0,
+      }),
+    },
+    // Raw import payload from mastersheet row (for full-fidelity storage/audit).
+    importRaw: { type: mongoose.Schema.Types.Mixed, default: null },
     tags: [{ type: String }],
     isActive: { type: Boolean, default: true },
     order: { type: Number },

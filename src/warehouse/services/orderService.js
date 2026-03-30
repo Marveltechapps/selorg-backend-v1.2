@@ -21,9 +21,16 @@ if (!Rider || !Rider.schema.paths.id || Rider.schema.paths.rider_id) {
 const { calculateDistance } = require('../../utils/distanceCalculator');
 const appConfig = require('../../config/app');
 const logger = require('../../core/utils/logger');
+const { mergeWarehouseFilter, warehouseKeyMatch, DEFAULT_WAREHOUSE_KEY } = require('../constants/warehouseScope');
 
-const listOrders = async (filters = {}, pagination = {}, sorting = {}) => {
+const listOrders = async (warehouseKeyOrFilters, filtersOrPagination = {}, paginationOrSorting = {}, sortingMaybe = {}) => {
   try {
+    const isNewSig = typeof warehouseKeyOrFilters === 'string';
+    const warehouseKey = isNewSig ? warehouseKeyOrFilters : DEFAULT_WAREHOUSE_KEY;
+    const filters = isNewSig ? filtersOrPagination : warehouseKeyOrFilters;
+    const pagination = isNewSig ? paginationOrSorting : filtersOrPagination;
+    const sorting = isNewSig ? sortingMaybe : paginationOrSorting;
+
     const {
       status,
       riderId,
@@ -55,7 +62,8 @@ const listOrders = async (filters = {}, pagination = {}, sorting = {}) => {
     }
 
     const skip = (page - 1) * limit;
-    const total = await Order.countDocuments(query);
+    const scopedQuery = mergeWarehouseFilter(query, warehouseKey);
+    const total = await Order.countDocuments(scopedQuery);
 
     // Build sort object
     let sortObj = {};
@@ -66,7 +74,7 @@ const listOrders = async (filters = {}, pagination = {}, sorting = {}) => {
       sortObj[sortBy] = sortOrder === 'asc' ? 1 : -1;
     }
 
-    let orders = await Order.find(query)
+    let orders = await Order.find(scopedQuery)
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
@@ -126,12 +134,24 @@ const listOrders = async (filters = {}, pagination = {}, sorting = {}) => {
   }
 };
 
-const assignOrder = async (orderId, riderId, overrideSla = false) => {
+const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOverrideSla, overrideSlaMaybe = false) => {
+  const first = String(warehouseKeyOrOrderId);
+  const isLegacySig = /^ORD-/.test(first);
+
+  const warehouseKey = isLegacySig ? DEFAULT_WAREHOUSE_KEY : warehouseKeyOrOrderId;
+  const orderId = isLegacySig ? warehouseKeyOrOrderId : orderIdOrRiderId;
+  const riderId = isLegacySig ? orderIdOrRiderId : riderIdOrOverrideSla;
+  const overrideSla = isLegacySig ? riderIdOrOverrideSla : overrideSlaMaybe;
+
   // Use raw collection to find order - 'orders' collection has mixed schemas (WarehouseOrder
   // vs DarkstoreOrder). Darkstore uses order_id; Warehouse uses id. Avoid loading as Mongoose
   // document to prevent validation failures on save (items as objects, timeline.ASSIGNED, etc).
   const ordersColl = mongoose.connection.collection('orders');
-  const orderDoc = await ordersColl.findOne({ $or: [{ id: orderId }, { order_id: orderId }] });
+  const orderFilter = mergeWarehouseFilter(
+    { $or: [{ id: orderId }, { order_id: orderId }] },
+    warehouseKey
+  );
+  const orderDoc = await ordersColl.findOne(orderFilter);
   if (!orderDoc) {
     const error = new Error(`Order ${orderId} not found in database`);
     error.statusCode = 404;
@@ -261,6 +281,7 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
             { $or: [{ riderId: previousRider.id }, { 'assignee.id': previousRider.id }] },
             { $nor: [{ id: orderId }, { order_id: orderId }] },
             { status: { $in: ['assigned', 'picked_up', 'in_transit', 'ASSIGNED', 'PICKED', 'PICKING', 'READY_FOR_DISPATCH'] } },
+            warehouseKeyMatch(warehouseKey),
           ],
         });
         
@@ -355,7 +376,10 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
   rider.capacity.currentLoad = (rider.capacity.currentLoad || 0) + 1;
 
   try {
-    const orderFilter = { $or: [{ id: orderId }, { order_id: orderId }] };
+    const orderFilter = mergeWarehouseFilter(
+      { $or: [{ id: orderId }, { order_id: orderId }] },
+      warehouseKey
+    );
     const [orderResult] = await Promise.all([
       ordersColl.updateOne(orderFilter, orderUpdate),
       rider.save(),
@@ -516,8 +540,15 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
   return responseOrder;
 };
 
-const alertOrder = async (orderId, reason) => {
-  let order = await Order.findOne({ id: orderId });
+const alertOrder = async (warehouseKeyOrOrderId, orderIdOrReason, reasonMaybe) => {
+  const first = String(warehouseKeyOrOrderId);
+  const isLegacySig = /^ORD-/.test(first);
+
+  const warehouseKey = isLegacySig ? DEFAULT_WAREHOUSE_KEY : warehouseKeyOrOrderId;
+  const orderId = isLegacySig ? warehouseKeyOrOrderId : orderIdOrReason;
+  const reason = isLegacySig ? orderIdOrReason : reasonMaybe;
+
+  let order = await Order.findOne(mergeWarehouseFilter({ id: orderId }, warehouseKey));
 
   // In development mode, create mock order if not found
   if (appConfig.nodeEnv === 'development') {

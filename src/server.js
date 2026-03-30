@@ -372,6 +372,24 @@ if (process.env.NODE_ENV !== 'test') {
     } catch (jobErr) {
       logger.warn('Operational alerts job failed to start', { error: jobErr?.message });
     }
+
+    // Start coupon status management job (SCHEDULED -> ACTIVE, ACTIVE -> EXPIRED)
+    try {
+      const couponStatusJob = require('./customer-backend/jobs/couponStatusJob');
+      couponStatusJob.start(60 * 1000); // every 60 seconds
+      logger.info('Coupon status management job started (interval: 60s)');
+    } catch (couponJobErr) {
+      logger.warn('Coupon status management job failed to start', { error: couponJobErr?.message });
+    }
+
+    // Start Worldline payment reconciliation job (stale pending -> unknown)
+    try {
+      const worldlineReconciliationJob = require('./customer-backend/jobs/worldlineReconciliationJob');
+      worldlineReconciliationJob.start(5 * 60 * 1000); // every 5 minutes
+      logger.info('Worldline reconciliation job started (interval: 5m)');
+    } catch (wlJobErr) {
+      logger.warn('Worldline reconciliation job failed to start', { error: wlJobErr?.message });
+    }
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       logger.error('Port already in use', {

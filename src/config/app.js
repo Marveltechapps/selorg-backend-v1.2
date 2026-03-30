@@ -44,7 +44,10 @@ module.exports = {
     darkstore: parseInt(process.env.CACHE_TTL_DARKSTORE) || 60,
     merch: parseInt(process.env.CACHE_TTL_MERCH) || 60,
     // Shared (additional)
-    search: parseInt(process.env.CACHE_TTL_SEARCH) || 30,
+    // Search should reflect live DB state; default 0 = no cache (override with CACHE_TTL_SEARCH)
+    search: Number.isFinite(parseInt(process.env.CACHE_TTL_SEARCH, 10))
+      ? parseInt(process.env.CACHE_TTL_SEARCH, 10)
+      : 0,
     communication: parseInt(process.env.CACHE_TTL_COMMUNICATION) || 30,
     inventorySync: parseInt(process.env.CACHE_TTL_INVENTORY_SYNC) || 30,
     bulk: parseInt(process.env.CACHE_TTL_BULK) || 60,

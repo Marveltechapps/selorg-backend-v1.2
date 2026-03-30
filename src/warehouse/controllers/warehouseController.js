@@ -6,27 +6,27 @@ const { asyncHandler } = require('../../core/middleware');
  */
 const warehouseController = {
   getMetrics: asyncHandler(async (req, res) => {
-    const metrics = await warehouseService.getMetrics();
+    const metrics = await warehouseService.getMetrics(req.user.warehouseKey);
     res.status(200).json({ success: true, data: metrics });
   }),
 
   getOrderFlow: asyncHandler(async (req, res) => {
-    const flow = await warehouseService.getOrderFlow();
+    const flow = await warehouseService.getOrderFlow(req.user.warehouseKey);
     res.status(200).json({ success: true, data: flow, meta: { count: flow.length } });
   }),
 
   getDailyReport: asyncHandler(async (req, res) => {
-    const report = await warehouseService.getDailyReport(req.query.date);
+    const report = await warehouseService.getDailyReport(req.user.warehouseKey, req.query.date);
     res.status(200).json({ success: true, data: report });
   }),
 
   getOperationsView: asyncHandler(async (req, res) => {
-    const view = await warehouseService.getOperationsView();
+    const view = await warehouseService.getOperationsView(req.user.warehouseKey);
     res.status(200).json({ success: true, data: view });
   }),
 
   getAnalytics: asyncHandler(async (req, res) => {
-    const analytics = await warehouseService.getAnalyticsSummary();
+    const analytics = await warehouseService.getAnalyticsSummary(req.user.warehouseKey);
     res.status(200).json({ success: true, data: analytics });
   })
 };

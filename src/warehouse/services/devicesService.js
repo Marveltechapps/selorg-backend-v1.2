@@ -6,12 +6,13 @@ const PickerDevice = require('../../picker/models/device.model');
 const PickerUser = require('../../picker/models/user.model');
 const { DEVICE_STATUS, PICKER_STATUS } = require('../../constants/pickerEnums');
 const websocketService = require('../../utils/websocket');
+const { mergeWarehouseFilter, warehouseFieldsForCreate } = require('../constants/warehouseScope');
 
 /**
  * List devices with filters
  * @param {Object} filters - { status, search (deviceId/serial) }
  */
-async function listDevices(filters = {}) {
+async function listDevices(warehouseKey, filters = {}) {
   const query = {};
   if (filters.status) query.status = filters.status;
   if (filters.search && filters.search.trim()) {
@@ -22,7 +23,8 @@ async function listDevices(filters = {}) {
     ];
   }
 
-  const devices = await PickerDevice.find(query)
+  const scopedQuery = mergeWarehouseFilter(query, warehouseKey);
+  const devices = await PickerDevice.find(scopedQuery)
     .populate('assignedPickerId', 'name phone')
     .sort({ createdAt: -1 })
     .lean();
@@ -43,8 +45,9 @@ async function listDevices(filters = {}) {
 /**
  * Create a new device
  */
-async function createDevice(body) {
+async function createDevice(warehouseKey, body) {
   const doc = await PickerDevice.create({
+    ...warehouseFieldsForCreate(warehouseKey),
     deviceId: body.deviceId,
     serial: body.serial || undefined,
     status: DEVICE_STATUS.AVAILABLE,
@@ -55,8 +58,8 @@ async function createDevice(body) {
 /**
  * PATCH device – actions: assign, return, mark_damaged
  */
-async function patchDevice(id, action, body) {
-  const device = await PickerDevice.findById(id);
+async function patchDevice(warehouseKey, id, action, body) {
+  const device = await PickerDevice.findOne(mergeWarehouseFilter({ _id: id }, warehouseKey));
   if (!device) return null;
 
   if (action === 'assign') {

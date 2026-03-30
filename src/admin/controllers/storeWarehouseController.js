@@ -6,9 +6,25 @@ const { asyncHandler } = require('../../core/middleware');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 const cacheInvalidation = require('../cacheInvalidation');
 const mongoose = require('mongoose');
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../../warehouse/constants/warehouseScope');
 const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const STATUS_VALUES = ['active', 'offline', 'inactive', 'maintenance'];
 const SERVICE_STATUS_VALUES = ['Full', 'Partial', 'None'];
+
+function resolveWarehouseKey(req) {
+  const role = String(req.user?.role || '').toLowerCase();
+  const isSuperAdmin = role === 'super_admin' || role === 'superadmin';
+  const explicit = req.query?.warehouseKey || req.body?.warehouseKey;
+
+  if (isSuperAdmin) {
+    if (!explicit) {
+      throw new ErrorResponse('warehouseKey query param is required for super_admin', 400);
+    }
+    return explicit;
+  }
+
+  return req.user?.warehouseKey;
+}
 
 const toTitleDay = (key = '') => {
   const v = String(key).trim().toLowerCase();
@@ -134,21 +150,37 @@ function transformStore(doc) {
     pincode: doc.pincode,
     latitude: lat,
     longitude: lng,
+    x: doc.x,
+    y: doc.y,
+    zones: doc.zones ?? [],
     phone: doc.phone,
     email: doc.email,
     manager: managerName,
     managerId: doc.managerId?._id ?? doc.managerId,
     status: doc.status ?? (doc.serviceStatus === 'Full' ? 'active' : doc.serviceStatus === 'None' ? 'offline' : 'inactive'),
+    serviceStatus: doc.serviceStatus,
     deliveryRadius: doc.deliveryRadius ?? 5,
     maxCapacity: doc.maxCapacity ?? 100,
     currentLoad: doc.currentLoad ?? 0,
     operationalHours,
+    metadata: doc.metadata,
     staffCount: doc.staffCount ?? 0,
     rating: doc.rating ?? 0,
     totalOrders: doc.totalOrders ?? 0,
     revenue: doc.revenue ?? 0,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
+  };
+}
+
+function transformWarehouseResponse(doc) {
+  const base = transformStore(doc);
+  if (!base) return null;
+  return {
+    ...base,
+    storageCapacity: doc.maxCapacity ?? 0,
+    currentUtilization:
+      doc.currentLoad != null ? Math.round((doc.currentLoad / (doc.maxCapacity || 1)) * 100) : 0,
   };
 }
 
@@ -304,15 +336,21 @@ const storeWarehouseController = {
     if (!store) {
       throw new ErrorResponse('Store not found', 404);
     }
+    const warehouseKey = resolveWarehouseKey(req);
 
     const zoneName = store.zoneId?.name ?? (store.zones && store.zones[0]);
     if (zoneName) {
       try {
         const Order = require('../../warehouse/models/Order');
-        const activeCount = await Order.countDocuments({
-          zone: zoneName,
-          status: { $nin: ['delivered', 'rto', 'returned'] },
-        });
+        const activeCount = await Order.countDocuments(
+          mergeWarehouseFilter(
+            {
+              zone: zoneName,
+              status: { $nin: ['delivered', 'rto', 'returned'] },
+            },
+            warehouseKey
+          )
+        );
         if (activeCount > 0) {
           throw new ErrorResponse(
             'Cannot delete store with active orders. Set status to Offline first.',
@@ -367,7 +405,17 @@ const storeWarehouseController = {
       storageCapacity: s.maxCapacity ?? 0,
       currentUtilization: s.currentLoad != null ? Math.round((s.currentLoad / (s.maxCapacity || 1)) * 100) : 0,
       manager: s.managerId?.name ?? s.manager ?? '',
+      managerId: s.managerId?._id ?? s.managerId,
       status: s.status ?? 'active',
+      phone: s.phone,
+      email: s.email,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      deliveryRadius: s.deliveryRadius,
+      currentLoad: s.currentLoad,
+      serviceStatus: s.serviceStatus,
+      zones: s.zones ?? [],
+      metadata: s.metadata,
       createdAt: s.createdAt,
     }));
     const totalPages = Math.ceil(total / limitNum);
@@ -385,28 +433,7 @@ const storeWarehouseController = {
       .populate('managerId', 'name email')
       .lean();
     if (!store) throw new ErrorResponse('Warehouse not found', 404);
-    res.json({
-      success: true,
-      data: {
-        id: store._id.toString(),
-        name: store.name,
-        code: store.code ?? `WH-${store._id}`,
-        address: store.address,
-        city: store.cityId?.name ?? store.city ?? '',
-        cityId: store.cityId?._id ?? store.cityId,
-        zone: store.zoneId?.name ?? (store.zones && store.zones[0]) ?? '',
-        zoneId: store.zoneId?._id ?? store.zoneId,
-        storageCapacity: store.maxCapacity ?? 0,
-        currentUtilization: store.currentLoad != null ? Math.round((store.currentLoad / (store.maxCapacity || 1)) * 100) : 0,
-        manager: store.managerId?.name ?? store.manager ?? '',
-        managerId: store.managerId?._id ?? store.managerId,
-        status: store.status ?? 'active',
-        phone: store.phone,
-        email: store.email,
-        createdAt: store.createdAt,
-        updatedAt: store.updatedAt,
-      },
-    });
+    res.json({ success: true, data: transformWarehouseResponse(store) });
   }),
 
   createWarehouse: asyncHandler(async (req, res) => {
@@ -443,21 +470,7 @@ const storeWarehouseController = {
       .lean();
     res.status(201).json({
       success: true,
-      data: {
-        id: populated._id.toString(),
-        name: populated.name,
-        code: populated.code,
-        address: populated.address,
-        city: populated.cityId?.name ?? '',
-        cityId: populated.cityId?._id,
-        zone: populated.zoneId?.name ?? '',
-        zoneId: populated.zoneId?._id,
-        storageCapacity: populated.maxCapacity ?? 0,
-        currentUtilization: 0,
-        manager: populated.managerId?.name ?? '',
-        status: populated.status ?? 'active',
-        createdAt: populated.createdAt,
-      },
+      data: transformWarehouseResponse(populated),
     });
   }),
 
@@ -502,21 +515,7 @@ const storeWarehouseController = {
       .lean();
     res.json({
       success: true,
-      data: {
-        id: populated._id.toString(),
-        name: populated.name,
-        code: populated.code,
-        address: populated.address,
-        city: populated.cityId?.name ?? '',
-        cityId: populated.cityId?._id,
-        zone: populated.zoneId?.name ?? '',
-        zoneId: populated.zoneId?._id,
-        storageCapacity: populated.maxCapacity ?? 0,
-        currentUtilization: populated.currentLoad != null ? Math.round((populated.currentLoad / (populated.maxCapacity || 1)) * 100) : 0,
-        manager: populated.managerId?.name ?? '',
-        status: populated.status ?? 'active',
-        updatedAt: populated.updatedAt,
-      },
+      data: transformWarehouseResponse(populated),
     });
   }),
 
@@ -531,12 +530,13 @@ const storeWarehouseController = {
 
   // Staff
   listStaff: asyncHandler(async (req, res) => {
+    const warehouseKey = resolveWarehouseKey(req);
     const { storeId, role, status } = req.query;
     const filter = {};
     if (storeId && mongoose.Types.ObjectId.isValid(storeId)) filter.storeId = storeId;
     if (role) filter.role = role;
     if (status) filter.status = status;
-    const staff = await Staff.find(filter)
+    const staff = await Staff.find(mergeWarehouseFilter(filter, warehouseKey))
       .populate('storeId', 'name code')
       .sort({ name: 1 })
       .lean();
@@ -561,7 +561,8 @@ const storeWarehouseController = {
   }),
 
   getStaff: asyncHandler(async (req, res) => {
-    const staff = await Staff.findById(req.params.id).lean();
+    const warehouseKey = resolveWarehouseKey(req);
+    const staff = await Staff.findOne(mergeWarehouseFilter({ _id: req.params.id }, warehouseKey)).lean();
     if (!staff) {
       throw new ErrorResponse('Staff not found', 404);
     }
@@ -569,13 +570,23 @@ const storeWarehouseController = {
   }),
 
   createStaff: asyncHandler(async (req, res) => {
-    const staff = await Staff.create(req.body);
+    const warehouseKey = resolveWarehouseKey(req);
+    const body = { ...req.body };
+    delete body.warehouseKey;
+    const staff = await Staff.create({ ...body, ...warehouseFieldsForCreate(warehouseKey) });
     await cacheInvalidation.invalidateStaff().catch(() => {});
     res.status(201).json({ success: true, data: staff });
   }),
 
   updateStaff: asyncHandler(async (req, res) => {
-    const staff = await Staff.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const warehouseKey = resolveWarehouseKey(req);
+    const updates = { ...req.body };
+    delete updates.warehouseKey;
+    const staff = await Staff.findOneAndUpdate(
+      mergeWarehouseFilter({ _id: req.params.id }, warehouseKey),
+      { ...updates, ...warehouseFieldsForCreate(warehouseKey) },
+      { new: true, runValidators: true }
+    );
     if (!staff) {
       throw new ErrorResponse('Staff not found', 404);
     }
@@ -584,7 +595,10 @@ const storeWarehouseController = {
   }),
 
   deleteStaff: asyncHandler(async (req, res) => {
-    const staff = await Staff.findByIdAndDelete(req.params.id);
+    const warehouseKey = resolveWarehouseKey(req);
+    const staff = await Staff.findOneAndDelete(
+      mergeWarehouseFilter({ _id: req.params.id }, warehouseKey)
+    );
     if (!staff) {
       throw new ErrorResponse('Staff not found', 404);
     }
@@ -612,8 +626,9 @@ const storeWarehouseController = {
   }),
 
   getStoreStats: asyncHandler(async (req, res) => {
+    const warehouseKey = resolveWarehouseKey(req);
     const stores = await Store.find().lean();
-    const staff = await Staff.find().lean();
+    const staff = await Staff.find(warehouseKeyMatch(warehouseKey)).lean();
     const activeStatus = ['active'];
     const activeCount = stores.filter((s) => activeStatus.includes(s.status) || s.serviceStatus === 'Full').length;
     const warehouseCount = stores.filter((s) => s.type === 'warehouse').length;

@@ -10,7 +10,7 @@ const outboundController = {
    * @desc    List all picklists
    */
   getPicklists: asyncHandler(async (req, res) => {
-    const picklists = await outboundService.listPicklists(req.query);
+    const picklists = await outboundService.listPicklists(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: picklists, meta: { count: picklists.length } });
   }),
 
@@ -19,7 +19,7 @@ const outboundController = {
    * @desc    Get picklist details
    */
   getPicklistDetails: asyncHandler(async (req, res) => {
-    const picklist = await outboundService.getPicklistById(req.params.id);
+    const picklist = await outboundService.getPicklistById(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: picklist });
   }),
 
@@ -30,7 +30,7 @@ const outboundController = {
   assignPicker: asyncHandler(async (req, res) => {
     const { pickerId, pickerName } = req.body;
     const picker = pickerId || pickerName;
-    const picklist = await outboundService.assignPicker(req.params.id, picker);
+    const picklist = await outboundService.assignPicker(req.user.warehouseKey, req.params.id, picker);
     res.status(200).json({ success: true, data: picklist, meta: { message: 'Picker assigned successfully' } });
   }),
 
@@ -39,7 +39,7 @@ const outboundController = {
    * @desc    List all batches
    */
   listBatches: asyncHandler(async (req, res) => {
-    const batches = await outboundService.listBatches(req.query);
+    const batches = await outboundService.listBatches(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: batches, meta: { count: batches.length } });
   }),
 
@@ -48,7 +48,7 @@ const outboundController = {
    * @desc    Create new picking batch
    */
   createBatch: asyncHandler(async (req, res) => {
-    const batch = await outboundService.createBatch(req.body);
+    const batch = await outboundService.createBatch(req.user.warehouseKey, req.body);
     res.status(201).json({ success: true, data: batch });
   }),
 
@@ -57,7 +57,7 @@ const outboundController = {
    * @desc    Get batch details
    */
   getBatchDetails: asyncHandler(async (req, res) => {
-    const batch = await outboundService.getBatchById(req.params.id);
+    const batch = await outboundService.getBatchById(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: batch });
   }),
 
@@ -66,7 +66,7 @@ const outboundController = {
    * @desc    Get picker status
    */
   getPickers: asyncHandler(async (req, res) => {
-    const pickers = await outboundService.listPickers();
+    const pickers = await outboundService.listPickers(req.user.warehouseKey);
     res.status(200).json({ success: true, data: pickers, meta: { count: pickers.length } });
   }),
 
@@ -75,7 +75,7 @@ const outboundController = {
    * @desc    Get orders for a specific picker
    */
   getPickerOrders: asyncHandler(async (req, res) => {
-    const orders = await outboundService.getPickerOrders(req.params.id);
+    const orders = await outboundService.getPickerOrders(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: orders, meta: { count: orders.length } });
   }),
 
@@ -84,7 +84,7 @@ const outboundController = {
    * @desc    Get all active routes
    */
   getActiveRoutes: asyncHandler(async (req, res) => {
-    const routes = await outboundService.getActiveRoutes();
+    const routes = await outboundService.getActiveRoutes(req.user.warehouseKey);
     res.status(200).json({ success: true, data: routes, meta: { count: routes.length } });
   }),
 
@@ -102,7 +102,7 @@ const outboundController = {
    * @desc    Get consolidated multi-order picks
    */
   getConsolidatedPicks: asyncHandler(async (req, res) => {
-    const picks = await outboundService.getConsolidatedPicks(req.query);
+    const picks = await outboundService.getConsolidatedPicks(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: picks, meta: { count: picks.length } });
   })
 };

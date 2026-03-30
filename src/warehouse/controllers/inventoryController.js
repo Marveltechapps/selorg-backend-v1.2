@@ -1,86 +1,97 @@
 const inventoryService = require('../services/inventoryService');
 const { asyncHandler } = require('../../core/middleware');
+const { mergeWarehouseFilter } = require('../constants/warehouseScope');
 
 /**
  * @desc Inventory Operations Controller
  */
 const inventoryController = {
   getInventorySummary: asyncHandler(async (req, res) => {
-    const summary = await inventoryService.getInventorySummary();
+    const summary = await inventoryService.getInventorySummary(req.user.warehouseKey);
     res.status(200).json({ success: true, data: summary });
   }),
 
   listStorageLocations: asyncHandler(async (req, res) => {
-    const result = await inventoryService.listStorageLocations(req.query);
+    const result = await inventoryService.listStorageLocations(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: result.items, meta: result.meta });
   }),
 
   listInventoryItems: asyncHandler(async (req, res) => {
-    const result = await inventoryService.listInventoryItems(req.query);
+    const result = await inventoryService.listInventoryItems(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: result.items, meta: result.meta });
   }),
 
   listAdjustments: asyncHandler(async (req, res) => {
-    const result = await inventoryService.listAdjustments(req.query);
+    const result = await inventoryService.listAdjustments(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: result.items, meta: result.meta });
   }),
 
   createAdjustment: asyncHandler(async (req, res) => {
-    const adj = await inventoryService.createAdjustment(req.body);
+    const adj = await inventoryService.createAdjustment(req.user.warehouseKey, req.body);
     res.status(201).json({ success: true, data: adj });
   }),
 
   listCycleCounts: asyncHandler(async (req, res) => {
-    const result = await inventoryService.listCycleCounts(req.query);
+    const result = await inventoryService.listCycleCounts(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: result.items, meta: result.meta });
   }),
 
   createCycleCount: asyncHandler(async (req, res) => {
-    const cc = await inventoryService.createCycleCount(req.body);
+    const cc = await inventoryService.createCycleCount(req.user.warehouseKey, req.body);
     res.status(201).json({ success: true, data: cc });
   }),
 
   startCycleCount: asyncHandler(async (req, res) => {
-    const cc = await inventoryService.startCycleCount(req.params.id);
+    const cc = await inventoryService.startCycleCount(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: cc, meta: { message: 'Cycle count started' } });
   }),
 
   completeCycleCount: asyncHandler(async (req, res) => {
-    const cc = await inventoryService.completeCycleCount(req.params.id);
+    const cc = await inventoryService.completeCycleCount(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: cc, meta: { message: 'Cycle count completed' } });
   }),
 
   listInternalTransfers: asyncHandler(async (req, res) => {
-    const result = await inventoryService.listInternalTransfers(req.query);
+    const result = await inventoryService.listInternalTransfers(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: result.items, meta: result.meta });
   }),
 
   createInternalTransfer: asyncHandler(async (req, res) => {
-    const trf = await inventoryService.createInternalTransfer(req.body);
+    const trf = await inventoryService.createInternalTransfer(req.user.warehouseKey, req.body);
     res.status(201).json({ success: true, data: trf });
   }),
 
   updateTransferStatus: asyncHandler(async (req, res) => {
-    const trf = await inventoryService.updateTransferStatus(req.params.id, req.body.status);
+    const trf = await inventoryService.updateTransferStatus(req.user.warehouseKey, req.params.id, req.body.status);
     res.status(200).json({ success: true, data: trf, meta: { message: 'Transfer status updated' } });
   }),
 
   listStockAlerts: asyncHandler(async (req, res) => {
-    const result = await inventoryService.listStockAlerts(req.query);
+    const result = await inventoryService.listStockAlerts(req.user.warehouseKey, req.query);
     res.status(200).json({ success: true, data: result.items, meta: result.meta });
   }),
 
   // Stubs for routes that exist in inventoryRoutes but need minimal impl
   getStorageLocationById: asyncHandler(async (req, res) => {
     const StorageLocation = require('../models/StorageLocation');
-    const loc = await StorageLocation.findOne({ $or: [{ id: req.params.id }, { _id: req.params.id }] });
+    const loc = await StorageLocation.findOne(
+      mergeWarehouseFilter(
+        { $or: [{ id: req.params.id }, { _id: req.params.id }] },
+        req.user.warehouseKey
+      )
+    );
     if (!loc) return res.status(404).json({ success: false, message: 'Location not found' });
     res.status(200).json({ success: true, data: loc });
   }),
 
   getInventoryItemById: asyncHandler(async (req, res) => {
     const InventoryItem = require('../models/InventoryItem');
-    const item = await InventoryItem.findOne({ $or: [{ id: req.params.id }, { sku: req.params.id }, { _id: req.params.id }] });
+    const item = await InventoryItem.findOne(
+      mergeWarehouseFilter(
+        { $or: [{ id: req.params.id }, { sku: req.params.id }, { _id: req.params.id }] },
+        req.user.warehouseKey
+      )
+    );
     if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
     res.status(200).json({ success: true, data: item });
   }),
@@ -88,7 +99,7 @@ const inventoryController = {
   updateInventoryItem: asyncHandler(async (req, res) => {
     const InventoryItem = require('../models/InventoryItem');
     const item = await InventoryItem.findOneAndUpdate(
-      { $or: [{ id: req.params.id }, { _id: req.params.id }] },
+      mergeWarehouseFilter({ $or: [{ id: req.params.id }, { _id: req.params.id }] }, req.user.warehouseKey),
       { $set: req.body },
       { new: true }
     );
@@ -98,7 +109,12 @@ const inventoryController = {
 
   getCycleCountById: asyncHandler(async (req, res) => {
     const CycleCount = require('../models/CycleCount');
-    const cc = await CycleCount.findOne({ $or: [{ id: req.params.id }, { countId: req.params.id }, { _id: req.params.id }] });
+    const cc = await CycleCount.findOne(
+      mergeWarehouseFilter(
+        { $or: [{ id: req.params.id }, { countId: req.params.id }, { _id: req.params.id }] },
+        req.user.warehouseKey
+      )
+    );
     if (!cc) return res.status(404).json({ success: false, message: 'Cycle count not found' });
     res.status(200).json({ success: true, data: cc });
   }),
@@ -106,7 +122,7 @@ const inventoryController = {
   updateCycleCount: asyncHandler(async (req, res) => {
     const CycleCount = require('../models/CycleCount');
     const cc = await CycleCount.findOneAndUpdate(
-      { $or: [{ id: req.params.id }, { _id: req.params.id }] },
+      mergeWarehouseFilter({ $or: [{ id: req.params.id }, { _id: req.params.id }] }, req.user.warehouseKey),
       { $set: req.body },
       { new: true }
     );
@@ -116,7 +132,12 @@ const inventoryController = {
 
   getInternalTransferById: asyncHandler(async (req, res) => {
     const InternalTransfer = require('../models/InternalTransfer');
-    const trf = await InternalTransfer.findOne({ $or: [{ id: req.params.id }, { transferId: req.params.id }, { _id: req.params.id }] });
+    const trf = await InternalTransfer.findOne(
+      mergeWarehouseFilter(
+        { $or: [{ id: req.params.id }, { transferId: req.params.id }, { _id: req.params.id }] },
+        req.user.warehouseKey
+      )
+    );
     if (!trf) return res.status(404).json({ success: false, message: 'Transfer not found' });
     res.status(200).json({ success: true, data: trf });
   }),

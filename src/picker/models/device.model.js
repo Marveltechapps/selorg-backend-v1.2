@@ -8,7 +8,8 @@ const { DEVICE_STATUS } = require('../../constants/pickerEnums');
 
 const deviceSchema = new mongoose.Schema(
   {
-    deviceId: { type: String, required: true, unique: true },
+    warehouseKey: { type: String, trim: true, index: true },
+    deviceId: { type: String, required: true },
     serial: { type: String },
     status: { type: String, enum: Object.values(DEVICE_STATUS), default: DEVICE_STATUS.AVAILABLE },
     assignedPickerId: { type: mongoose.Schema.Types.ObjectId, ref: 'PickerUser', default: null },
@@ -25,5 +26,6 @@ const deviceSchema = new mongoose.Schema(
 deviceSchema.index({ status: 1 });
 deviceSchema.index({ assignedPickerId: 1 });
 deviceSchema.index({ deviceId: 'text', serial: 'text' });
+deviceSchema.index({ warehouseKey: 1, deviceId: 1 }, { unique: true });
 
 module.exports = mongoose.model('PickerDevice', deviceSchema);

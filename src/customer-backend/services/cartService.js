@@ -13,6 +13,26 @@ async function getCartForUser(userId) {
   return formatCartResponse(cart);
 }
 
+function matchCartLine(it, productId, variantId) {
+  return (
+    String(it.productId) === String(productId) && String(it.variantId || '') === String(variantId ?? '')
+  );
+}
+
+/**
+ * Find a cart line by Mongo subdocument id, or by product + variant (when id missing on client).
+ */
+function findCartLine(cart, itemId, productId, variantId) {
+  if (itemId) {
+    const byId = cart.items.id(itemId);
+    if (byId) return byId;
+  }
+  if (productId != null) {
+    return cart.items.find((it) => matchCartLine(it, productId, variantId));
+  }
+  return null;
+}
+
 function formatCartResponse(cart) {
   const items = (cart.items || []).map((it) => ({
     id: String(it._id),
@@ -88,13 +108,14 @@ async function addItem(userId, body) {
 }
 
 /**
- * Update cart item quantity by item id (cart item _id).
+ * Update cart item quantity by line-item id and/or productId + variantId (fallback when id missing on client).
  */
-async function updateItem(userId, itemId, quantity) {
+async function updateItem(userId, itemId, quantity, opts = {}) {
+  const { productId, variantId } = opts;
   if (quantity == null || quantity < 0) return { error: 'Invalid quantity' };
   const cart = await Cart.findOne({ userId });
   if (!cart) return { error: 'Cart not found' };
-  const item = cart.items.id(itemId);
+  const item = findCartLine(cart, itemId, productId, variantId);
   if (!item) return { error: 'Item not found' };
   if (quantity === 0) {
     item.remove();
@@ -107,12 +128,13 @@ async function updateItem(userId, itemId, quantity) {
 }
 
 /**
- * Remove one item from cart by item id.
+ * Remove one item from cart by item id, or by productId + variantId.
  */
-async function removeItem(userId, itemId) {
+async function removeItem(userId, itemId, opts = {}) {
+  const { productId, variantId } = opts;
   const cart = await Cart.findOne({ userId });
   if (!cart) return { error: 'Cart not found' };
-  const item = cart.items.id(itemId);
+  const item = findCartLine(cart, itemId, productId, variantId);
   if (!item) return { error: 'Item not found' };
   item.remove();
   await cart.save();

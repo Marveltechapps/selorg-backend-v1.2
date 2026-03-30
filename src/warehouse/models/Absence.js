@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const AbsenceSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   staffId: {
@@ -45,7 +45,8 @@ const AbsenceSchema = new mongoose.Schema({
 
 AbsenceSchema.index({ staffId: 1, date: 1 });
 AbsenceSchema.index({ date: 1, type: 1 });
+AbsenceSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 
-module.exports = Absence;
+module.exports = mongoose.models.Absence || mongoose.model('Absence', AbsenceSchema);
 

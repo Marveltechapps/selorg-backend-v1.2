@@ -38,16 +38,36 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
   ]);
 
   const subcategoryIds = subcategories.map((s) => s._id);
-  const productCategoryIds = subCategoryId
-    ? [new mongoose.Types.ObjectId(subCategoryId)]
-    : [catId, ...subcategoryIds];
 
-  const products = await Product.find({
-    categoryId: { $in: productCategoryIds },
+  // Product taxonomy:
+  // - `Product.categoryId` = level-1 category (main category)
+  // - `Product.subcategoryId` = level-2 category (sub category)
+  // When user selects a subcategory, we must filter by `subcategoryId`,
+  // otherwise the product grid becomes empty.
+  const productQueryBase = {
     isActive: true,
     isSaleable: true,
     classification: 'Style',
-  })
+  };
+
+  const products = await Product.find(
+    subCategoryId
+      ? {
+          ...productQueryBase,
+          $or: [
+            { categoryId: new mongoose.Types.ObjectId(subCategoryId) },
+            { subcategoryId: new mongoose.Types.ObjectId(subCategoryId) },
+          ],
+        }
+      : {
+          ...productQueryBase,
+          $or: [
+            { categoryId: catId },
+            { subcategoryId: { $in: subcategoryIds } },
+            { categoryId: { $in: subcategoryIds } },
+          ],
+        }
+  )
     .sort({ order: 1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
     .lean();

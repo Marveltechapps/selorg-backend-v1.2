@@ -8,7 +8,7 @@ const { asyncHandler } = require('../../core/middleware');
 const devicesController = {
   list: asyncHandler(async (req, res) => {
     const { status, search } = req.query;
-    const devices = await devicesService.listDevices({ status, search });
+    const devices = await devicesService.listDevices(req.user.warehouseKey, { status, search });
     res.status(200).json({ success: true, data: devices, meta: { count: devices.length } });
   }),
 
@@ -17,7 +17,7 @@ const devicesController = {
     if (!deviceId) {
       return res.status(400).json({ success: false, message: 'deviceId is required' });
     }
-    const device = await devicesService.createDevice({ deviceId, serial });
+    const device = await devicesService.createDevice(req.user.warehouseKey, { deviceId, serial });
     await cacheInvalidation.invalidateWarehouse().catch(() => {});
     res.status(201).json({ success: true, data: device });
   }),
@@ -28,7 +28,7 @@ const devicesController = {
     if (!action) {
       return res.status(400).json({ success: false, message: 'action is required (assign, return, mark_damaged)' });
     }
-    const device = await devicesService.patchDevice(id, action, { pickerId, condition, photoUrl });
+    const device = await devicesService.patchDevice(req.user.warehouseKey, id, action, { pickerId, condition, photoUrl });
     if (!device) {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }

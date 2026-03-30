@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 
 const rawMaterialSchema = new mongoose.Schema(
   {
+    // Hub scope (e.g. Chennai Hub). Production UI always sends `storeId`.
+    store_id: { type: String, required: false, index: true },
     name: { type: String, required: true },
     currentStock: { type: Number, required: true, min: 0, default: 0 },
     unit: { type: String, required: true, default: 'kg' },
@@ -17,5 +19,6 @@ const rawMaterialSchema = new mongoose.Schema(
 
 rawMaterialSchema.index({ name: 'text', category: 'text' });
 rawMaterialSchema.index({ currentStock: 1 });
+rawMaterialSchema.index({ store_id: 1, name: 1 });
 
 module.exports = mongoose.models.RawMaterial || mongoose.model('RawMaterial', rawMaterialSchema, 'prod_raw_materials');

@@ -1,16 +1,19 @@
 const mongoose = require('mongoose');
 
 const InventoryItemSchema = new mongoose.Schema({
+  warehouseKey: {
+    type: String,
+    trim: true,
+    index: true,
+  },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   sku: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     index: true,
   },
@@ -76,6 +79,8 @@ InventoryItemSchema.pre('save', function(next) {
 });
 
 // Indexes for performance
+InventoryItemSchema.index({ warehouseKey: 1, sku: 1 }, { unique: true });
+InventoryItemSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 InventoryItemSchema.index({ category: 1, currentStock: 1 });
 InventoryItemSchema.index({ sku: 'text', productName: 'text' });
 InventoryItemSchema.index({ location: 1 });

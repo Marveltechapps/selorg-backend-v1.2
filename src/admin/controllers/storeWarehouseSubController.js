@@ -7,6 +7,22 @@ const InternalTransfer = require('../../warehouse/models/InternalTransfer');
 const inboundService = require('../../warehouse/services/inboundService');
 const { asyncHandler } = require('../../core/middleware');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
+const { mergeWarehouseFilter, warehouseKeyMatch } = require('../../warehouse/constants/warehouseScope');
+
+function resolveWarehouseKey(req) {
+  const role = String(req.user?.role || '').toLowerCase();
+  const isSuperAdmin = role === 'super_admin' || role === 'superadmin';
+  const explicit = req.query?.warehouseKey || req.body?.warehouseKey;
+
+  if (isSuperAdmin) {
+    if (!explicit) {
+      throw new ErrorResponse('warehouseKey query param is required for super_admin', 400);
+    }
+    return explicit;
+  }
+
+  return req.user?.warehouseKey;
+}
 
 /**
  * Delivery zones: Zone + Store linkage, shaped for Store & Warehouse UI
@@ -42,11 +58,17 @@ const getDeliveryZones = asyncHandler(async (req, res) => {
  * Inventories: admin-scoped list of inventory items (from warehouse)
  */
 const getInventories = asyncHandler(async (req, res) => {
+  const warehouseKey = resolveWarehouseKey(req);
   const page = parseInt(req.query.page) || 1;
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
   const skip = (page - 1) * limit;
-  const total = await InventoryItem.countDocuments({});
-  const items = await InventoryItem.find({}).sort({ lastUpdated: -1 }).skip(skip).limit(limit).lean();
+  const scopedWh = warehouseKeyMatch(warehouseKey);
+  const total = await InventoryItem.countDocuments(scopedWh);
+  const items = await InventoryItem.find(scopedWh)
+    .sort({ lastUpdated: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
   const data = items.map((i) => ({
     id: i._id?.toString() ?? i.id,
     sku: i.sku,
@@ -67,7 +89,13 @@ const getInventories = asyncHandler(async (req, res) => {
 });
 
 const getInventoryItemById = asyncHandler(async (req, res) => {
-  const item = await InventoryItem.findOne({ $or: [{ id: req.params.id }, { _id: req.params.id }] }).lean();
+  const warehouseKey = resolveWarehouseKey(req);
+  const item = await InventoryItem.findOne(
+    mergeWarehouseFilter(
+      { $or: [{ id: req.params.id }, { _id: req.params.id }] },
+      warehouseKey
+    )
+  ).lean();
   if (!item) throw new ErrorResponse('Inventory item not found', 404);
   res.json({
     success: true,
@@ -90,13 +118,18 @@ const getInventoryItemById = asyncHandler(async (req, res) => {
  * Stock movements: combines internal transfers and adjustments
  */
 const getStockMovements = asyncHandler(async (req, res) => {
+  const warehouseKey = resolveWarehouseKey(req);
   const page = parseInt(req.query.page) || 1;
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
   const skip = (page - 1) * limit;
 
   const [transfers, totalTransfers] = await Promise.all([
-    InternalTransfer.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    InternalTransfer.countDocuments({}),
+    InternalTransfer.find(warehouseKeyMatch(warehouseKey))
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    InternalTransfer.countDocuments(warehouseKeyMatch(warehouseKey)),
   ]);
   const data = transfers.map((t) => ({
     id: t._id?.toString(),
@@ -122,7 +155,8 @@ const getStockMovements = asyncHandler(async (req, res) => {
  * GRNs: admin-scoped proxy to warehouse inbound
  */
 const getGRNs = asyncHandler(async (req, res) => {
-  const result = await inboundService.listGRNs({
+  const warehouseKey = resolveWarehouseKey(req);
+  const result = await inboundService.listGRNs(warehouseKey, {
     ...req.query,
     page: parseInt(req.query.page) || 1,
     limit: parseInt(req.query.limit) || 20,
@@ -148,7 +182,8 @@ const getGRNs = asyncHandler(async (req, res) => {
 });
 
 const getGRNById = asyncHandler(async (req, res) => {
-  const grn = await inboundService.getGRNById(req.params.id);
+  const warehouseKey = resolveWarehouseKey(req);
+  const grn = await inboundService.getGRNById(warehouseKey, req.params.id);
   res.json({
     success: true,
     data: {
@@ -208,11 +243,17 @@ const getPutawayTasks = asyncHandler(async (req, res) => {
  * Bins (storage locations): admin-scoped list of storage locations
  */
 const getBins = asyncHandler(async (req, res) => {
+  const warehouseKey = resolveWarehouseKey(req);
   const page = parseInt(req.query.page) || 1;
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
   const skip = (page - 1) * limit;
-  const total = await StorageLocation.countDocuments({});
-  const items = await StorageLocation.find({}).sort({ aisle: 1, rack: 1, shelf: 1 }).skip(skip).limit(limit).lean();
+  const scopedWh = warehouseKeyMatch(warehouseKey);
+  const total = await StorageLocation.countDocuments(scopedWh);
+  const items = await StorageLocation.find(scopedWh)
+    .sort({ aisle: 1, rack: 1, shelf: 1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
   const data = items.map((s) => ({
     id: s._id?.toString() ?? s.id,
     aisle: s.aisle,
@@ -231,9 +272,13 @@ const getBins = asyncHandler(async (req, res) => {
 });
 
 const getBinById = asyncHandler(async (req, res) => {
-  const loc = await StorageLocation.findOne({
-    $or: [{ id: req.params.id }, { _id: req.params.id }],
-  }).lean();
+  const warehouseKey = resolveWarehouseKey(req);
+  const loc = await StorageLocation.findOne(
+    mergeWarehouseFilter(
+      { $or: [{ id: req.params.id }, { _id: req.params.id }] },
+      warehouseKey
+    )
+  ).lean();
   if (!loc) throw new ErrorResponse('Storage location not found', 404);
   res.json({
     success: true,

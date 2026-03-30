@@ -1,12 +1,15 @@
 const mongoose = require('mongoose');
 
 const WarehouseAttendanceSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
+  warehouseKey: { type: String, trim: true, index: true },
+  id: { type: String, required: true, index: true },
   staffId: { type: String, required: true, index: true },
   status: { type: String, enum: ['check-in', 'check-out'], required: true },
   timestamp: { type: Date, default: Date.now },
   location: { type: String, default: 'Main Gate' }
 }, { timestamps: true, collection: 'warehouse_attendance' });
+
+WarehouseAttendanceSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 module.exports = mongoose.models.WarehouseAttendance || mongoose.model('WarehouseAttendance', WarehouseAttendanceSchema);
 

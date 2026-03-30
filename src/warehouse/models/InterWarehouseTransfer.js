@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const InterWarehouseTransferSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
+  warehouseKey: { type: String, trim: true, index: true },
+  id: { type: String, required: true, index: true },
   origin: { type: String, default: 'Current Warehouse' },
   destination: { type: String, required: true },
   status: { type: String, enum: ['pending', 'loading', 'en-route', 'completed', 'cancelled'], default: 'pending' },
@@ -13,6 +14,8 @@ const InterWarehouseTransferSchema = new mongoose.Schema({
   requestedBy: { type: String },
   requestedAt: { type: Date, default: Date.now }
 }, { timestamps: true, collection: 'warehouse_inter_transfers' });
+
+InterWarehouseTransferSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 module.exports = mongoose.models.InterWarehouseTransfer || mongoose.model('InterWarehouseTransfer', InterWarehouseTransferSchema);
 

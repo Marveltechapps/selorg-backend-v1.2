@@ -12,7 +12,7 @@ const listOrders = async (req, res, next) => {
     const pagination = { page: parseInt(page) || 1, limit: parseInt(limit) || 5 };
     const sorting = { sortBy: sortBy || 'etaMinutes', sortOrder: sortOrder || 'asc' };
     
-    const result = await orderService.listOrders(filters, pagination, sorting);
+    const result = await orderService.listOrders(req.user.warehouseKey, filters, pagination, sorting);
 
     // Standardized response envelope (success, data, meta)
     res.status(200).json({
@@ -36,7 +36,7 @@ const assignOrder = async (req, res, next) => {
     const { orderId } = req.params;
     const { riderId, overrideSla = false } = req.body;
     
-    const order = await orderService.assignOrder(orderId, riderId, overrideSla);
+    const order = await orderService.assignOrder(req.user.warehouseKey, orderId, riderId, overrideSla);
     
     // Invalidate all related cache entries
     await cache.delByPattern('orders:*');
@@ -77,7 +77,7 @@ const alertOrder = async (req, res, next) => {
     const { orderId } = req.params;
     const { reason } = req.body;
     
-    const result = await orderService.alertOrder(orderId, reason);
+    const result = await orderService.alertOrder(req.user.warehouseKey, orderId, reason);
     
     // Invalidate cache
     await cache.delByPattern('orders:*');

@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const InventoryAdjustmentSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   type: {
@@ -51,6 +51,8 @@ const InventoryAdjustmentSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'inventory_adjustments',
 });
+
+InventoryAdjustmentSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 // Indexes for performance
 InventoryAdjustmentSchema.index({ sku: 1, timestamp: -1 });

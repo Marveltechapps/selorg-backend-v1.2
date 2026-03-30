@@ -1,16 +1,15 @@
 const mongoose = require('mongoose');
 
 const InternalTransferSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   transferId: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     index: true,
   },
@@ -69,6 +68,9 @@ const InternalTransferSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'internal_transfers',
 });
+
+InternalTransferSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
+InternalTransferSchema.index({ warehouseKey: 1, transferId: 1 }, { unique: true });
 
 // Indexes for performance
 InternalTransferSchema.index({ status: 1, timestamp: -1 });

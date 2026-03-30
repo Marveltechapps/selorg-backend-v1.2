@@ -1,15 +1,18 @@
 const WarehouseException = require('../models/WarehouseException');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Exception Management Service
  */
 const exceptionsService = {
-  listExceptions: async (filters = {}) => {
+  listExceptions: async (warehouseKey, filters = {}) => {
     const query = {};
     if (filters.status) query.status = filters.status;
     if (filters.priority) query.priority = filters.priority;
-    const items = await WarehouseException.find(query).sort({ createdAt: -1 }).lean();
+    const items = await WarehouseException.find(mergeWarehouseFilter(query, warehouseKey))
+      .sort({ createdAt: -1 })
+      .lean();
     return items.map(e => ({
       id: e.id,
       priority: e.priority,
@@ -21,22 +24,22 @@ const exceptionsService = {
     }));
   },
 
-  reportException: async (data) => {
+  reportException: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await WarehouseException.countDocuments();
+      const count = await WarehouseException.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `EXC-${(count + 1).toString().padStart(3, '0')}`;
     }
-    return await WarehouseException.create(data);
+    return await WarehouseException.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
-  getExceptionById: async (id) => {
-    const exception = await WarehouseException.findOne({ id });
+  getExceptionById: async (warehouseKey, id) => {
+    const exception = await WarehouseException.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!exception) throw new ErrorResponse(`Exception not found with id ${id}`, 404);
     return exception;
   },
 
-  updateStatus: async (id, status) => {
-    const exception = await WarehouseException.findOne({ id });
+  updateStatus: async (warehouseKey, id, status) => {
+    const exception = await WarehouseException.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!exception) throw new ErrorResponse(`Exception not found with id ${id}`, 404);
     
     exception.status = status;
@@ -47,8 +50,8 @@ const exceptionsService = {
     return exception;
   },
 
-  handleShipmentRejection: async (id) => {
-    const exception = await WarehouseException.findOne({ id });
+  handleShipmentRejection: async (warehouseKey, id) => {
+    const exception = await WarehouseException.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!exception) throw new ErrorResponse(`Exception not found with id ${id}`, 404);
     
     // Logic for rejecting shipment
@@ -59,8 +62,8 @@ const exceptionsService = {
     return exception;
   },
 
-  handlePartialAcceptance: async (id, acceptedQuantity) => {
-    const exception = await WarehouseException.findOne({ id });
+  handlePartialAcceptance: async (warehouseKey, id, acceptedQuantity) => {
+    const exception = await WarehouseException.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!exception) throw new ErrorResponse(`Exception not found with id ${id}`, 404);
     
     // Logic for partial acceptance

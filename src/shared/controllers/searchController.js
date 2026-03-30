@@ -11,7 +11,7 @@ const { asyncHandler } = require('../../core/middleware');
  * @access  Private
  */
 const globalSearch = asyncHandler(async (req, res) => {
-  const { q, type = 'all', limit = 10 } = req.query;
+  const { q, type = 'all', limit = 10, dashboard = '' } = req.query;
   const userId = req.user?.id || req.user?._id;
 
   if (!q || q.trim().length < 2) {
@@ -21,7 +21,14 @@ const globalSearch = asyncHandler(async (req, res) => {
     });
   }
 
-  const results = await searchService.globalSearch(q, type, parseInt(limit), userId);
+  const results = await searchService.globalSearch(
+    q,
+    type,
+    parseInt(limit, 10),
+    userId,
+    String(dashboard || ''),
+    req.user || null
+  );
 
   res.status(200).json({
     success: true,
@@ -35,7 +42,7 @@ const globalSearch = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const getSuggestions = asyncHandler(async (req, res) => {
-  const { q, limit = 5 } = req.query;
+  const { q, limit = 5, dashboard = '' } = req.query;
 
   if (!q || q.trim().length < 2) {
     return res.status(200).json({
@@ -44,7 +51,12 @@ const getSuggestions = asyncHandler(async (req, res) => {
     });
   }
 
-  const suggestions = await searchService.getSuggestions(q, parseInt(limit));
+  const suggestions = await searchService.getSuggestions(
+    q,
+    parseInt(limit, 10),
+    String(dashboard || ''),
+    req.user || null
+  );
 
   res.status(200).json({
     success: true,
@@ -59,9 +71,13 @@ const getSuggestions = asyncHandler(async (req, res) => {
  */
 const getRecentSearches = asyncHandler(async (req, res) => {
   const userId = req.user?.id || req.user?._id;
-  const { limit = 10 } = req.query;
+  const { limit = 10, dashboard = '' } = req.query;
 
-  const recentSearches = await searchService.getRecentSearches(userId, parseInt(limit));
+  const recentSearches = await searchService.getRecentSearches(
+    userId,
+    parseInt(limit, 10),
+    String(dashboard || '')
+  );
 
   res.status(200).json({
     success: true,

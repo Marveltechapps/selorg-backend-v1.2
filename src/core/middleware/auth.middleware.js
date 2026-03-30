@@ -80,6 +80,18 @@ const authenticateToken = (req, res, next) => {
       // Attach user to request object
       const assignedStores = decoded.assignedStores || [];
       const primaryStoreId = decoded.primaryStoreId || '';
+      const defaultWarehouseKey =
+        (process.env.DASHBOARD_WAREHOUSE_KEY &&
+          String(process.env.DASHBOARD_WAREHOUSE_KEY).trim()) ||
+        (process.env.DASHBOARD_HUB_KEY && String(process.env.DASHBOARD_HUB_KEY).trim()) ||
+        'chennai-hub';
+      const warehouseKey =
+        (decoded.warehouseKey && String(decoded.warehouseKey).trim()) ||
+        // Fallbacks for older tokens / existing hub-based JWT payloads
+        (decoded.hubKey && String(decoded.hubKey).trim()) ||
+        (primaryStoreId && String(primaryStoreId).trim()) ||
+        (assignedStores[0] && String(assignedStores[0]).trim()) ||
+        defaultWarehouseKey;
       const hubKey =
         (decoded.hubKey && String(decoded.hubKey).trim()) ||
         (primaryStoreId && String(primaryStoreId).trim()) ||
@@ -95,6 +107,7 @@ const authenticateToken = (req, res, next) => {
         permissions: decoded.permissions || [],
         assignedStores,
         primaryStoreId,
+        warehouseKey,
         hubKey,
       };
 

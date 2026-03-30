@@ -10,6 +10,7 @@ const { LifestyleItem } = require('../models/LifestyleItem');
 const { PromoBlock } = require('../models/PromoBlock');
 const { getDefaultAddress } = require('./addressService');
 const { resolveCollectionProducts } = require('./merchandising/collectionService');
+const { enrichHomePayloadLegacy } = require('../utils/customerMediaEnrichment');
 
 async function resolveProducts(productIds = []) {
   if (!Array.isArray(productIds) || productIds.length === 0) return [];
@@ -30,6 +31,8 @@ async function resolveProducts(productIds = []) {
       mrp: 1,
       taxPercent: 1,
       imageUrl: 1,
+      thumbnailUrl: 1,
+      cardImageUrl: 1,
       isSaleable: 1,
       stock: 1,
       stockQuantity: 1,
@@ -40,8 +43,34 @@ async function resolveProducts(productIds = []) {
 }
 
 async function getHomePayload(req = {}) {
-  const config = await HomeConfig.findOne({ key: 'main' }).lean();
-  const definitionsFromCollection = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
+  let config = await HomeConfig.findOne({ key: 'main' }).lean();
+  if (!config) {
+    config = {
+      key: 'main',
+      searchPlaceholder: 'Search for products',
+      deliveryTypeLabel: 'Delivery',
+      categorySectionTitle: 'Shop by Category',
+    };
+  }
+  let definitionsFromCollection = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
+
+  // If no sections are defined in the database, provide a default layout to avoid an empty home page.
+  if (definitionsFromCollection.length === 0) {
+    const banners = await Banner.find({ isActive: true }).select('_id slot').lean();
+    const heroBanners = banners.filter((b) => b.slot === 'hero').map((b) => b._id);
+    const midBanners = banners.filter((b) => b.slot === 'mid' || b.slot === 'banner_sub').map((b) => b._id);
+
+    definitionsFromCollection = [
+      { key: 'categories', label: 'Shop by Category', type: 'super_category', order: 1 },
+    ];
+    if (heroBanners.length > 0) {
+      definitionsFromCollection.unshift({ key: 'hero_banner', label: 'Featured Offers', type: 'banner_main', order: 0, bannerIds: heroBanners });
+    }
+    if (midBanners.length > 0) {
+      definitionsFromCollection.push({ key: 'mid_banner', label: 'Recommended for You', type: 'banner_sub', order: 2, bannerIds: midBanners });
+    }
+  }
+
   const sectionDefinitions = definitionsFromCollection.map((d) => ({ key: d.key, label: d.label || d.key }));
   const sectionOrder = sectionDefinitions.map((d) => d.key);
 
@@ -238,7 +267,7 @@ async function getHomePayload(req = {}) {
       ? { sectionDefinitions, sectionOrder }
       : null;
 
-  return {
+  return enrichHomePayloadLegacy({
     config: configWithDefaults,
     categories: categories || [],
     heroBanners: heroBanners || [],
@@ -253,7 +282,7 @@ async function getHomePayload(req = {}) {
     lifestyle,
     promoBlocks,
     defaultAddress: defaultAddress || null,
-  };
+  });
 }
 
 module.exports = { getHomePayload };

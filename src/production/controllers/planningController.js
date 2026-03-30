@@ -1,8 +1,18 @@
 const ProductionPlan = require('../models/ProductionPlan');
 
+function getStoreId(req) {
+  return (
+    req.query?.storeId ||
+    req.body?.storeId ||
+    process.env.DEFAULT_STORE_ID ||
+    'chennai-hub'
+  );
+}
+
 const listPlans = async (req, res) => {
   try {
-    const plans = await ProductionPlan.find({}).sort({ startDate: 1 }).lean();
+    const storeId = getStoreId(req);
+    const plans = await ProductionPlan.find({ store_id: storeId }).sort({ startDate: 1 }).lean();
     res.status(200).json(plans.map((p) => ({
       id: p._id.toString(),
       product: p.product,
@@ -19,12 +29,14 @@ const listPlans = async (req, res) => {
 
 const createPlan = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const { product, line, startDate, endDate, quantity } = req.body || {};
     if (!product || !line || !startDate || quantity === undefined) {
       return res.status(400).json({ success: false, error: 'product, line, startDate, and quantity are required' });
     }
     const end = endDate || startDate;
     const doc = await ProductionPlan.create({
+      store_id: storeId,
       product,
       line,
       startDate: new Date(startDate),

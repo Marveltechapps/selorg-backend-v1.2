@@ -20,6 +20,7 @@ const staffRoutes = require('./staffRoutes');
 const inventoryRoutes = require('./inventoryRoutes');
 const attendanceRoutes = require('./attendanceRoutes');
 const devicesRoutes = require('./devicesRoutes');
+const notificationsRoutes = require('./notificationsRoutes');
 
 // Auth (login only) - no JWT required
 router.use('/auth', authRoutes);
@@ -27,7 +28,13 @@ router.use('/auth', authRoutes);
 // All other routes require JWT and role: warehouse, admin, super_admin; cache GET responses
 const protectedRouter = express.Router();
 protectedRouter.use(authenticateToken, requireRole('warehouse', 'admin', 'super_admin'));
-protectedRouter.use(cacheMiddleware(appConfig.cache.warehouse));
+// Real-time feed: do not cache notification polling
+protectedRouter.use('/notifications', notificationsRoutes);
+protectedRouter.use(
+  cacheMiddleware(appConfig.cache.warehouse, {
+    cacheKeyExtra: (req) => (req.user?.warehouseKey ? `:${req.user.warehouseKey}` : ''),
+  })
+);
 protectedRouter.use('/', warehouseRoutes);
 protectedRouter.use('/inbound', inboundRoutes);
 protectedRouter.use('/inventory', inventoryRoutes);

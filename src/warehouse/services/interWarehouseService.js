@@ -1,12 +1,15 @@
 const InterWarehouseTransfer = require('../models/InterWarehouseTransfer');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Inter-Warehouse Transfer Service
  */
 const interWarehouseService = {
-  listTransfers: async () => {
-    const transfers = await InterWarehouseTransfer.find().sort({ createdAt: -1 }).lean();
+  listTransfers: async (warehouseKey) => {
+    const transfers = await InterWarehouseTransfer.find(warehouseKeyMatch(warehouseKey))
+      .sort({ createdAt: -1 })
+      .lean();
     // Transform to match frontend WarehouseTransfer interface
     return transfers.map(t => ({
       id: t.id,
@@ -20,22 +23,22 @@ const interWarehouseService = {
     }));
   },
 
-  requestTransfer: async (data) => {
+  requestTransfer: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await InterWarehouseTransfer.countDocuments();
+      const count = await InterWarehouseTransfer.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `TRF-${(count + 1).toString().padStart(3, '0')}`;
     }
-    return await InterWarehouseTransfer.create(data);
+    return await InterWarehouseTransfer.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
-  getTransferById: async (id) => {
-    const transfer = await InterWarehouseTransfer.findOne({ id });
+  getTransferById: async (warehouseKey, id) => {
+    const transfer = await InterWarehouseTransfer.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!transfer) throw new ErrorResponse(`Transfer not found with id ${id}`, 404);
     return transfer;
   },
 
-  updateStatus: async (id, updateData) => {
-    const transfer = await InterWarehouseTransfer.findOne({ id });
+  updateStatus: async (warehouseKey, id, updateData) => {
+    const transfer = await InterWarehouseTransfer.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!transfer) throw new ErrorResponse(`Transfer not found with id ${id}`, 404);
     
     Object.assign(transfer, updateData);
@@ -43,8 +46,8 @@ const interWarehouseService = {
     return transfer;
   },
 
-  getTracking: async (id) => {
-    const transfer = await InterWarehouseTransfer.findOne({ id });
+  getTracking: async (warehouseKey, id) => {
+    const transfer = await InterWarehouseTransfer.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!transfer) throw new ErrorResponse(`Transfer not found with id ${id}`, 404);
     
     // Simulate real-time tracking based on progress

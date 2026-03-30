@@ -6,13 +6,21 @@ const BulkUpload = require('../models/BulkUpload');
 const AuditLog = require('../models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
+const ProductionLine = require('../models/ProductionLine');
+const RawMaterial = require('../models/RawMaterial');
+const QCInspection = require('../models/QCInspection');
+const MaintenanceTask = require('../models/MaintenanceTask');
+const ShiftCoverage = require('../models/ShiftCoverage');
+const Attendance = require('../models/Attendance');
 
-const DEFAULT_FACTORY = process.env.DEFAULT_FACTORY_ID || 'FAC-Austin-01';
+// Production dashboard tenant scoping: default to the configured dashboard hub.
+const DEFAULT_FACTORY =
+  process.env.DASHBOARD_HUB_KEY || process.env.DEFAULT_FACTORY_ID || 'chennai-hub';
 
 // ---- Alerts ----
 const getProductionAlerts = async (req, res) => {
   try {
-    const factoryId = req.query.factoryId || DEFAULT_FACTORY;
+    const factoryId = req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
     const status = req.query.status || 'all';
     const severity = req.query.severity || 'all';
     const category = req.query.category || 'all';
@@ -84,8 +92,9 @@ const updateProductionAlertStatus = async (req, res) => {
   try {
     const { alertId } = req.params;
     const { actionType, assignee } = req.body;
+    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
 
-    const alert = await ProductionAlert.findOne({ alert_id: alertId });
+    const alert = await ProductionAlert.findOne({ alert_id: alertId, factory_id: factoryId });
     if (!alert) {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
@@ -140,7 +149,8 @@ const updateProductionAlertStatus = async (req, res) => {
 const deleteProductionAlert = async (req, res) => {
   try {
     const { alertId } = req.params;
-    const result = await ProductionAlert.deleteOne({ alert_id: alertId });
+    const factoryId = req.query.factoryId || req.query.storeId || req.body?.factoryId || DEFAULT_FACTORY;
+    const result = await ProductionAlert.deleteOne({ alert_id: alertId, factory_id: factoryId });
     if (result.deletedCount === 0) {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
@@ -154,7 +164,7 @@ const deleteProductionAlert = async (req, res) => {
 // ---- Incidents ----
 const getProductionIncidents = async (req, res) => {
   try {
-    const factoryId = req.query.factoryId || DEFAULT_FACTORY;
+    const factoryId = req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
 
     const incidents = await ProductionIncident.find({ factory_id: factoryId })
       .sort({ reported_at: -1 })
@@ -195,7 +205,7 @@ const createProductionIncident = async (req, res) => {
       });
     }
 
-    const factoryId = req.body.factoryId || req.query.factoryId || DEFAULT_FACTORY;
+    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
     const incidentId = generateId('INC');
     const incident = await ProductionIncident.create({
       incident_id: incidentId,
@@ -234,6 +244,7 @@ const updateProductionIncidentStatus = async (req, res) => {
   try {
     const { incidentId } = req.params;
     const { status } = req.body;
+    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
 
     if (!['open', 'investigating', 'resolved'].includes(status)) {
       return res.status(400).json({ success: false, error: 'Invalid status' });
@@ -246,7 +257,7 @@ const updateProductionIncidentStatus = async (req, res) => {
     }
 
     const incident = await ProductionIncident.findOneAndUpdate(
-      { incident_id: incidentId },
+      { incident_id: incidentId, factory_id: factoryId },
       update,
       { new: true }
     );
@@ -280,7 +291,7 @@ const getProductionReports = async (req, res) => {
   try {
     const reportType = req.query.reportType || 'overview';
     const preset = req.query.preset || 'week'; // week | month | quarter
-    const factoryId = req.query.factoryId || DEFAULT_FACTORY;
+    const factoryId = req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
 
     const end = new Date();
     const start = new Date();
@@ -290,63 +301,152 @@ const getProductionReports = async (req, res) => {
 
     const startStr = start.toISOString().split('T')[0];
     const endStr = end.toISOString().split('T')[0];
-
-    // Generate report data (aggregate from DB in real app; here we return structured analytics)
-    const days = Math.ceil((end - start) / (24 * 60 * 60 * 1000)) || 7;
-    const labels = Array.from({ length: Math.min(days, 8) }, (_, i) => {
+    const days = Math.max(Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)), 1);
+    const labelCount = Math.min(days, 8);
+    const labels = Array.from({ length: labelCount }, (_, i) => {
       const d = new Date(start);
       d.setDate(d.getDate() + i);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dateIso = d.toISOString().split('T')[0];
+      const display = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return { dateIso, display };
     });
 
-    const productionData = labels.map((date, i) => ({
-      date,
-      output: 2400 + Math.floor(Math.random() * 400),
-      target: 2600,
-      efficiency: 90 + Math.floor(Math.random() * 15),
+    // Production lines (current snapshot; shown across the chosen date labels deterministically)
+    const lines = await ProductionLine.find({ factory_id: factoryId }).lean();
+    const totalOutput = lines.reduce((sum, l) => sum + (Number(l.output) || 0), 0);
+    const totalTarget = lines.reduce((sum, l) => sum + (Number(l.target) || 0), 0);
+    const avgEfficiency =
+      lines.length > 0
+        ? Math.round(lines.reduce((sum, l) => sum + (Number(l.efficiency) || 0), 0) / lines.length)
+        : 0;
+    // (Downtime is derived per line below.)
+
+    const productionData = labels.map((l) => ({
+      date: l.display,
+      output: totalOutput,
+      target: totalTarget,
+      efficiency: avgEfficiency,
     }));
 
-    const lineUtilizationData = [
-      { name: 'Line A', utilization: 95, downtime: 5 },
-      { name: 'Line B', utilization: 88, downtime: 12 },
-      { name: 'Line C', utilization: 92, downtime: 8 },
-      { name: 'Line D', utilization: 78, downtime: 22 },
-    ];
+    const lineUtilizationData = lines.map((l) => {
+      const target = Number(l.target) || 0;
+      const output = Number(l.output) || 0;
+      const utilization = target > 0 ? Math.round((output / target) * 100) : 0;
+      return {
+        name: l.name,
+        utilization,
+        downtime: l.status === 'running' ? 0 : 15,
+      };
+    });
 
-    const materialData = [
-      { material: 'Organic Oats', allocated: 1500, consumed: 1380, waste: 120 },
-      { material: 'Sugar', allocated: 800, consumed: 750, waste: 50 },
-      { material: 'Packaging Film', allocated: 500, consumed: 485, waste: 15 },
-      { material: 'Protein Powder', allocated: 600, consumed: 580, waste: 20 },
-      { material: 'Almond Extract', allocated: 300, consumed: 290, waste: 10 },
-    ];
-
-    const qualityData = labels.map((date) => ({
-      date,
-      passRate: 97 + Math.random() * 3,
-      defects: Math.floor(Math.random() * 50) + 10,
+    // Materials: use current inventory + safetyStock as a deterministic "allocated" proxy.
+    const materials = await RawMaterial.find({ store_id: factoryId }).lean();
+    const topMaterials = materials.slice(0, 5);
+    const materialData = topMaterials.map((m) => ({
+      material: m.name,
+      allocated: Number(m.safetyStock) || 0,
+      consumed: Number(m.currentStock) || 0,
+      waste: Math.max(0, (Number(m.safetyStock) || 0) - (Number(m.currentStock) || 0)),
     }));
+
+    // QC Quality by day
+    const labelDateIsos = labels.map((l) => l.dateIso);
+    const qcInspections = await QCInspection.find({
+      store_id: factoryId,
+      date: { $in: labelDateIsos },
+    }).lean();
+
+    const qcByDate = new Map();
+    for (const ins of qcInspections) {
+      const key = String(ins.date);
+      if (!qcByDate.has(key)) qcByDate.set(key, []);
+      qcByDate.get(key).push(ins);
+    }
+
+    const qualityData = labels.map((l) => {
+      const list = qcByDate.get(l.dateIso) || [];
+      const total = list.length;
+      const passed = list.filter((x) => x.status === 'passed').length;
+      const failed = list.filter((x) => x.status === 'failed');
+      const totalDefects = failed.reduce((sum, x) => sum + (Number(x.defects_found) || 0), 0);
+      const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
+      return {
+        date: l.display,
+        passRate,
+        defects: totalDefects,
+      };
+    });
+
+    // Workforce: aggregate attendance + shift coverage in the selected period
+    const startDateStr = startStr;
+    const endDateStr = endStr;
+    const [shiftCoverage, attendance] = await Promise.all([
+      ShiftCoverage.find({ store_id: factoryId, date: { $gte: start, $lte: end } }).lean(),
+      Attendance.find({ store_id: factoryId, date: { $gte: startDateStr, $lte: endDateStr } }).lean(),
+    ]);
+
+    const presentCount = attendance.filter((a) => a.status === 'present').length;
+    const targetStaffTotal = shiftCoverage.reduce((sum, s) => sum + (Number(s.target_staff) || 0), 0);
+    const attendancePct = targetStaffTotal > 0 ? Math.round((presentCount / targetStaffTotal) * 100) : 0;
 
     const workforceData = [
-      { shift: 'Morning', productivity: 94, attendance: 96 },
-      { shift: 'Afternoon', productivity: 89, attendance: 92 },
-      { shift: 'Night', productivity: 86, attendance: 88 },
+      { shift: 'Morning', productivity: attendancePct, attendance: attendancePct },
+      { shift: 'Afternoon', productivity: attendancePct, attendance: attendancePct },
+      { shift: 'Night', productivity: attendancePct, attendance: attendancePct },
     ];
 
-    const maintenanceData = [
-      { month: 'Week 1', preventive: 8, corrective: 3, breakdown: 1 },
-      { month: 'Week 2', preventive: 10, corrective: 5, breakdown: 2 },
-      { month: 'Week 3', preventive: 9, corrective: 4, breakdown: 1 },
-      { month: 'Week 4', preventive: 11, corrective: 2, breakdown: 0 },
-    ];
+    // Maintenance tasks: group into 4 buckets across the preset period.
+    const maintenanceTasks = await MaintenanceTask.find({
+      store_id: factoryId,
+      scheduled_date: { $gte: startStr, $lte: endStr },
+    }).lean();
 
-    const defectTypeData = [
-      { name: 'Weight Issue', value: 89 },
-      { name: 'Visual Defect', value: 62 },
-      { name: 'Seal Integrity', value: 31 },
-      { name: 'Contamination', value: 18 },
-      { name: 'Other', value: 18 },
-    ];
+    const buckets = Array.from({ length: 4 }, (_, idx) => ({
+      month: `Week ${idx + 1}`,
+      preventive: 0,
+      corrective: 0,
+      breakdown: 0,
+    }));
+
+    const startTs = start.getTime();
+    const endTs = end.getTime();
+    const bucketWidth = Math.max((endTs - startTs) / 4, 1);
+
+    for (const t of maintenanceTasks) {
+      const ts = new Date(t.scheduled_date).getTime();
+      const rel = ts - startTs;
+      const bucketIdx = Math.min(3, Math.max(0, Math.floor(rel / bucketWidth)));
+      const bucket = buckets[bucketIdx];
+      if (t.task_type === 'preventive') bucket.preventive += 1;
+      else if (t.task_type === 'corrective') bucket.corrective += 1;
+      else if (t.task_type === 'breakdown') bucket.breakdown += 1;
+    }
+
+    const maintenanceData = buckets;
+
+    // Defect type distribution: failures grouped by check/product name, normalized to 0-100.
+    const qcFailures = await QCInspection.find({
+      store_id: factoryId,
+      status: 'failed',
+      date: { $gte: startStr, $lte: endStr },
+    }).lean();
+
+    const defectsByType = new Map();
+    let totalDefectsAll = 0;
+    for (const f of qcFailures) {
+      const typeName = String(f.check_type || f.product_name || 'Unknown');
+      const d = Number(f.defects_found) || 0;
+      totalDefectsAll += d;
+      defectsByType.set(typeName, (defectsByType.get(typeName) || 0) + d);
+    }
+
+    const defectTypeData = Array.from(defectsByType.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, val]) => ({
+        name,
+        value: totalDefectsAll > 0 ? Math.round((val / totalDefectsAll) * 100) : 0,
+      }));
 
     res.status(200).json({
       success: true,
@@ -371,6 +471,7 @@ const getProductionReports = async (req, res) => {
 const exportProductionReports = async (req, res) => {
   try {
     const { preset } = req.query;
+    const factoryId = req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
     const end = new Date();
     const start = new Date();
     if (preset === 'week') start.setDate(start.getDate() - 7);
@@ -379,13 +480,51 @@ const exportProductionReports = async (req, res) => {
 
     const startStr = start.toISOString().split('T')[0];
     const endStr = end.toISOString().split('T')[0];
-    const csvContent = [
-      ['Comprehensive Production Report', `Period: ${startStr} to ${endStr}`].join(','),
-      '',
-      'Date,Output,Target,Efficiency',
-      'Dec 15,2400,2600,92',
-      'Dec 16,2600,2600,100',
-    ].join('\n');
+
+    const days = Math.max(Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)), 1);
+    const labelCount = Math.min(days, 8);
+    const labels = Array.from({ length: labelCount }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      return { dateIso: d.toISOString().split('T')[0], display: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) };
+    });
+
+    const lines = await ProductionLine.find({ factory_id: factoryId }).lean();
+    const totalOutput = lines.reduce((sum, l) => sum + (Number(l.output) || 0), 0);
+    const totalTarget = lines.reduce((sum, l) => sum + (Number(l.target) || 0), 0);
+    const avgEfficiency =
+      lines.length > 0
+        ? Math.round(lines.reduce((sum, l) => sum + (Number(l.efficiency) || 0), 0) / lines.length)
+        : 0;
+
+    const qcInspections = await QCInspection.find({
+      store_id: factoryId,
+      date: { $in: labels.map((l) => l.dateIso) },
+    }).lean();
+
+    const qcByDate = new Map();
+    for (const ins of qcInspections) {
+      const key = String(ins.date);
+      if (!qcByDate.has(key)) qcByDate.set(key, []);
+      qcByDate.get(key).push(ins);
+    }
+
+    const csvRows = [];
+    csvRows.push(['Comprehensive Production Report', `Period: ${startStr} to ${endStr}`].join(','));
+    csvRows.push('');
+    csvRows.push('Date,Output,Target,Efficiency,PassRate,Defects');
+
+    for (const l of labels) {
+      const list = qcByDate.get(l.dateIso) || [];
+      const total = list.length;
+      const passed = list.filter((x) => x.status === 'passed').length;
+      const failed = list.filter((x) => x.status === 'failed');
+      const totalDefects = failed.reduce((sum, x) => sum + (Number(x.defects_found) || 0), 0);
+      const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
+      csvRows.push([l.display, totalOutput, totalTarget, avgEfficiency, passRate, totalDefects].join(','));
+    }
+
+    const csvContent = csvRows.join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="production-comprehensive-${endStr}.csv"`);

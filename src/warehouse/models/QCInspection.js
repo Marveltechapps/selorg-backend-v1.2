@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const QCInspectionSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
+  warehouseKey: { type: String, trim: true, index: true },
+  id: { type: String, required: true, index: true },
   inspectionId: { type: String, required: true },
   batchId: { type: String, required: true },
   productName: { type: String, required: true },
@@ -12,6 +13,8 @@ const QCInspectionSchema = new mongoose.Schema({
   itemsInspected: { type: Number },
   defectsFound: { type: Number }
 }, { timestamps: true, collection: 'warehouse_qc_inspections' });
+
+QCInspectionSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 module.exports = mongoose.models.QCInspection || mongoose.model('QCInspection', QCInspectionSchema);
 

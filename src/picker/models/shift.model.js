@@ -10,6 +10,7 @@ const shiftSchema = new mongoose.Schema(
   {
     id: { type: String },
     name: { type: String, required: true },
+    warehouseKey: { type: String, trim: true, index: true },
     site: { type: String },
     siteId: { type: String },
     startTime: { type: String },
@@ -27,7 +28,7 @@ const shiftSchema = new mongoose.Schema(
   { timestamps: true, collection: 'picker_shifts' }
 );
 
-shiftSchema.index({ site: 1, status: 1 });
-shiftSchema.index({ siteId: 1, status: 1 });
+shiftSchema.index({ warehouseKey: 1, site: 1, status: 1 });
+shiftSchema.index({ warehouseKey: 1, siteId: 1, status: 1 });
 
 module.exports = mongoose.models.PickerShift || mongoose.model('PickerShift', shiftSchema);

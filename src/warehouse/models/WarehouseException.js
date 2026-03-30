@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const WarehouseExceptionSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true, index: true },
+  warehouseKey: { type: String, trim: true, index: true },
+  id: { type: String, required: true, index: true },
   priority: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
   category: { type: String, enum: ['inbound', 'outbound', 'inventory', 'technical', 'qc', 'other'], required: true },
   title: { type: String, required: true },
@@ -14,6 +15,8 @@ const WarehouseExceptionSchema = new mongoose.Schema({
   resolvedAt: { type: Date },
   resolutionNotes: { type: String }
 }, { timestamps: true, collection: 'warehouse_exceptions' });
+
+WarehouseExceptionSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 module.exports = mongoose.models.WarehouseException || mongoose.model('WarehouseException', WarehouseExceptionSchema);
 

@@ -6,7 +6,7 @@ const { asyncHandler } = require('../../core/middleware');
  */
 const warehouseReportsController = {
   getOperationalSLAs: asyncHandler(async (req, res) => {
-    const metrics = await warehouseReportsService.getSLAMetrics(req.query.range);
+    const metrics = await warehouseReportsService.getSLAMetrics(req.user.warehouseKey, req.query.range);
     // Map service output to schema SLAMetrics shape
     const payload = {
       inboundTurnaround: metrics.dockTurnaroundTime || null,
@@ -18,13 +18,13 @@ const warehouseReportsController = {
   }),
 
   exportSLAMetrics: asyncHandler(async (req, res) => {
-    const metrics = await warehouseReportsService.getSLAMetrics(req.query.range);
+    const metrics = await warehouseReportsService.getSLAMetrics(req.user.warehouseKey, req.query.range);
     const csv = `metric,value\nInbound SLA,${metrics.inboundSLA}\nOutbound SLA,${metrics.outboundSLA}`;
     res.status(200).json({ success: true, data: { csv }, meta: { message: 'CSV export initiated' } });
   }),
 
   getInventoryHealth: asyncHandler(async (req, res) => {
-    const health = await warehouseReportsService.getInventoryHealth();
+    const health = await warehouseReportsService.getInventoryHealth(req.user.warehouseKey);
     // Map to InventoryHealth schema where possible
     const payload = {
       accuracy: health.stockAccuracy || null,
@@ -37,13 +37,13 @@ const warehouseReportsController = {
   }),
 
   exportInventoryHealth: asyncHandler(async (req, res) => {
-    const health = await warehouseReportsService.getInventoryHealth();
+    const health = await warehouseReportsService.getInventoryHealth(req.user.warehouseKey);
     const csv = `metric,value\nHealth Score,${health.healthScore}\nTotal SKUs,${health.totalSKUs}`;
     res.status(200).json({ success: true, data: { csv }, meta: { message: 'CSV export initiated' } });
   }),
 
   getProductivity: asyncHandler(async (req, res) => {
-    const productivity = await warehouseReportsService.getProductivityMetrics();
+    const productivity = await warehouseReportsService.getProductivityMetrics(req.user.warehouseKey);
     // Map to ProductivityMetrics schema
     const payload = {
       avgUPH: productivity.averagePicksPerHour || null,
@@ -56,23 +56,23 @@ const warehouseReportsController = {
   }),
 
   exportProductivity: asyncHandler(async (req, res) => {
-    const productivity = await warehouseReportsService.getProductivityMetrics();
+    const productivity = await warehouseReportsService.getProductivityMetrics(req.user.warehouseKey);
     const csv = `metric,value\nAvg Picks/hr,${productivity.averagePicksPerHour}\nUtilization,${productivity.utilizationRate}`;
     res.status(200).json({ success: true, data: { csv }, meta: { message: 'CSV export initiated' } });
   }),
 
   getStorageUtilization: asyncHandler(async (req, res) => {
-    const utilization = await warehouseReportsService.getStorageUtilization();
+    const utilization = await warehouseReportsService.getStorageUtilization(req.user.warehouseKey);
     res.status(200).json({ success: true, data: utilization, meta: { count: utilization.length } });
   }),
 
   getOutputTrends: asyncHandler(async (req, res) => {
-    const trends = await warehouseReportsService.getOutputTrends();
+    const trends = await warehouseReportsService.getOutputTrends(req.user.warehouseKey);
     res.status(200).json({ success: true, data: trends, meta: { count: trends.length } });
   }),
 
   getInventoryByCategory: asyncHandler(async (req, res) => {
-    const breakdown = await warehouseReportsService.getInventoryByCategory();
+    const breakdown = await warehouseReportsService.getInventoryByCategory(req.user.warehouseKey);
     res.status(200).json({ success: true, data: breakdown, meta: { count: breakdown.length } });
   })
 };

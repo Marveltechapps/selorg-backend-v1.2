@@ -7,6 +7,7 @@ const { PromoBlock } = require('../../models/PromoBlock');
 const { HomeConfig } = require('../../models/HomeConfig');
 const { HomeSection } = require('../../models/HomeSection');
 const { resolveCollectionProducts } = require('../merchandising/collectionService');
+const { enrichCmsBlockData } = require('../../utils/customerMediaEnrichment');
 
 const now = new Date();
 
@@ -92,7 +93,7 @@ async function resolveBlockData(block, siteId = null) {
     }
   }
 
-  return data;
+  return enrichCmsBlockData(type, data);
 }
 
 /**

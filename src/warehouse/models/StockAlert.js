@@ -1,10 +1,10 @@
 const mongoose = require('mongoose');
 
 const StockAlertSchema = new mongoose.Schema({
+  warehouseKey: { type: String, trim: true, index: true },
   id: {
     type: String,
     required: true,
-    unique: true,
     index: true,
   },
   type: {
@@ -56,6 +56,8 @@ const StockAlertSchema = new mongoose.Schema({
   timestamps: true,
   collection: 'stock_alerts',
 });
+
+StockAlertSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
 // Indexes for performance
 StockAlertSchema.index({ type: 1, priority: 1 });

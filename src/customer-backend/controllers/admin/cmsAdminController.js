@@ -5,6 +5,7 @@ const { Banner } = require('../../models/Banner');
 const { Product } = require('../../models/Product');
 const { importSkuMaster } = require('../../services/import/skuMasterImport.service');
 const { importCmsPages } = require('../../services/import/cmsPagesImport.service');
+const { importContentHubMaster } = require('../../services/import/contentHubMasterImport.service');
 
 async function listPages(req, res) {
   try {
@@ -237,6 +238,28 @@ module.exports = {
     const overwrite = overwriteRaw === undefined ? false : String(overwriteRaw) === 'true';
     try {
       const { counts, errors, warnings, success } = await importSkuMaster(req.file.buffer, { overwrite });
+      return res.status(200).json({
+        success,
+        counts,
+        warnings: warnings || [],
+        errors,
+      });
+    } catch (err) {
+      return res.status(200).json({
+        success: false,
+        counts: {},
+        errors: [{ message: err.message }],
+      });
+    }
+  },
+  uploadContentHubMaster: async (req, res) => {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ success: false, counts: {}, errors: [{ message: 'file is required' }] });
+    }
+    const overwriteRaw = req.body?.overwrite ?? req.query?.overwrite;
+    const overwrite = overwriteRaw === undefined ? true : String(overwriteRaw) === 'true';
+    try {
+      const { counts, errors, warnings, success } = await importContentHubMaster(req.file.buffer, { overwrite });
       return res.status(200).json({
         success,
         counts,

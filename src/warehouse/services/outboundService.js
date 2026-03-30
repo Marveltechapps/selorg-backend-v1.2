@@ -1,6 +1,7 @@
 const Picklist = require('../models/Picklist');
 const PickingBatch = require('../models/PickingBatch');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
  * @desc Outbound Operations Service
@@ -10,10 +11,12 @@ const outboundService = {
   /**
    * List Picklists (Auto/Manual)
    */
-  listPicklists: async (filters = {}) => {
+  listPicklists: async (warehouseKey, filters = {}) => {
     const query = {};
     if (filters.type) query.type = filters.type;
-    const picklists = await Picklist.find(query).sort({ createdAt: -1 }).lean();
+    const picklists = await Picklist.find(mergeWarehouseFilter(query, warehouseKey))
+      .sort({ createdAt: -1 })
+      .lean();
     // Map priority values to match frontend expectations
     return picklists.map(p => ({
       ...p,
@@ -25,8 +28,8 @@ const outboundService = {
   /**
    * Get Picklist details
    */
-  getPicklistById: async (id) => {
-    const picklist = await Picklist.findOne({ id });
+  getPicklistById: async (warehouseKey, id) => {
+    const picklist = await Picklist.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!picklist) throw new ErrorResponse(`Picklist not found with id ${id}`, 404);
     return picklist;
   },
@@ -34,15 +37,17 @@ const outboundService = {
   /**
    * Assign picker to a picklist
    */
-  assignPicker: async (id, pickerIdOrName) => {
-    const picklist = await Picklist.findOne({ id });
+  assignPicker: async (warehouseKey, id, pickerIdOrName) => {
+    const picklist = await Picklist.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!picklist) throw new ErrorResponse(`Picklist not found with id ${id}`, 404);
     
     // If pickerName is provided, find the picker by name
     const Staff = require('../models/Staff');
     let pickerId = pickerIdOrName;
     if (pickerIdOrName && !pickerIdOrName.startsWith('PICKER-')) {
-      const staff = await Staff.findOne({ name: pickerIdOrName, role: 'Picker' });
+      const staff = await Staff.findOne(
+        mergeWarehouseFilter({ name: pickerIdOrName, role: 'Picker' }, warehouseKey)
+      );
       if (staff) pickerId = staff.id;
     }
     
@@ -56,20 +61,20 @@ const outboundService = {
   /**
    * Create a new picking batch
    */
-  createBatch: async (batchData = {}) => {
+  createBatch: async (warehouseKey, batchData = {}) => {
     if (!batchData.id) {
-      const count = await PickingBatch.countDocuments();
+      const count = await PickingBatch.countDocuments(warehouseKeyMatch(warehouseKey));
       batchData.id = `BATCH-${(count + 1).toString().padStart(3, '0')}`;
     }
     if (!batchData.zone) batchData.zone = 'Main Zone';
-    return await PickingBatch.create(batchData);
+    return await PickingBatch.create({ ...batchData, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
   /**
    * List all batches
    */
-  listBatches: async (filters = {}) => {
-    const batches = await PickingBatch.find({}).sort({ createdAt: -1 }).lean();
+  listBatches: async (warehouseKey, filters = {}) => {
+    const batches = await PickingBatch.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
     // Transform to match frontend BatchOrder interface
     return batches.map(b => ({
       id: b.id,
@@ -85,8 +90,8 @@ const outboundService = {
   /**
    * Get Batch details
    */
-  getBatchById: async (id) => {
-    const batch = await PickingBatch.findOne({ id });
+  getBatchById: async (warehouseKey, id) => {
+    const batch = await PickingBatch.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!batch) throw new ErrorResponse(`Batch not found with id ${id}`, 404);
     return batch;
   },
@@ -94,9 +99,9 @@ const outboundService = {
   /**
    * Get Picker status and performance
    */
-  listPickers: async () => {
+  listPickers: async (warehouseKey) => {
     const Staff = require('../models/Staff');
-    const pickers = await Staff.find({ role: 'Picker' }).lean();
+    const pickers = await Staff.find(mergeWarehouseFilter({ role: 'Picker' }, warehouseKey)).lean();
     return pickers.map(p => ({
       id: p.id,
       pickerId: p.id,
@@ -112,22 +117,27 @@ const outboundService = {
   /**
    * Get orders assigned to a picker
    */
-  getPickerOrders: async (pickerId) => {
-    return await Picklist.find({ pickerId });
+  getPickerOrders: async (warehouseKey, pickerId) => {
+    return await Picklist.find(mergeWarehouseFilter({ pickerId }, warehouseKey));
   },
 
   /**
    * Get all active routes
    */
-  getActiveRoutes: async () => {
+  getActiveRoutes: async (warehouseKey) => {
     // Get active picklists and create route data
-    const activePicklists = await Picklist.find({ 
-      status: { $in: ['assigned', 'picking'] },
-      $or: [
-        { picker: { $exists: true, $ne: null } },
-        { pickerId: { $exists: true, $ne: null } }
-      ]
-    }).lean();
+    const activePicklists = await Picklist.find(
+      mergeWarehouseFilter(
+        {
+          status: { $in: ['assigned', 'picking'] },
+          $or: [
+            { picker: { $exists: true, $ne: null } },
+            { pickerId: { $exists: true, $ne: null } }
+          ]
+        },
+        warehouseKey
+      )
+    ).lean();
 
     // Group by picker (use picker field or pickerId)
     const routesByPicker = {};
@@ -151,7 +161,7 @@ const outboundService = {
     // If no active routes, return some sample routes for demonstration
     if (Object.keys(routesByPicker).length === 0) {
       const Staff = require('../models/Staff');
-      const pickers = await Staff.find({ role: 'Picker' }).limit(3).lean();
+      const pickers = await Staff.find(mergeWarehouseFilter({ role: 'Picker' }, warehouseKey)).limit(3).lean();
       return pickers.map((p, idx) => ({
         id: `ROUTE-${p.id}`,
         routeId: `ROUTE-${p.id}`,
@@ -190,11 +200,11 @@ const outboundService = {
   /**
    * Get consolidated multi-order picks
    */
-  getConsolidatedPicks: async (filters = {}) => {
+  getConsolidatedPicks: async (warehouseKey, filters = {}) => {
     // Get picklists that share the same SKU/location
-    const picklists = await Picklist.find({ 
-      status: { $in: ['queued', 'assigned', 'picking'] }
-    }).lean();
+    const picklists = await Picklist.find(
+      mergeWarehouseFilter({ status: { $in: ['queued', 'assigned', 'picking'] } }, warehouseKey)
+    ).lean();
 
     // Group by location/zone (simplified - in real system would group by SKU)
     const picksByLocation = {};

@@ -4,13 +4,15 @@ const WarehouseShiftSlot = require('../models/WarehouseShiftSlot');
 const WarehouseTraining = require('../models/WarehouseTraining');
 const WarehouseAttendance = require('../models/WarehouseAttendance');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
+const { mergeWarehouseFilter, warehouseKeyMatch, warehouseFieldsForCreate } = require('../constants/warehouseScope');
 
 /**
  * @desc Warehouse Workforce Service
  */
 const workforceService = {
-  listStaff: async () => {
-    const staff = await Staff.find({ 
+  listStaff: async (warehouseKey) => {
+    const staff = await Staff.find(
+      mergeWarehouseFilter({
       $or: [
         { role: /warehouse/i },
         { role: 'Picker' },
@@ -21,12 +23,14 @@ const workforceService = {
         { role: 'QC Inspector' },
         { role: 'Warehouse Manager' }
       ]
-    }).sort({ name: 1 }).lean();
+      }, warehouseKey)
+    ).sort({ name: 1 }).lean();
     // Transform to match frontend Staff interface
     return staff.map(s => ({
       id: s.id,
       name: s.name,
       role: s.role,
+      zone: s.zone,
       shift: s.shift || 'morning',
       status: s.status === 'Active' ? 'active' : s.status === 'Break' ? 'break' : 'offline',
       productivity: s.productivity || 85 + Math.floor(Math.random() * 15),
@@ -37,14 +41,14 @@ const workforceService = {
     }));
   },
 
-  getStaffById: async (id) => {
-    const staff = await Staff.findOne({ id });
+  getStaffById: async (warehouseKey, id) => {
+    const staff = await Staff.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!staff) throw new ErrorResponse(`Staff member not found with id ${id}`, 404);
     return staff;
   },
 
-  addStaff: async (data) => {
-    const count = await Staff.countDocuments();
+  addStaff: async (warehouseKey, data) => {
+    const count = await Staff.countDocuments(warehouseKeyMatch(warehouseKey));
     const id = data.id || `STAFF-${(count + 1).toString().padStart(3, '0')}`;
     const staffData = {
       id,
@@ -59,7 +63,7 @@ const workforceService = {
       productivity: data.productivity || 0,
       hourlyRate: data.hourlyRate || 0
     };
-    const staff = await Staff.create(staffData);
+    const staff = await Staff.create({ ...staffData, ...warehouseFieldsForCreate(warehouseKey) });
     return {
       id: staff.id,
       name: staff.name,
@@ -74,8 +78,8 @@ const workforceService = {
     };
   },
 
-  listShifts: async () => {
-    const shifts = await WarehouseShiftSlot.find().sort({ date: -1 }).lean();
+  listShifts: async (warehouseKey) => {
+    const shifts = await WarehouseShiftSlot.find(warehouseKeyMatch(warehouseKey)).sort({ date: -1 }).lean();
     // Transform to match frontend ShiftSchedule interface
     return shifts.map(s => ({
       id: s.id,
@@ -91,18 +95,19 @@ const workforceService = {
     }));
   },
 
-  listAttendance: async (filters = {}) => {
+  listAttendance: async (warehouseKey, filters = {}) => {
     const WarehouseAttendance = require('../models/WarehouseAttendance');
     const Staff = require('../models/Staff');
     const { page = 1, limit = 50, staffId } = filters;
     const query = {};
     if (staffId) query.staffId = staffId;
     const skip = (page - 1) * limit;
-    const total = await WarehouseAttendance.countDocuments(query);
-    const items = await WarehouseAttendance.find(query).sort({ timestamp: -1 }).skip(skip).limit(limit).lean();
+    const scopedQuery = mergeWarehouseFilter(query, warehouseKey);
+    const total = await WarehouseAttendance.countDocuments(scopedQuery);
+    const items = await WarehouseAttendance.find(scopedQuery).sort({ timestamp: -1 }).skip(skip).limit(limit).lean();
 
     // Fetch all staff to map names
-    const allStaff = await Staff.find({}).select('id name').lean();
+    const allStaff = await Staff.find(warehouseKeyMatch(warehouseKey)).select('id name').lean();
     const staffMap = allStaff.reduce((map, s) => {
       map[s.id] = s.name;
       return map;
@@ -127,13 +132,13 @@ const workforceService = {
     };
   },
 
-  listPerformance: async (filters = {}) => {
+  listPerformance: async (warehouseKey, filters = {}) => {
     // Heuristic performance: count completed picklists per staff in last 7 days
     const Picklist = require('../models/Picklist');
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const agg = await Picklist.aggregate([
-      { $match: { status: 'completed', updatedAt: { $gte: sevenDaysAgo } } },
+      { $match: mergeWarehouseFilter({ status: 'completed', updatedAt: { $gte: sevenDaysAgo } }, warehouseKey) },
       { $group: { _id: '$picker', tasks: { $sum: 1 } } },
       { $sort: { tasks: -1 } },
       { $limit: 10 }
@@ -151,12 +156,12 @@ const workforceService = {
     }));
   },
 
-  listLeaveRequests: async (filters = {}) => {
+  listLeaveRequests: async (warehouseKey, filters = {}) => {
     const LeaveRequest = require('../models/LeaveRequest');
     const { page = 1, limit = 50 } = filters;
     const skip = (page - 1) * limit;
-    const total = await LeaveRequest.countDocuments();
-    const items = await LeaveRequest.find().sort({ createdAt: -1 }).skip(skip).limit(limit).lean();
+    const total = await LeaveRequest.countDocuments(warehouseKeyMatch(warehouseKey));
+    const items = await LeaveRequest.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).skip(skip).limit(limit).lean();
     return {
       items: items.map(l => ({
         id: l.id,
@@ -176,16 +181,16 @@ const workforceService = {
     };
   },
 
-  createLeaveRequest: async (data) => {
+  createLeaveRequest: async (warehouseKey, data) => {
     const LeaveRequest = require('../models/LeaveRequest');
     const Staff = require('../models/Staff');
     
     // Validate staff exists
-    const staff = await Staff.findOne({ id: data.staffId });
+    const staff = await Staff.findOne(mergeWarehouseFilter({ id: data.staffId }, warehouseKey));
     if (!staff) throw new ErrorResponse(`Staff member not found with id ${data.staffId}`, 404);
     
     if (!data.id) {
-      const count = await LeaveRequest.countDocuments();
+      const count = await LeaveRequest.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `LR-${(count + 1).toString().padStart(3, '0')}`;
     }
     
@@ -199,12 +204,12 @@ const workforceService = {
       data.days = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
     
-    return await LeaveRequest.create(data);
+    return await LeaveRequest.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
-  updateLeaveStatus: async (id, status) => {
+  updateLeaveStatus: async (warehouseKey, id, status) => {
     const LeaveRequest = require('../models/LeaveRequest');
-    const leave = await LeaveRequest.findOne({ id });
+    const leave = await LeaveRequest.findOne(mergeWarehouseFilter({ id }, warehouseKey));
     if (!leave) throw new ErrorResponse(`Leave request not found with id ${id}`, 404);
     
     leave.status = status;
@@ -212,9 +217,9 @@ const workforceService = {
     return leave;
   },
 
-  createShift: async (data) => {
+  createShift: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await WarehouseShiftSlot.countDocuments();
+      const count = await WarehouseShiftSlot.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `SHIFT-${(count + 1).toString().padStart(3, '0')}`;
     }
     const slotData = {
@@ -224,7 +229,7 @@ const workforceService = {
       requiredStaff: data.requiredStaff || 4,
       assignedStaff: data.staffAssigned || data.assignedStaff || []
     };
-    const slot = await WarehouseShiftSlot.create(slotData);
+    const slot = await WarehouseShiftSlot.create({ ...slotData, ...warehouseFieldsForCreate(warehouseKey) });
     return {
       id: slot.id,
       date: slot.date ? new Date(slot.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
@@ -235,8 +240,33 @@ const workforceService = {
     };
   },
 
-  assignStaffToShift: async (shiftId, staffIds) => {
-    const shift = await WarehouseShiftSlot.findOne({ id: shiftId });
+  updateShift: async (warehouseKey, id, updates = {}) => {
+    const slot = await WarehouseShiftSlot.findOne(mergeWarehouseFilter({ id }, warehouseKey));
+    if (!slot) throw new ErrorResponse('Shift not found', 404);
+
+    if (updates.shift) slot.shift = updates.shift;
+    if (updates.date) slot.date = new Date(updates.date);
+    if (updates.requiredStaff != null) slot.requiredStaff = updates.requiredStaff;
+    if (Array.isArray(updates.assignedStaff)) slot.assignedStaff = updates.assignedStaff;
+    if (Array.isArray(updates.staffAssigned)) slot.assignedStaff = updates.staffAssigned;
+
+    await slot.save();
+
+    return {
+      id: slot.id,
+      date: slot.date ? new Date(slot.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      shift: slot.shift || 'morning',
+      requiredStaff: slot.requiredStaff || 4,
+      staffAssigned: slot.assignedStaff || [],
+      status:
+        slot.assignedStaff && slot.assignedStaff.length >= (slot.requiredStaff || 4)
+          ? 'full'
+          : 'understaffed',
+    };
+  },
+
+  assignStaffToShift: async (warehouseKey, shiftId, staffIds) => {
+    const shift = await WarehouseShiftSlot.findOne(mergeWarehouseFilter({ id: shiftId }, warehouseKey));
     if (!shift) throw new ErrorResponse(`Shift not found with id ${shiftId}`, 404);
     
     // Set the assigned staff to the provided list
@@ -252,8 +282,8 @@ const workforceService = {
     };
   },
 
-  listTrainings: async () => {
-    const trainings = await WarehouseTraining.find().sort({ date: 1 }).lean();
+  listTrainings: async (warehouseKey) => {
+    const trainings = await WarehouseTraining.find(warehouseKeyMatch(warehouseKey)).sort({ date: 1 }).lean();
     return trainings.map(t => ({
       id: t.id,
       trainingId: t.trainingId,
@@ -268,8 +298,8 @@ const workforceService = {
     }));
   },
 
-  getTrainingById: async (id) => {
-    const t = await WarehouseTraining.findOne({ id }).lean();
+  getTrainingById: async (warehouseKey, id) => {
+    const t = await WarehouseTraining.findOne(mergeWarehouseFilter({ id }, warehouseKey)).lean();
     if (!t) throw new ErrorResponse(`Training session not found with id ${id}`, 404);
     return {
       id: t.id,
@@ -286,8 +316,8 @@ const workforceService = {
     };
   },
 
-  enrollInTraining: async (trainingId, staffIds) => {
-    const training = await WarehouseTraining.findOne({ id: trainingId });
+  enrollInTraining: async (warehouseKey, trainingId, staffIds) => {
+    const training = await WarehouseTraining.findOne(mergeWarehouseFilter({ id: trainingId }, warehouseKey));
     if (!training) throw new ErrorResponse(`Training session not found with id ${trainingId}`, 404);
     
     training.enrolledStaff = [...new Set([...(training.enrolledStaff || []), ...staffIds])];
@@ -296,12 +326,12 @@ const workforceService = {
     return training;
   },
 
-  logAttendance: async (data) => {
+  logAttendance: async (warehouseKey, data) => {
     if (!data.id) {
-      const count = await WarehouseAttendance.countDocuments();
+      const count = await WarehouseAttendance.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `ATT-${(count + 1).toString().padStart(3, '0')}`;
     }
-    return await WarehouseAttendance.create(data);
+    return await WarehouseAttendance.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   }
 };
 

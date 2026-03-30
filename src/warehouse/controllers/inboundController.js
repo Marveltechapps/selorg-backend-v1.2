@@ -11,7 +11,7 @@ const inboundController = {
    */
   getGRNs: asyncHandler(async (req, res) => {
     const pagination = { page: parseInt(req.query.page) || 1, limit: parseInt(req.query.limit) || 50 };
-    const result = await inboundService.listGRNs({ ...req.query, ...pagination });
+    const result = await inboundService.listGRNs(req.user.warehouseKey, { ...req.query, ...pagination });
     res.status(200).json({
       success: true,
       data: result.items || [],
@@ -29,7 +29,7 @@ const inboundController = {
    * @desc    Create new GRN
    */
   createGRN: asyncHandler(async (req, res) => {
-    const grn = await inboundService.createGRN(req.body);
+    const grn = await inboundService.createGRN(req.user.warehouseKey, req.body);
     res.status(201).json({ success: true, data: grn });
   }),
 
@@ -38,7 +38,7 @@ const inboundController = {
    * @desc    Get GRN details
    */
   getGRNDetails: asyncHandler(async (req, res) => {
-    const grn = await inboundService.getGRNById(req.params.id);
+    const grn = await inboundService.getGRNById(req.user.warehouseKey, req.params.id);
     res.status(200).json({
       success: true,
       data: grn
@@ -50,7 +50,7 @@ const inboundController = {
    * @desc    Start counting for GRN
    */
   startGRNCounting: asyncHandler(async (req, res) => {
-    const grn = await inboundService.startCounting(req.params.id);
+    const grn = await inboundService.startCounting(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: grn, meta: { message: 'Counting started' } });
   }),
 
@@ -59,7 +59,7 @@ const inboundController = {
    * @desc    Complete GRN
    */
   completeGRN: asyncHandler(async (req, res) => {
-    const grn = await inboundService.completeGRN(req.params.id);
+    const grn = await inboundService.completeGRN(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: grn, meta: { message: 'GRN marked as completed' } });
   }),
 
@@ -68,7 +68,7 @@ const inboundController = {
    * @desc    Log discrepancy for GRN
    */
   logGRNDiscrepancy: asyncHandler(async (req, res) => {
-    const grn = await inboundService.logDiscrepancy(req.params.id, req.body);
+    const grn = await inboundService.logDiscrepancy(req.user.warehouseKey, req.params.id, req.body);
     res.status(200).json({ success: true, data: grn, meta: { message: 'Discrepancy logged' } });
   }),
 
@@ -78,7 +78,7 @@ const inboundController = {
    */
   getDocks: asyncHandler(async (req, res) => {
     const pagination = { page: parseInt(req.query.page) || 1, limit: parseInt(req.query.limit) || 50 };
-    const result = await inboundService.listDocks(pagination);
+    const result = await inboundService.listDocks(req.user.warehouseKey, pagination);
     res.status(200).json({
       success: true,
       data: result.items || [],
@@ -96,7 +96,7 @@ const inboundController = {
    * @desc    Update dock status
    */
   updateDock: asyncHandler(async (req, res) => {
-    const dock = await inboundService.updateDock(req.params.id, req.body);
+    const dock = await inboundService.updateDock(req.user.warehouseKey, req.params.id, req.body);
     res.status(200).json({ success: true, data: dock, meta: { message: 'Dock updated successfully' } });
   }),
 
@@ -105,9 +105,9 @@ const inboundController = {
    * @desc    Export GRNs to CSV (Mock)
    */
   exportGRNs: asyncHandler(async (req, res) => {
-    const grns = await inboundService.listGRNs(req.query);
+    const grns = await inboundService.listGRNs(req.user.warehouseKey, req.query);
     // In a real system, generate CSV and stream it
-    const csv = `id,poNumber,vendor,status,items\n${grns.map(g => `${g.id},${g.poNumber},${g.vendor},${g.status},${g.items}`).join('\n')}`;
+    const csv = `id,poNumber,vendor,status,items\n${(grns.items || []).map(g => `${g.id},${g.poNumber},${g.vendor},${g.status},${g.items}`).join('\n')}`;
     res.status(200).json({ success: true, data: { csv }, meta: { message: 'CSV export initiated' } });
   })
 };
