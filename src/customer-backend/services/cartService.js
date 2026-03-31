@@ -79,32 +79,41 @@ async function addItem(userId, body) {
   const variantSize = variant ? variant.size : '';
   const image = (product.images && product.images[0]) || '';
 
-  let cart = await Cart.findOne({ userId });
-  if (!cart) {
-    cart = await Cart.create({ userId, items: [] });
+  // 1. Try to increment quantity if item already exists in cart
+  const cart = await Cart.findOneAndUpdate(
+    {
+      userId,
+      'items.productId': new mongoose.Types.ObjectId(productId),
+      'items.variantId': variantId || '',
+    },
+    { $inc: { 'items.$.quantity': quantity } },
+    { new: true }
+  ).lean();
+
+  if (cart) {
+    return formatCartResponse(cart);
   }
 
-  const existing = cart.items.find(
-    (it) => String(it.productId) === String(productId) && String(it.variantId || '') === String(variantId || '')
-  );
-  if (existing) {
-    existing.quantity += quantity;
-  } else {
-    cart.items.push({
-      productId: new mongoose.Types.ObjectId(productId),
-      variantId: variantId || '',
-      variantSize,
-      quantity,
-      price,
-      originalPrice,
-      gstRate: product.gstRate || 0,
-      productName: product.name,
-      image,
-    });
-  }
-  await cart.save();
-  const populated = await Cart.findOne({ userId }).lean();
-  return formatCartResponse(populated);
+  // 2. Item not in cart, push new item
+  const newItem = {
+    productId: new mongoose.Types.ObjectId(productId),
+    variantId: variantId || '',
+    variantSize,
+    quantity,
+    price,
+    originalPrice,
+    gstRate: product.gstRate || 0,
+    productName: product.name,
+    image,
+  };
+
+  const updatedCart = await Cart.findOneAndUpdate(
+    { userId },
+    { $push: { items: newItem } },
+    { upsert: true, new: true }
+  ).lean();
+
+  return formatCartResponse(updatedCart);
 }
 
 /**
@@ -113,18 +122,39 @@ async function addItem(userId, body) {
 async function updateItem(userId, itemId, quantity, opts = {}) {
   const { productId, variantId } = opts;
   if (quantity == null || quantity < 0) return { error: 'Invalid quantity' };
-  const cart = await Cart.findOne({ userId });
-  if (!cart) return { error: 'Cart not found' };
-  const item = findCartLine(cart, itemId, productId, variantId);
-  if (!item) return { error: 'Item not found' };
+
   if (quantity === 0) {
-    item.remove();
-  } else {
-    item.quantity = quantity;
+    return removeItem(userId, itemId, opts);
   }
-  await cart.save();
-  const populated = await Cart.findOne({ userId }).lean();
-  return formatCartResponse(populated);
+
+  let filter = { userId };
+  let update = { $set: { 'items.$.quantity': quantity } };
+
+  if (itemId && mongoose.Types.ObjectId.isValid(itemId)) {
+    filter['items._id'] = new mongoose.Types.ObjectId(itemId);
+  } else if (productId) {
+    filter['items.productId'] = new mongoose.Types.ObjectId(productId);
+    filter['items.variantId'] = variantId || '';
+  } else {
+    return { error: 'Item not found' };
+  }
+
+  const cart = await Cart.findOneAndUpdate(filter, update, { new: true }).lean();
+  if (!cart) {
+    // If we used itemId and it failed, try fallback to productId+variantId if available
+    if (itemId && productId) {
+      const fallbackFilter = {
+        userId,
+        'items.productId': new mongoose.Types.ObjectId(productId),
+        'items.variantId': variantId || '',
+      };
+      const fallbackCart = await Cart.findOneAndUpdate(fallbackFilter, update, { new: true }).lean();
+      if (fallbackCart) return formatCartResponse(fallbackCart);
+    }
+    return { error: 'Item not found' };
+  }
+
+  return formatCartResponse(cart);
 }
 
 /**
@@ -132,14 +162,29 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
  */
 async function removeItem(userId, itemId, opts = {}) {
   const { productId, variantId } = opts;
-  const cart = await Cart.findOne({ userId });
+  let filter = { userId };
+  let pullQuery;
+
+  if (itemId && mongoose.Types.ObjectId.isValid(itemId)) {
+    pullQuery = { _id: new mongoose.Types.ObjectId(itemId) };
+  } else if (productId) {
+    pullQuery = {
+      productId: new mongoose.Types.ObjectId(productId),
+      variantId: variantId || '',
+    };
+  } else {
+    return { error: 'Item not found' };
+  }
+
+  const cart = await Cart.findOneAndUpdate(
+    filter,
+    { $pull: { items: pullQuery } },
+    { new: true }
+  ).lean();
+
   if (!cart) return { error: 'Cart not found' };
-  const item = findCartLine(cart, itemId, productId, variantId);
-  if (!item) return { error: 'Item not found' };
-  item.remove();
-  await cart.save();
-  const populated = await Cart.findOne({ userId }).lean();
-  return formatCartResponse(populated);
+
+  return formatCartResponse(cart);
 }
 
 /**

@@ -10,11 +10,11 @@ async function createWorldlineSession(req, res) {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const { orderId, platform, algo, consumerEmailId, consumerMobileNo } = req.body || {};
+    const { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode } = req.body || {};
     if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
     if (!platform) return res.status(400).json({ success: false, message: 'platform is required (android|ios)' });
 
-    const result = await createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo });
+    const result = await createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode });
     if (result.error) return res.status(400).json({ success: false, message: result.error });
     return res.status(200).json({ success: true, data: result.data });
   } catch (err) {

@@ -80,7 +80,47 @@ function isTerminal(status) {
   return status === 'success' || status === 'failed' || status === 'cancelled';
 }
 
-async function createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo }) {
+function verifyGatewayResponse({ payment, response, salt }) {
+  const msgOrder = [
+    'txn_status',
+    'txn_msg',
+    'txn_err_msg',
+    'clnt_txn_ref',
+    'tpsl_bank_cd',
+    'tpsl_txn_id',
+    'txn_amt',
+    'clnt_rqst_meta',
+    'tpsl_txn_time',
+    'bal_amt',
+    'card_id',
+    'alias_name',
+    'BankTransactionID',
+    'mandate_reg_no',
+    'token',
+  ];
+
+  const expectedHash = computeResponseHash({ msgOrder, response, salt, deviceId: payment.deviceId });
+  const receivedHash = String(response?.hash || response?.HASH || '').trim();
+  const hashOk = receivedHash && expectedHash.toLowerCase() === receivedHash.toLowerCase();
+
+  const receivedAmount = Number(response?.txn_amt ?? response?.txnAmt ?? NaN);
+  const amountOk = Number.isFinite(receivedAmount) ? receivedAmount === Number(payment.amountInr) : true;
+
+  let verificationError = 'none';
+  if (!hashOk) verificationError = 'hash_mismatch';
+  else if (!amountOk) verificationError = 'amount_mismatch';
+
+  return {
+    hashOk,
+    amountOk,
+    verificationError,
+    receivedHash,
+    statusCode: String(response?.txn_status || response?.statusCode || '').trim(),
+    statusMessage: String(response?.txn_msg || response?.txn_err_msg || ''),
+  };
+}
+
+async function createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
 
   const normalizedPlatform = normalizePlatform(platform);
@@ -105,7 +145,30 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     return { error: `Amount must be between ₹${min} and ₹${max} in this environment` };
   }
 
-  const txnId = `${Date.now()}-${uuidv4().slice(0, 8)}`;
+  // Find latest attempt for this order + platform
+  const latestAttempt = await WorldlinePayment.findOne({ orderId, platform: normalizedPlatform }).sort({ attemptNo: -1 });
+
+  let attemptNo = 1;
+  let txnId;
+  let shouldCreateNew = true;
+
+  if (latestAttempt) {
+    const isExpired = latestAttempt.sessionExpiresAt && new Date() > latestAttempt.sessionExpiresAt;
+    if (!isTerminal(latestAttempt.status) && !isExpired) {
+      // Reuse active session
+      txnId = latestAttempt.txnId;
+      attemptNo = latestAttempt.attemptNo;
+      shouldCreateNew = false;
+    } else {
+      // Create new attempt
+      attemptNo = latestAttempt.attemptNo + 1;
+    }
+  }
+
+  if (shouldCreateNew) {
+    txnId = `${Date.now()}-${uuidv4().slice(0, 8)}-${attemptNo}`;
+  }
+
   const consumerId = String(userId).slice(-20);
 
   const token = computeToken({
@@ -119,7 +182,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     deviceId,
   });
 
-  const idempotencyKey = `worldline:${orderId}:${normalizedPlatform}`;
+  const idempotencyKey = `worldline:${orderId}:${normalizedPlatform}:${attemptNo}`;
 
   const sessionPayload = {
     features: {
@@ -132,7 +195,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
       deviceId,
       token,
       returnUrl,
-      paymentMode: 'all',
+      paymentMode: paymentMode || 'all',
       merchantId,
       currency: 'INR',
       consumerId,
@@ -141,8 +204,11 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     },
   };
 
+  const sessionDurationMs = 30 * 60 * 1000; // 30 minutes
+  const sessionExpiresAt = new Date(Date.now() + sessionDurationMs);
+
   const doc = await WorldlinePayment.findOneAndUpdate(
-    { idempotencyKey },
+    { orderId, attemptNo },
     {
       $setOnInsert: {
         userId: new mongoose.Types.ObjectId(userId),
@@ -153,18 +219,25 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
         platform: normalizedPlatform,
         deviceId,
         txnId,
+        attemptNo,
         amountInr: amount,
         token,
         status: 'created',
+        sessionExpiresAt,
         rawSessionRequest: sessionPayload,
       },
     },
     { upsert: true, new: true }
   ).lean();
 
-  logger.info('Worldline session created', { orderId: String(orderId), txnId: doc.txnId, platform: doc.platform });
+  logger.info('Worldline session managed', {
+    orderId: String(orderId),
+    txnId: doc.txnId,
+    attemptNo: doc.attemptNo,
+    isNew: shouldCreateNew,
+  });
 
-  return { data: { paymentId: String(doc._id), orderId: String(orderId), txnId: doc.txnId, sessionPayload } };
+  return { data: { paymentId: String(doc._id), orderId: String(orderId), txnId: doc.txnId, attemptNo: doc.attemptNo, sessionPayload } };
 }
 
 async function completePayment(userId, { orderId, txnId, response }) {
@@ -179,7 +252,7 @@ async function completePayment(userId, { orderId, txnId, response }) {
   const payment = await WorldlinePayment.findOne({ orderId: new mongoose.Types.ObjectId(orderId), txnId: String(txnId) });
   if (!payment) return { error: 'Payment session not found for order/txnId' };
 
-  // Idempotency: if we already processed to a terminal status, return it as-is.
+  // Idempotency: if already processed to a terminal status, return it as-is.
   if (isTerminal(payment.status) && payment.responseHash) {
     return {
       data: {
@@ -188,44 +261,27 @@ async function completePayment(userId, { orderId, txnId, response }) {
         status: payment.status,
         statusCode: payment.statusCode,
         statusMessage: payment.statusMessage,
-        hashOk: true,
+        hashOk: payment.verificationError === 'none',
         tpslTxnId: payment.tpslTxnId,
         bankTxnId: payment.bankTxnId,
       },
     };
   }
 
-  const msgOrder = [
-    'txn_status',
-    'txn_msg',
-    'txn_err_msg',
-    'clnt_txn_ref',
-    'tpsl_bank_cd',
-    'tpsl_txn_id',
-    'txn_amt',
-    'clnt_rqst_meta',
-    'tpsl_txn_time',
-    'bal_amt',
-    'card_id',
-    'alias_name',
-    'BankTransactionID',
-    'mandate_reg_no',
-    'token',
-  ];
+  const { hashOk, amountOk, verificationError, receivedHash, statusCode, statusMessage } = verifyGatewayResponse({
+    payment,
+    response,
+    salt,
+  });
 
-  const expectedHash = computeResponseHash({ msgOrder, response, salt, deviceId: payment.deviceId });
-  const receivedHash = String(response?.hash || response?.HASH || '').trim();
-  const hashOk = receivedHash && expectedHash.toLowerCase() === receivedHash.toLowerCase();
-
-  const statusCode = String(response?.txn_status || response?.statusCode || '').trim();
   const mapped = mapStatus(statusCode);
-  const receivedAmount = Number(response?.txn_amt ?? response?.txnAmt ?? NaN);
-  const amountOk = Number.isFinite(receivedAmount) ? receivedAmount === Number(payment.amountInr) : true;
 
   const update = {
     status: mapped,
     statusCode,
-    statusMessage: String(response?.txn_msg || response?.txn_err_msg || ''),
+    statusMessage,
+    verificationSource: 'app_complete',
+    verificationError,
     tpslTxnId: String(response?.tpsl_txn_id || ''),
     bankTxnId: String(response?.BankTransactionID || ''),
     tpslBankCd: String(response?.tpsl_bank_cd || ''),
@@ -234,37 +290,41 @@ async function completePayment(userId, { orderId, txnId, response }) {
     rawGatewayResponse: response || null,
   };
 
-  if (!hashOk) {
+  if (!hashOk || !amountOk) {
     update.status = 'unknown';
-    update.statusMessage = 'Hash verification failed';
-  } else if (!amountOk) {
-    update.status = 'unknown';
-    update.statusMessage = 'Amount mismatch';
+    update.statusMessage = !hashOk ? 'Hash verification failed' : 'Amount mismatch';
   }
 
-  await WorldlinePayment.updateOne({ _id: payment._id }, { $set: update });
+  // Use findOneAndUpdate with terminal guard to prevent races
+  const finalPayment = await WorldlinePayment.findOneAndUpdate(
+    { _id: payment._id, status: { $nin: ['success', 'failed', 'cancelled'] } },
+    { $set: update },
+    { new: true }
+  ).lean();
 
-  if (hashOk && amountOk && mapped === 'success') {
+  const effectivePayment = finalPayment || (await WorldlinePayment.findById(payment._id).lean());
+
+  if (effectivePayment.status === 'success' && effectivePayment.verificationError === 'none') {
     order.paymentStatus = 'paid';
     await order.save();
-  } else if (mapped === 'failed' || mapped === 'cancelled') {
-    order.paymentStatus = 'failed';
-    await order.save();
-  } else {
-    order.paymentStatus = 'pending';
-    await order.save();
+  } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
+    // Only move to failed if verified, or if we decide to trust cancelled even if unverified (risky)
+    if (effectivePayment.verificationError === 'none') {
+      order.paymentStatus = 'failed';
+      await order.save();
+    }
   }
 
   return {
     data: {
       orderId: String(orderId),
       txnId: String(txnId),
-      status: update.status,
-      statusCode: update.statusCode,
-      statusMessage: update.statusMessage,
-      hashOk,
-      tpslTxnId: update.tpslTxnId,
-      bankTxnId: update.bankTxnId,
+      status: effectivePayment.status,
+      statusCode: effectivePayment.statusCode,
+      statusMessage: effectivePayment.statusMessage,
+      hashOk: effectivePayment.verificationError === 'none',
+      tpslTxnId: effectivePayment.tpslTxnId,
+      bankTxnId: effectivePayment.bankTxnId,
     },
   };
 }
@@ -302,42 +362,25 @@ async function processGatewayReturn({ response }) {
         status: payment.status,
         statusCode: payment.statusCode,
         statusMessage: payment.statusMessage,
-        hashOk: true,
+        hashOk: payment.verificationError === 'none',
       },
     };
   }
 
-  const msgOrder = [
-    'txn_status',
-    'txn_msg',
-    'txn_err_msg',
-    'clnt_txn_ref',
-    'tpsl_bank_cd',
-    'tpsl_txn_id',
-    'txn_amt',
-    'clnt_rqst_meta',
-    'tpsl_txn_time',
-    'bal_amt',
-    'card_id',
-    'alias_name',
-    'BankTransactionID',
-    'mandate_reg_no',
-    'token',
-  ];
+  const { hashOk, amountOk, verificationError, receivedHash, statusCode, statusMessage } = verifyGatewayResponse({
+    payment,
+    response,
+    salt,
+  });
 
-  const expectedHash = computeResponseHash({ msgOrder, response, salt, deviceId: payment.deviceId });
-  const receivedHash = String(response?.hash || response?.HASH || '').trim();
-  const hashOk = receivedHash && expectedHash.toLowerCase() === receivedHash.toLowerCase();
-
-  const statusCode = String(response?.txn_status || response?.statusCode || '').trim();
   const mapped = mapStatus(statusCode);
-  const receivedAmount = Number(response?.txn_amt ?? response?.txnAmt ?? NaN);
-  const amountOk = Number.isFinite(receivedAmount) ? receivedAmount === Number(payment.amountInr) : true;
 
   const update = {
     status: mapped,
     statusCode,
-    statusMessage: String(response?.txn_msg || response?.txn_err_msg || ''),
+    statusMessage,
+    verificationSource: 'gateway_return',
+    verificationError,
     tpslTxnId: String(response?.tpsl_txn_id || ''),
     bankTxnId: String(response?.BankTransactionID || ''),
     tpslBankCd: String(response?.tpsl_bank_cd || ''),
@@ -346,44 +389,47 @@ async function processGatewayReturn({ response }) {
     rawGatewayReturn: response || null,
   };
 
-  if (!hashOk) {
+  if (!hashOk || !amountOk) {
     update.status = 'unknown';
-    update.statusMessage = 'Hash verification failed';
-  } else if (!amountOk) {
-    update.status = 'unknown';
-    update.statusMessage = 'Amount mismatch';
+    update.statusMessage = !hashOk ? 'Hash verification failed' : 'Amount mismatch';
   }
 
-  await WorldlinePayment.updateOne({ _id: payment._id }, { $set: update });
+  const finalPayment = await WorldlinePayment.findOneAndUpdate(
+    { _id: payment._id, status: { $nin: ['success', 'failed', 'cancelled'] } },
+    { $set: update },
+    { new: true }
+  ).lean();
 
-  if (hashOk && amountOk && mapped === 'success') {
+  const effectivePayment = finalPayment || (await WorldlinePayment.findById(payment._id).lean());
+
+  if (effectivePayment.status === 'success' && effectivePayment.verificationError === 'none') {
     order.paymentStatus = 'paid';
     await order.save();
-  } else if (mapped === 'failed' || mapped === 'cancelled') {
-    order.paymentStatus = 'failed';
-    await order.save();
-  } else {
-    order.paymentStatus = 'pending';
-    await order.save();
+  } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
+    if (effectivePayment.verificationError === 'none') {
+      order.paymentStatus = 'failed';
+      await order.save();
+    }
   }
 
   logger.info('Worldline return processed', {
     orderId: String(order._id),
     txnId,
-    status: update.status,
-    statusCode: update.statusCode,
-    hashOk,
-    amountOk,
+    status: effectivePayment.status,
+    statusCode: effectivePayment.statusCode,
+    verificationError: effectivePayment.verificationError,
+    attemptNo: effectivePayment.attemptNo,
+    tpslTxnId: effectivePayment.tpslTxnId,
   });
 
   return {
     data: {
       orderId: String(order._id),
       txnId,
-      status: update.status,
-      statusCode: update.statusCode,
-      statusMessage: update.statusMessage,
-      hashOk,
+      status: effectivePayment.status,
+      statusCode: effectivePayment.statusCode,
+      statusMessage: effectivePayment.statusMessage,
+      hashOk: effectivePayment.verificationError === 'none',
       amountOk,
     },
   };
@@ -392,20 +438,61 @@ async function processGatewayReturn({ response }) {
 async function getStatus(userId, { orderId }) {
   const order = await Order.findOne({ _id: orderId, userId: new mongoose.Types.ObjectId(userId) }).lean();
   if (!order) return { error: 'Order not found' };
-  const payment = await WorldlinePayment.findOne({ orderId: new mongoose.Types.ObjectId(orderId) }).sort({ createdAt: -1 }).lean();
+
+  const payments = await WorldlinePayment.find({ orderId: new mongoose.Types.ObjectId(orderId) }).sort({ attemptNo: -1 });
+  const payment = payments[0]; // Latest attempt
+
+  let uiState = 'WAITING_FOR_PAYMENT';
+  let recommendedAction = 'NONE';
+
+  if (!payment) {
+    uiState = 'WAITING_FOR_PAYMENT';
+    recommendedAction = 'CREATE_SESSION';
+  } else {
+    const isExpired = payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt;
+
+    if (payment.status === 'success' && payment.verificationError === 'none') {
+      uiState = 'PAID';
+      recommendedAction = 'GO_TO_ORDER';
+    } else if (payment.status === 'pending') {
+      uiState = 'PENDING_VERIFICATION';
+      recommendedAction = 'POLL_STATUS';
+    } else if (payment.status === 'unknown') {
+      uiState = 'UNKNOWN';
+      recommendedAction = 'CONTACT_SUPPORT';
+    } else if (isTerminal(payment.status) || isExpired) {
+      uiState = 'RETRY_AVAILABLE';
+      recommendedAction = 'RETRY_PAYMENT';
+    } else if (payment.status === 'created' || payment.status === 'initiated') {
+      uiState = 'WAITING_FOR_PAYMENT';
+      recommendedAction = 'OPEN_GATEWAY';
+    }
+  }
+
   return {
     data: {
       orderId: String(orderId),
       orderPaymentStatus: order.paymentStatus,
-      worldline: payment
+      uiState,
+      recommendedAction,
+      latestPayment: payment
         ? {
             txnId: payment.txnId,
+            attemptNo: payment.attemptNo,
             status: payment.status,
             statusCode: payment.statusCode,
             statusMessage: payment.statusMessage,
+            verificationError: payment.verificationError,
+            isExpired: payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt,
             updatedAt: payment.updatedAt,
           }
         : null,
+      allAttempts: payments.map((p) => ({
+        txnId: p.txnId,
+        attemptNo: p.attemptNo,
+        status: p.status,
+        createdAt: p.createdAt,
+      })),
     },
   };
 }

@@ -99,6 +99,14 @@ const appConfigSchema = new mongoose.Schema(
     payment: {
       upiMerchantId: { type: String, default: 'merchant@upi' },
       upiMerchantName: { type: String, default: 'SelOrg' },
+      upiApps: [{
+        id: { type: String },
+        name: { type: String },
+        scheme: { type: String, default: '' },
+        isActive: { type: Boolean, default: true },
+        order: { type: Number, default: 0 },
+      }],
+      showOtherUpiOption: { type: Boolean, default: true },
     },
 
     images: {
@@ -207,6 +215,14 @@ const DEFAULT_APP_CONFIG = {
   payment: {
     upiMerchantId: 'merchant@upi',
     upiMerchantName: 'SelOrg',
+    upiApps: [
+      { id: 'gpay', name: 'Google Pay', scheme: 'tez://upi/pay', isActive: true, order: 0 },
+      { id: 'phonepe', name: 'PhonePe', scheme: 'phonepe://pay', isActive: true, order: 1 },
+      { id: 'paytm', name: 'Paytm', scheme: 'paytmmp://pay', isActive: true, order: 2 },
+      { id: 'bhim', name: 'BHIM', scheme: 'upi://pay', isActive: true, order: 3 },
+      { id: 'other_upi', name: 'Other UPI Apps', scheme: 'upi://pay', isActive: true, order: 99 },
+    ],
+    showOtherUpiOption: true,
   },
   images: {
     placeholderUrl: 'https://placehold.co/200x200?text=No+Image',

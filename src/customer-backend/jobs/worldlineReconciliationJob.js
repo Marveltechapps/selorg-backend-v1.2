@@ -24,20 +24,35 @@ async function runOnce() {
     if (candidates.length === 0) return;
 
     for (const p of candidates) {
-      // Without a gateway status-enquiry API in this codebase, we can only mark the attempt as stale.
-      // This enables UI recovery via /payments/worldline/status and allows safe retry.
+      // 1. Logic for marking as unknown/stale
+      // This allows the frontend to offer a RETRY or CONTACT_SUPPORT action
+      const timeSinceUpdateMs = Date.now() - new Date(p.updatedAt).getTime();
+      const isExtremelyStale = timeSinceUpdateMs > 24 * 60 * 60 * 1000; // 24 hours
+
+      const update = {
+        status: 'unknown',
+        statusMessage: 'Reconciliation: stale pending payment',
+        verificationSource: 'reconciliation',
+      };
+
+      if (isExtremelyStale) {
+        update.status = 'failed';
+        update.statusMessage = 'Reconciliation: timed out after 24h';
+      }
+
       await WorldlinePayment.updateOne(
         { _id: p._id, status: p.status },
-        { $set: { status: 'unknown', statusMessage: 'Reconciliation: stale pending payment (no final response received)' } }
+        { $set: update }
       );
 
-      try {
-        await Order.updateOne(
-          { _id: p.orderId, paymentStatus: { $in: ['pending'] } },
-          { $set: { paymentStatus: 'pending' } }
-        );
-      } catch {
-        // non-blocking
+      // 2. Update order if this was the latest attempt
+      const latestAttempt = await WorldlinePayment.findOne({ orderId: p.orderId }).sort({ attemptNo: -1 });
+      if (latestAttempt && String(latestAttempt._id) === String(p._id)) {
+        if (update.status === 'failed') {
+          await Order.updateOne({ _id: p.orderId }, { $set: { paymentStatus: 'failed' } });
+        } else {
+          await Order.updateOne({ _id: p.orderId }, { $set: { paymentStatus: 'pending' } });
+        }
       }
     }
 
