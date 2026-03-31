@@ -6,7 +6,9 @@ const { WorldlinePayment } = require('../models/WorldlinePayment');
 const logger = require('../../core/utils/logger');
 
 function isEnabled() {
-  return process.env.WORLDLINE_ENABLED === '1' || process.env.WORLDLINE_ENABLED === 'true';
+  const raw = String(process.env.WORLDLINE_ENABLED || '').trim().toLowerCase();
+  // Be tolerant across deployment platforms that store booleans differently.
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
 function getAmountLimits() {
