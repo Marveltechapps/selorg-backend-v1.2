@@ -11,10 +11,33 @@ function isEnabled() {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 }
 
+/** Worldline sandbox kits typically allow only ₹1–₹10 per txn. Production: set WORLDLINE_MAX_AMOUNT_INR to your live limit. */
+const DEFAULT_MIN_AMOUNT_INR = 1;
+const DEFAULT_MAX_AMOUNT_INR = 10;
+
 function getAmountLimits() {
-  const min = parseFloat(process.env.WORLDLINE_MIN_AMOUNT_INR || '1');
-  const max = parseFloat(process.env.WORLDLINE_MAX_AMOUNT_INR || '10');
-  return { min, max };
+  const parsedMin = parseFloat(process.env.WORLDLINE_MIN_AMOUNT_INR ?? '');
+  const parsedMax = parseFloat(process.env.WORLDLINE_MAX_AMOUNT_INR ?? '');
+  const min = Number.isFinite(parsedMin) ? parsedMin : DEFAULT_MIN_AMOUNT_INR;
+  let max = Number.isFinite(parsedMax) ? parsedMax : DEFAULT_MAX_AMOUNT_INR;
+  if (max < min) max = min;
+  return { min: Math.max(0, min), max };
+}
+
+function worldlineAmountRangeError(amount, min, max) {
+  const rounded = Math.round(amount * 100) / 100;
+  if (amount > max) {
+    return (
+      `Worldline in this environment only accepts ₹${min}–₹${max} per payment. ` +
+      `Your order total is ₹${rounded} (items + delivery + handling + tip − discounts), not just cart subtotal. ` +
+      `Use Cash on Delivery for larger tests, or keep the full order within ₹${max}. ` +
+      `In production, set WORLDLINE_MAX_AMOUNT_INR to match your live merchant limit.`
+    );
+  }
+  if (amount < min) {
+    return `Order total ₹${rounded} is below the minimum ₹${min} for online payment in this environment.`;
+  }
+  return `Amount must be between ₹${min} and ₹${max} in this environment`;
 }
 
 function normalizePlatform(platform) {
@@ -144,7 +167,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   const amount = Number(order.totalBill || 0);
   const { min, max } = getAmountLimits();
   if (!(amount >= min && amount <= max)) {
-    return { error: `Amount must be between ₹${min} and ₹${max} in this environment` };
+    return { error: worldlineAmountRangeError(amount, min, max) };
   }
 
   // Find latest attempt for this order + platform

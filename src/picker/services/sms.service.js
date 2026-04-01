@@ -6,7 +6,15 @@
  */
 const http = require('http');
 const https = require('https');
-const { getSmsVendorUrl, getSmsVendorParams, getSmsMessageTemplate, getSmsProvider, getTwilioConfig, getMsg91Config } = require('../config/otp.config');
+const {
+  getSmsVendorUrl,
+  getSmsVendorParams,
+  getSmsMessageTemplate,
+  getSmsProvider,
+  getTwilioConfig,
+  getMsg91Config,
+  getFast2SmsConfig,
+} = require('../config/otp.config');
 const { classifySmsError } = require('./sms-diagnostics');
 
 const SMS_TIMEOUT_MS = 15000;
@@ -17,6 +25,9 @@ let lastSmsError = null;
 let lastSmsResult = null;
 
 const MAX_DEBUG_BODY_LENGTH = 2000;
+
+/** Log once per process when Spear (or config vendor) fails for credits and no MSG91/Fast2SMS fallback is set. */
+let configVendorCreditHintLogged = false;
 
 function setLastSmsError(provider, statusCode, body, errMessage) {
   lastSmsError = {
@@ -236,6 +247,17 @@ const sendViaConfigSms = (phone, otp) => {
       }
 
       setLastSmsError('config_smsvendor', r.statusCode, r.body, null);
+      if (
+        !configVendorCreditHintLogged &&
+        /insufficient|no\s*credit|recharge|balance\s*is\s*zero|out\s*of\s*balance/i.test(bodyPreview.toLowerCase()) &&
+        !(getMsg91Config().authKey || '').trim() &&
+        !(getFast2SmsConfig().apiKey || '').trim()
+      ) {
+        configVendorCreditHintLogged = true;
+        console.warn(
+          '[SMS] Config smsvendor cannot send (often: zero credits). Recharge Spear UC, or add msg91AuthKey + msg91Sender + msg91TemplateId in src/config.json (or MSG91_* in .env) so OTP falls back after Spear fails.'
+        );
+      }
       console.warn('[SMS] Config vendor FAIL – statusCode:', r.statusCode, '| param used:', paramMobile, '| body:', bodyPreview);
       return { sent: false, numberRequired: bodySaysNumberRequired(r.body), ...getLastSmsResult() };
     });
@@ -331,18 +353,21 @@ const sendViaMsg91 = (phone, otp, otpExpiryMinutes = 5) => {
   });
 };
 
-/** Fast2SMS – India. route=otp (DLT) or q (Quick SMS). numbers: 10-digit or 91+10. */
+/** Fast2SMS – India. route=otp (DLT) or q (Quick SMS). numbers: 10-digit or 91+10. Key/route from config.json or env. */
 const sendViaFast2SMS = (phone, otp) => {
-  const apiKey = process.env.FAST2SMS_API_KEY;
+  const { apiKey, route } = getFast2SmsConfig();
   if (!apiKey) return Promise.resolve({ sent: false });
-  const route = process.env.FAST2SMS_ROUTE || 'q';
   const numbers = phone.length === 10 ? phone : phone.replace(/\D/g, '').replace(/^0/, '91');
+  const template = getSmsMessageTemplate();
+  const quickMsg = template
+    ? String(template).replace(/\{otp\}/gi, otp).replace(/\{#var#\}/gi, otp)
+    : `Your verification code is ${otp}. Valid for 5 min.`;
   const body =
     route === 'otp'
       ? JSON.stringify({ route: 'otp', numbers, variables_values: otp, flash: 0 })
       : JSON.stringify({
           route: 'q',
-          message: `Your Picker App OTP is ${otp}. Valid for 5 min.`,
+          message: quickMsg,
           numbers,
           flash: 0,
         });
@@ -407,7 +432,10 @@ const sendViaTwilio = (phone, otp) => {
     setLastSmsError('Twilio', null, null, 'Invalid phone format');
     return Promise.resolve({ sent: false, ...getLastSmsResult() });
   }
-  const msg = `Your Picker App OTP is ${otp}. Valid for 5 minutes.`;
+  const template = getSmsMessageTemplate();
+  const msg = template
+    ? String(template).replace(/\{otp\}/gi, otp).replace(/\{#var#\}/gi, otp)
+    : `Your verification code is ${otp}. Valid for 5 minutes.`;
   const body = new URLSearchParams({ To: to, From: from, Body: msg }).toString();
   const auth = Buffer.from(`${sid}:${token}`).toString('base64');
   return new Promise((resolve) => {
@@ -536,7 +564,7 @@ const sendOtpSms = async (phone, otp, otpExpiryMinutes = 5) => {
         const r2 = await sendViaMsg91(trimmed, otp, otpExpiryMinutes);
         if (r2.sent) return r2;
       }
-      if (process.env.FAST2SMS_API_KEY) {
+      if (getFast2SmsConfig().apiKey) {
         const r2 = await sendViaFast2SMS(trimmed, otp);
         if (r2.sent) return r2;
       }
@@ -553,7 +581,7 @@ const sendOtpSms = async (phone, otp, otpExpiryMinutes = 5) => {
       const r = await sendViaMsg91(trimmed, otp, otpExpiryMinutes);
       if (r.sent) return r;
     }
-    if (process.env.FAST2SMS_API_KEY) {
+    if (getFast2SmsConfig().apiKey) {
       const r = await sendViaFast2SMS(trimmed, otp);
       if (r.sent) return r;
     }

@@ -79,6 +79,7 @@ const orderSchema = new mongoose.Schema(
     discount: { type: Number, default: 0 },
     walletDeduction: { type: Number, default: 0 },
     totalBill: { type: Number, required: true, default: 0 },
+    pricingSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
     estimatedDelivery: { type: Date },
     deliveredAt: { type: Date },
     deliveryOtp: { type: String },

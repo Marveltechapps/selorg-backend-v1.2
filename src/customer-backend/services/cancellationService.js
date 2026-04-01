@@ -3,6 +3,16 @@ const { Order } = require('../models/Order');
 const { sendOrderStatusNotification } = require('./notificationService');
 const { triggerAutoRefundForMissingItems, creditWallet } = require('./autoRefundService');
 
+/** Daily cancel cap: 50 non-production, 10 production. Override with CUSTOMER_MAX_CANCELLATIONS_PER_DAY. */
+function getEffectiveMaxCancellationsPerDay() {
+  const raw = process.env.CUSTOMER_MAX_CANCELLATIONS_PER_DAY;
+  if (raw !== undefined && raw !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+  return process.env.NODE_ENV === 'production' ? 10 : 50;
+}
+
 async function getActivePolicy(paymentMethod) {
   let policy = await CancellationPolicy.findOne({
     isActive: true,
@@ -16,16 +26,19 @@ async function getActivePolicy(paymentMethod) {
     }).lean();
   }
 
-  return policy || {
-    allowedStatuses: ['pending', 'confirmed'],
-    freeWindowMinutes: 2,
-    cancellationFeePercent: 0,
-    maxCancellationFee: 0,
-    maxCancellationsPerDay: 3,
-    customerCanCancel: true,
-    autoRefundOnCancel: true,
-    refundMethod: 'original_payment',
-  };
+  const base =
+    policy || {
+      allowedStatuses: ['pending', 'confirmed'],
+      freeWindowMinutes: 2,
+      cancellationFeePercent: 0,
+      maxCancellationFee: 0,
+      maxCancellationsPerDay: 10,
+      customerCanCancel: true,
+      autoRefundOnCancel: true,
+      refundMethod: 'original_payment',
+    };
+
+  return { ...base, maxCancellationsPerDay: getEffectiveMaxCancellationsPerDay() };
 }
 
 async function canCustomerCancel(userId, orderId) {

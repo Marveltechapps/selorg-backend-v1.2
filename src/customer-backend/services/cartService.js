@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 const { Cart } = require('../models/Cart');
 const { Product } = require('../models/Product');
+const { calculatePricing, compareWithLegacy } = require('./pricingEngineService');
+
+const usePricingEngine = true;
 
 /**
  * Get cart for user; return shape expected by app (items, itemTotal, discount, deliveryFee, total).
@@ -10,7 +13,7 @@ async function getCartForUser(userId) {
   if (!cart || !cart.items || cart.items.length === 0) {
     return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, total: 0 };
   }
-  return formatCartResponse(cart);
+  return formatCartResponse(cart, { userId });
 }
 
 function matchCartLine(it, productId, variantId) {
@@ -33,7 +36,8 @@ function findCartLine(cart, itemId, productId, variantId) {
   return null;
 }
 
-function formatCartResponse(cart) {
+async function formatCartResponse(cart, options = {}) {
+  const { userId = null, couponCode = null, zone = null, paymentMethod = null } = options;
   const items = (cart.items || []).map((it) => ({
     id: String(it._id),
     productId: String(it.productId),
@@ -46,16 +50,53 @@ function formatCartResponse(cart) {
     gstRate: it.gstRate || 0,
     image: it.image || '',
   }));
-  const itemTotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
-  const deliveryFee = 0;
-  const discount = 0;
-  const total = itemTotal + deliveryFee - discount;
+  const legacyItemTotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
+  const legacyDeliveryFee = 0;
+  const legacyDiscount = 0;
+  const legacyTotal = legacyItemTotal + legacyDeliveryFee - legacyDiscount;
+
+  let debugPricing = null;
+  let engineTotals = null;
+
+  try {
+    debugPricing = await calculatePricing({
+      userId,
+      cartItems: items.map((it) => ({
+        productId: it.productId,
+        variantId: it.variantId || null,
+        quantity: it.quantity,
+        baseUnitPrice: it.price,
+      })),
+      couponCode,
+      zone,
+      paymentMethod,
+      mode: 'cart',
+    });
+    engineTotals = debugPricing?.totals || null;
+    compareWithLegacy(
+      { itemTotal: legacyItemTotal, finalAmount: legacyTotal },
+      engineTotals || {}
+    );
+  } catch (error) {
+    console.warn('[cart-service] pricing engine shadow execution failed', {
+      userId,
+      message: error?.message || String(error),
+    });
+  }
+
+  const itemTotal = usePricingEngine && engineTotals ? Number(engineTotals.itemTotal) || 0 : legacyItemTotal;
+  const discount = usePricingEngine && engineTotals ? Number(engineTotals.discount) || 0 : legacyDiscount;
+  const deliveryFee =
+    usePricingEngine && engineTotals ? Number(engineTotals.deliveryFee) || 0 : legacyDeliveryFee;
+  const total = usePricingEngine && engineTotals ? Number(engineTotals.finalAmount) || 0 : legacyTotal;
+
   return {
     items,
     itemTotal,
     discount,
     deliveryFee,
     total,
+    debugPricing,
   };
 }
 
@@ -91,7 +132,7 @@ async function addItem(userId, body) {
   ).lean();
 
   if (cart) {
-    return formatCartResponse(cart);
+    return formatCartResponse(cart, { userId });
   }
 
   // 2. Item not in cart, push new item
@@ -113,7 +154,7 @@ async function addItem(userId, body) {
     { upsert: true, new: true }
   ).lean();
 
-  return formatCartResponse(updatedCart);
+  return formatCartResponse(updatedCart, { userId });
 }
 
 /**
@@ -149,12 +190,12 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
         'items.variantId': variantId || '',
       };
       const fallbackCart = await Cart.findOneAndUpdate(fallbackFilter, update, { new: true }).lean();
-      if (fallbackCart) return formatCartResponse(fallbackCart);
+      if (fallbackCart) return formatCartResponse(fallbackCart, { userId });
     }
     return { error: 'Item not found' };
   }
 
-  return formatCartResponse(cart);
+  return formatCartResponse(cart, { userId });
 }
 
 /**
@@ -184,7 +225,7 @@ async function removeItem(userId, itemId, opts = {}) {
 
   if (!cart) return { error: 'Cart not found' };
 
-  return formatCartResponse(cart);
+  return formatCartResponse(cart, { userId });
 }
 
 /**

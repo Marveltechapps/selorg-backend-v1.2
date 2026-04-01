@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const AuditLog = require('../../common-models/AuditLog');
 const websocketService = require('../../utils/websocket');
+const { getSmsMessageTemplate, isOtpDevMode } = require('../../picker/config/otp.config');
 
 function generateSecurePassword(length = 8) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -21,13 +22,27 @@ function generateSecurePassword(length = 8) {
 const JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || process.env.JWT_SECRET || 'dev_jwt_secret_change_in_prod';
 const ACCESS_EXPIRES_SECONDS = Number(process.env.JWT_ACCESS_EXPIRES_SECONDS) || 60 * 60 * 24;
 
-/** Per OTP_PROCESS_WORKFLOW.md */
-const SIGNIN_SMS_MESSAGE = 'Dear Applicant, Your OTP for Mobile No. Verification is {otp} . MJPTBCWREIS - EVOLGN';
+/** Matches default in src/config.json smsMessageTemplate when template is empty. */
+const CUSTOMER_SMS_TEMPLATE_FALLBACK =
+  'Dear Applicant, Your OTP for Mobile No. Verification is {otp}. MJPTBCWREIS - EVOLGN';
 const TEST_MOBILE = '9698790921';
 const TEST_OTP = '8790';
 
+function buildCustomerOtpSms(otp) {
+  const tpl = getSmsMessageTemplate();
+  const base = tpl && String(tpl).trim().length > 0 ? tpl : CUSTOMER_SMS_TEMPLATE_FALLBACK;
+  return String(base).replace(/{otp}/g, otp).replace(/\{#var#\}/g, otp);
+}
+
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '').slice(-10);
+}
+
+/** Map provider/internal errors to a safe string for API clients (avoid leaking stack or [SMS] logs). */
+function clientSmsFailureMessage(raw, fallback) {
+  const s = String(raw || '').trim();
+  if (!s || s.startsWith('[') || s.length > 220) return fallback;
+  return s;
 }
 
 async function sendOtp(req, res) {
@@ -43,12 +58,32 @@ async function sendOtp(req, res) {
       return;
     }
     const otp = digits === TEST_MOBILE ? TEST_OTP : generateOtp(4);
-    const message = SIGNIN_SMS_MESSAGE.replace(/{otp}/g, otp);
-    const providerResult = await sendSms({ to: digits, text: message });
+    const message = buildCustomerOtpSms(otp);
+    
+    // Log OTP to console for visibility (especially useful during development/testing)
+    console.log(`[sendOtp] Generated OTP for ${digits}: ${otp}`);
+
+    let providerResult;
+    if (isOtpDevMode()) {
+      console.log(`[sendOtp] otpDevMode: skipping SMS; enter OTP from server logs for ${digits}`);
+      providerResult = { success: true, body: 'otp-dev-mode-no-sms' };
+    } else {
+      providerResult = await sendSms({ to: digits, text: message });
+    }
 
     if (!providerResult || !providerResult.success) {
-      return res.status(500).json({ success: false, message: 'Failed to send OTP via SMS' });
+      const errorMsg = providerResult?.error || 'SMS provider unavailable';
+      console.error(`[sendOtp] SMS provider failed for ${digits}: ${errorMsg}`);
+      const clientMsg = clientSmsFailureMessage(errorMsg, 'Failed to send OTP via SMS');
+      return res.status(500).json({
+        success: false,
+        message: clientMsg,
+        internalCode: 'SMS_PROVIDER_ERROR',
+        details: process.env.NODE_ENV === 'development' ? errorMsg : undefined,
+      });
     }
+
+    console.log(`[sendOtp] OTP successfully sent to ${digits} via SMS provider`);
 
     const otpHash = hashOtp(otp);
     const expiresAt = getExpiryDate(300); // 5 min per workflow
@@ -65,10 +100,6 @@ async function sendOtp(req, res) {
       verified: false,
       providerResponseId: providerResult.body ? String(providerResult.body).slice(0, 255) : undefined,
     });
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[dev] OTP for', digits, ':', otp);
-    }
 
     res.status(200).json({
       success: true,
@@ -278,12 +309,32 @@ async function resendOtp(req, res) {
     }
     const digits = normalizePhone(session.phoneNumber);
     const otp = digits === TEST_MOBILE ? TEST_OTP : generateOtp(4);
-    const message = SIGNIN_SMS_MESSAGE.replace(/{otp}/g, otp);
-    const providerResult = await sendSms({ to: digits, text: message });
+    const message = buildCustomerOtpSms(otp);
+    
+    // Log OTP to console for visibility (especially useful during development/testing)
+    console.log(`[resendOtp] Generated OTP for ${digits}: ${otp}`);
+
+    let providerResult;
+    if (isOtpDevMode()) {
+      console.log(`[resendOtp] otpDevMode: skipping SMS; OTP in logs for ${digits}`);
+      providerResult = { success: true, body: 'otp-dev-mode-no-sms' };
+    } else {
+      providerResult = await sendSms({ to: digits, text: message });
+    }
 
     if (!providerResult || !providerResult.success) {
-      return res.status(500).json({ success: false, message: 'Failed to resend OTP via SMS' });
+      const errorMsg = providerResult?.error || 'SMS provider unavailable';
+      console.error(`[resendOtp] SMS provider failed for ${digits}: ${errorMsg}`);
+      const clientMsg = clientSmsFailureMessage(errorMsg, 'Failed to resend OTP via SMS');
+      return res.status(500).json({
+        success: false,
+        message: clientMsg,
+        internalCode: 'SMS_PROVIDER_ERROR',
+        details: process.env.NODE_ENV === 'development' ? errorMsg : undefined,
+      });
     }
+
+    console.log(`[resendOtp] OTP successfully resent to ${digits} via SMS provider`);
 
     session.otpHash = hashOtp(otp);
     session.otpSentAt = new Date();

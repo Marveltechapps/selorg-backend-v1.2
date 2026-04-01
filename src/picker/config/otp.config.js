@@ -33,10 +33,19 @@ function loadOtpConfig() {
     const raw = fs.readFileSync(configPath, 'utf8');
     const data = JSON.parse(raw);
     const smsProviderRaw = (typeof data.smsProvider === 'string' ? data.smsProvider.trim() : '') || (data.enableTwilio === true || data.enableTwilio === 1 ? 'twilio' : '') || (data.useTwilio === true || data.useTwilio === 1 ? 'twilio' : '');
-    // DEV mode: no real SMS, use fixed OTP (e.g. 1234). Set via config.otpDevMode=1 or OTP_DEV_MODE=1 or NODE_ENV=development.
-    const otpDevModeConfig = data.otpDevMode === 1 || data.otpDevMode === true;
-    const otpDevModeEnv = process.env.OTP_DEV_MODE === '1' || process.env.OTP_DEV_MODE === 'true';
-    const otpDevMode = otpDevModeConfig || otpDevModeEnv || process.env.NODE_ENV === 'development';
+    // OTP_DEV_MODE=1|true forces dev mode; =0|false forces off. Otherwise config.json otpDevMode, else NODE_ENV===development.
+    const envOtpDevTrue = process.env.OTP_DEV_MODE === '1' || process.env.OTP_DEV_MODE === 'true';
+    const envOtpDevFalse = process.env.OTP_DEV_MODE === '0' || process.env.OTP_DEV_MODE === 'false';
+    let otpDevMode;
+    if (envOtpDevTrue) {
+      otpDevMode = true;
+    } else if (envOtpDevFalse) {
+      otpDevMode = false;
+    } else if (Object.prototype.hasOwnProperty.call(data, 'otpDevMode')) {
+      otpDevMode = data.otpDevMode === 1 || data.otpDevMode === true;
+    } else {
+      otpDevMode = process.env.NODE_ENV === 'development';
+    }
 
     let smsParamMobile = typeof data.smsParamMobile === 'string' ? data.smsParamMobile.trim() : 'to_mobileno';
     let smsParamMessage = typeof data.smsParamMessage === 'string' ? data.smsParamMessage.trim() : 'sms_text';
@@ -50,25 +59,36 @@ function loadOtpConfig() {
       smsParamMobile,
       smsParamMessage,
       smsCountryCode: typeof data.smsCountryCode === 'string' ? data.smsCountryCode.trim() : '91',
-      smsPrependCountryCode: data.smsPrependCountryCode === true || data.smsPrependCountryCode === 1,
+      smsPrependCountryCode:
+        data.smsPrependCountryCode === true ||
+        data.smsPrependCountryCode === 1 ||
+        data.smsUseCountryCode === true ||
+        data.smsUseCountryCode === 1,
       smsMethod: (typeof data.smsMethod === 'string' ? data.smsMethod.toUpperCase() : '') === 'POST' ? 'POST' : 'GET',
       debugMode: data.debugMode === 1 || data.debugMode === true,
       otpDevMode,
       twilioAccountSid: typeof data.twilioAccountSid === 'string' ? data.twilioAccountSid.trim() : '',
       twilioAuthToken: typeof data.twilioAuthToken === 'string' ? data.twilioAuthToken.trim() : '',
-      twilioPhoneNumber: typeof data.twilioPhoneNumber === 'string' ? data.twilioPhoneNumber.trim() : '',
+      twilioPhoneNumber:
+        (typeof data.twilioPhoneNumber === 'string' ? data.twilioPhoneNumber.trim() : '') ||
+        (typeof data.twilioFrom === 'string' ? data.twilioFrom.trim() : '') ||
+        (typeof data.TWILIO_FROM === 'string' ? data.TWILIO_FROM.trim() : ''),
+      twilioFrom: typeof data.twilioFrom === 'string' ? data.twilioFrom.trim() : '',
       msg91AuthKey: (typeof data.msg91AuthKey === 'string' ? data.msg91AuthKey.trim() : '') || (process.env.MSG91_AUTH_KEY || '').trim(),
       msg91Sender: (typeof data.msg91Sender === 'string' ? data.msg91Sender.trim() : '') || (process.env.MSG91_SENDER || '').trim(),
       msg91TemplateId: (typeof data.msg91TemplateId === 'string' ? data.msg91TemplateId.trim() : '') || (process.env.MSG91_TEMPLATE_ID || '').trim(),
       /** Optional: DLT-approved message template. Use {otp} placeholder. If set, this is used instead of default message so SMS is not dropped by DLT. */
       smsMessageTemplate: typeof data.smsMessageTemplate === 'string' ? data.smsMessageTemplate.trim() : '',
+      fast2smsApiKey: (typeof data.fast2smsApiKey === 'string' ? data.fast2smsApiKey.trim() : '') || (process.env.FAST2SMS_API_KEY || '').trim(),
+      fast2smsRoute: (typeof data.fast2smsRoute === 'string' ? data.fast2smsRoute.trim() : '') || (process.env.FAST2SMS_ROUTE || 'q').trim(),
+      otpBypassNumbers: typeof data.otpBypassNumbers === 'string' ? data.otpBypassNumbers.trim() : '',
     };
     const hasVendor = !!cached.smsvendor;
     console.log('[OTP config] Loaded from', configPath, '| smsProvider:', cached.smsProvider, '| smsvendor:', hasVendor ? 'set' : 'not set', '| countryCode:', cached.smsCountryCode, '| otpDevMode:', cached.otpDevMode, '| debugMode:', cached.debugMode);
   } catch (err) {
     console.warn('[OTP config] Failed to load', configPath, ':', err?.message);
     // When no config file: enable dev mode so send-otp works without SMS (OTP returned in response for testing).
-    cached = { smsvendor: '', smsProvider: 'config', smsParamMobile: 'to_mobileno', smsParamMessage: 'sms_text', smsCountryCode: '91', smsPrependCountryCode: false, smsMethod: 'GET', debugMode: true, otpDevMode: true, twilioAccountSid: '', twilioAuthToken: '', twilioPhoneNumber: '', msg91AuthKey: '', msg91Sender: '', msg91TemplateId: '', smsMessageTemplate: '' };
+    cached = { smsvendor: '', smsProvider: 'config', smsParamMobile: 'to_mobileno', smsParamMessage: 'sms_text', smsCountryCode: '91', smsPrependCountryCode: false, smsMethod: 'GET', debugMode: true, otpDevMode: true, twilioAccountSid: '', twilioAuthToken: '', twilioPhoneNumber: '', twilioFrom: '', msg91AuthKey: '', msg91Sender: '', msg91TemplateId: '', smsMessageTemplate: '', fast2smsApiKey: '', fast2smsRoute: 'q', otpBypassNumbers: '' };
   }
   return cached;
 }
@@ -95,7 +115,13 @@ function getTwilioConfig() {
   return {
     accountSid: (process.env.TWILIO_ACCOUNT_SID || c.twilioAccountSid || '').trim(),
     authToken: (process.env.TWILIO_AUTH_TOKEN || c.twilioAuthToken || '').trim(),
-    phoneNumber: (process.env.TWILIO_PHONE_NUMBER || c.twilioPhoneNumber || '').trim(),
+    phoneNumber: (
+      process.env.TWILIO_PHONE_NUMBER ||
+      process.env.TWILIO_FROM ||
+      c.twilioPhoneNumber ||
+      (typeof c.twilioFrom === 'string' ? c.twilioFrom : '') ||
+      ''
+    ).trim(),
   };
 }
 
@@ -148,6 +174,15 @@ function getMsg91Config() {
   };
 }
 
+/** Fast2SMS – API key and route from config.json or env. */
+function getFast2SmsConfig() {
+  const c = loadOtpConfig();
+  return {
+    apiKey: (c.fast2smsApiKey || process.env.FAST2SMS_API_KEY || '').trim(),
+    route: (c.fast2smsRoute || process.env.FAST2SMS_ROUTE || 'q').trim(),
+  };
+}
+
 module.exports = {
   loadOtpConfig,
   getSmsVendorUrl,
@@ -157,4 +192,5 @@ module.exports = {
   getTwilioConfig,
   isOtpDevMode,
   getMsg91Config,
+  getFast2SmsConfig,
 };

@@ -3,10 +3,14 @@ const { Order } = require('../models/Order');
 const { CustomerAddress } = require('../models/CustomerAddress');
 const { Cart } = require('../models/Cart');
 const { Product } = require('../models/Product');
+const { PricingCoupon } = require('../../merch/models/PricingCoupon');
+const { CouponRedemption } = require('../models/CouponRedemption');
+const { calculatePricing, compareWithLegacy } = require('./pricingEngineService');
 const { resolveStoreId } = require('./storeLocator');
 
 /** All orders route to Adyar darkstore only */
 const ADYAR_STORE_ID = 'DS-Adyar-01';
+const usePricingEngineForOrders = true;
 
 function formatOrderForApp(doc) {
   const o = doc.toObject ? doc.toObject() : doc;
@@ -59,6 +63,7 @@ function formatOrderForApp(doc) {
     handlingCharge: o.handlingCharge,
     deliveryFee: o.deliveryFee,
     discount: o.discount,
+    pricingSnapshot: o.pricingSnapshot || null,
     walletDeduction: o.walletDeduction || 0,
     totalBill: o.totalBill,
     createdAt: o.createdAt,
@@ -152,57 +157,139 @@ async function createOrder(userId, body) {
     });
   }
 
-  const deliveryFee = 0;
-  const handlingCharge = 0;
-  const discount = 0;
-  const totalBill = itemTotal + deliveryFee + handlingCharge - discount + (deliveryTip || 0);
+  let deliveryFee = 0;
+  let handlingCharge = 0;
+  let discount = 0;
+  let totalBill = itemTotal + deliveryFee + handlingCharge - discount + (deliveryTip || 0);
+
+  const resolvedMethodType = paymentMethodType || (paymentMethodId ? 'card' : 'cash');
+  let engineResult = null;
+  try {
+    engineResult = await calculatePricing({
+      userId,
+      cartItems: orderItems.map((it) => ({
+        productId: String(it.productId),
+        variantId: it.variantId || null,
+        quantity: it.quantity,
+        baseUnitPrice: it.price,
+      })),
+      couponCode: couponCode || null,
+      zone: address?.city || null,
+      paymentMethod: resolvedMethodType,
+      mode: 'order',
+    });
+
+    compareWithLegacy(
+      { itemTotal, totalBill },
+      engineResult?.totals || {}
+    );
+  } catch (error) {
+    console.warn('[order-service] pricing engine shadow execution failed', {
+      userId,
+      message: error?.message || String(error),
+    });
+  }
+
+  if (usePricingEngineForOrders && engineResult?.totals) {
+    const safeTotals = engineResult.totals;
+    discount = Number(safeTotals.discount) || 0;
+    deliveryFee = Number(safeTotals.deliveryFee) || 0;
+    handlingCharge = Number(safeTotals.handlingCharge) || 0;
+    totalBill = (Number(safeTotals.finalAmount) || 0) + (deliveryTip || 0);
+  }
 
   const orderNumber = await generateOrderNumber();
   const estimatedDelivery = new Date(Date.now() + 60 * 60 * 1000 * 24); // +1 day
 
   const matchedStoreObjectId = await resolveStoreId(ADYAR_STORE_ID);
 
-  const resolvedMethodType = paymentMethodType || (paymentMethodId ? 'card' : 'cash');
   // Online payments are backend-led (Worldline). Mark as pending until gateway confirms.
   const paymentStatus = resolvedMethodType === 'cash' ? 'cod_pending' : 'pending';
 
-  const order = await Order.create({
-    userId: new mongoose.Types.ObjectId(userId),
-    orderNumber,
-    items: orderItems,
-    status: 'pending',
-    timeline: [{ status: 'pending', timestamp: new Date(), note: 'Order placed', actor: 'customer' }],
-    addressId: address._id,
-    storeId: matchedStoreObjectId || undefined,
-    deliveryAddress: {
-      line1: address.line1,
-      line2: address.line2,
-      city: address.city,
-      state: address.state,
-      pincode: address.pincode,
-      landmark: address.label,
-    },
-    deliveryNotes: body.deliveryNotes || '',
-    paymentMethodId: paymentMethodId || '',
-    paymentMethod: {
-      methodType: resolvedMethodType,
-      last4: '',
-    },
-    paymentStatus,
-    itemTotal,
-    totalTax,
-    handlingCharge,
-    deliveryFee,
-    deliveryTip: deliveryTip || 0,
-    discount,
-    totalBill,
-    estimatedDelivery,
-  });
+  const session = await mongoose.startSession();
+  let order;
+  try {
+    await session.withTransaction(async () => {
+      const createdOrders = await Order.create(
+        [
+          {
+            userId: new mongoose.Types.ObjectId(userId),
+            orderNumber,
+            items: orderItems,
+            status: 'pending',
+            timeline: [{ status: 'pending', timestamp: new Date(), note: 'Order placed', actor: 'customer' }],
+            addressId: address._id,
+            storeId: matchedStoreObjectId || undefined,
+            deliveryAddress: {
+              line1: address.line1,
+              line2: address.line2,
+              city: address.city,
+              state: address.state,
+              pincode: address.pincode,
+              landmark: address.label,
+            },
+            deliveryNotes: body.deliveryNotes || '',
+            paymentMethodId: paymentMethodId || '',
+            paymentMethod: {
+              methodType: resolvedMethodType,
+              last4: '',
+            },
+            paymentStatus,
+            itemTotal,
+            totalTax,
+            handlingCharge,
+            deliveryFee,
+            deliveryTip: deliveryTip || 0,
+            discount,
+            totalBill,
+            estimatedDelivery,
+            pricingSnapshot: usePricingEngineForOrders ? engineResult : undefined,
+          },
+        ],
+        { session }
+      );
+      order = createdOrders[0];
 
-  await Cart.findOneAndUpdate({ userId }, { $set: { items: [] } });
+      if (couponCode) {
+        const normalizedCode = String(couponCode).trim().toUpperCase();
+        const couponDoc = await PricingCoupon.findOne({ code: normalizedCode }).session(session);
+        if (couponDoc) {
+          const existingRedemption = await CouponRedemption.findOne({
+            couponId: couponDoc._id,
+            userId: new mongoose.Types.ObjectId(userId),
+            orderId: order._id,
+          }).session(session);
+
+          if (!existingRedemption) {
+            await CouponRedemption.create(
+              [
+                {
+                  couponId: couponDoc._id,
+                  userId: new mongoose.Types.ObjectId(userId),
+                  orderId: order._id,
+                  discountApplied: discount,
+                },
+              ],
+              { session }
+            );
+            await PricingCoupon.updateOne(
+              { _id: couponDoc._id },
+              { $inc: { usageCount: 1 } },
+              { session }
+            );
+          }
+        }
+      }
+
+      await Cart.findOneAndUpdate({ userId }, { $set: { items: [] } }, { session });
+    });
+  } finally {
+    await session.endSession();
+  }
 
   const populated = await Order.findById(order._id).lean();
   const response = formatOrderForApp({ ...populated, _id: populated._id });
+  response.debugPricing = engineResult || null;
 
   // Send push notification for order placed
   try {

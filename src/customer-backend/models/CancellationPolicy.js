@@ -11,7 +11,7 @@ const cancellationPolicySchema = new mongoose.Schema(
     freeWindowMinutes: { type: Number, default: 2 },
     cancellationFeePercent: { type: Number, default: 0 },
     maxCancellationFee: { type: Number, default: 0 },
-    maxCancellationsPerDay: { type: Number, default: 3 },
+    maxCancellationsPerDay: { type: Number, default: 10 },
     maxCancellationsPerWeek: { type: Number, default: 10 },
     customerCanCancel: { type: Boolean, default: true },
     supportCanCancel: { type: Boolean, default: true },
