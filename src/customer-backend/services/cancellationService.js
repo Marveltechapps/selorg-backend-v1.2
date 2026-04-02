@@ -3,14 +3,14 @@ const { Order } = require('../models/Order');
 const { sendOrderStatusNotification } = require('./notificationService');
 const { triggerAutoRefundForMissingItems, creditWallet } = require('./autoRefundService');
 
-/** Daily cancel cap: 50 non-production, 10 production. Override with CUSTOMER_MAX_CANCELLATIONS_PER_DAY. */
+/** Daily cancel cap per user (calendar day). Default 1000; override with CUSTOMER_MAX_CANCELLATIONS_PER_DAY. */
 function getEffectiveMaxCancellationsPerDay() {
   const raw = process.env.CUSTOMER_MAX_CANCELLATIONS_PER_DAY;
   if (raw !== undefined && raw !== '') {
     const n = Number(raw);
     if (Number.isFinite(n) && n >= 0) return Math.floor(n);
   }
-  return process.env.NODE_ENV === 'production' ? 10 : 50;
+  return 1000;
 }
 
 async function getActivePolicy(paymentMethod) {
@@ -32,7 +32,7 @@ async function getActivePolicy(paymentMethod) {
       freeWindowMinutes: 2,
       cancellationFeePercent: 0,
       maxCancellationFee: 0,
-      maxCancellationsPerDay: 10,
+      maxCancellationsPerDay: 1000,
       customerCanCancel: true,
       autoRefundOnCancel: true,
       refundMethod: 'original_payment',
