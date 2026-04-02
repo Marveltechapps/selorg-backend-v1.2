@@ -13,7 +13,15 @@ async function getCart(req, res) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const data = await getCartForUser(userId);
+    const couponCodeRaw = typeof req.query?.coupon_code === 'string' ? req.query.coupon_code.trim() : '';
+    const zoneRaw = typeof req.query?.zone === 'string' ? req.query.zone.trim() : '';
+    const paymentMethodRaw = typeof req.query?.payment_method === 'string' ? req.query.payment_method.trim() : '';
+
+    const data = await getCartForUser(userId, {
+      couponCode: couponCodeRaw || null,
+      zone: zoneRaw || null,
+      paymentMethod: paymentMethodRaw || null,
+    });
     res.status(200).json({ success: true, data });
   } catch (err) {
     console.error('cart getCart error:', err);

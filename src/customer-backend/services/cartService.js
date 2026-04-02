@@ -6,14 +6,15 @@ const { calculatePricing, compareWithLegacy } = require('./pricingEngineService'
 const usePricingEngine = true;
 
 /**
- * Get cart for user; return shape expected by app (items, itemTotal, discount, deliveryFee, total).
+ * Get cart for user; return shape expected by app.
+ * Supports optional pricing context (coupon/zone/payment) for parity with createOrder.
  */
-async function getCartForUser(userId) {
+async function getCartForUser(userId, options = {}) {
   const cart = await Cart.findOne({ userId }).lean();
   if (!cart || !cart.items || cart.items.length === 0) {
-    return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, total: 0 };
+    return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
   }
-  return formatCartResponse(cart, { userId });
+  return formatCartResponse(cart, { userId, ...options });
 }
 
 function matchCartLine(it, productId, variantId) {
@@ -38,7 +39,7 @@ function findCartLine(cart, itemId, productId, variantId) {
 
 async function formatCartResponse(cart, options = {}) {
   const { userId = null, couponCode = null, zone = null, paymentMethod = null } = options;
-  const items = (cart.items || []).map((it) => ({
+  let items = (cart.items || []).map((it) => ({
     id: String(it._id),
     productId: String(it.productId),
     productName: it.productName || '',
@@ -88,13 +89,38 @@ async function formatCartResponse(cart, options = {}) {
   const discount = usePricingEngine && engineTotals ? Number(engineTotals.discount) || 0 : legacyDiscount;
   const deliveryFee =
     usePricingEngine && engineTotals ? Number(engineTotals.deliveryFee) || 0 : legacyDeliveryFee;
+  const handlingCharge =
+    usePricingEngine && engineTotals ? Number(engineTotals.handlingCharge) || 0 : 0;
+  const tax = usePricingEngine && engineTotals ? Number(engineTotals.tax) || 0 : 0;
   const total = usePricingEngine && engineTotals ? Number(engineTotals.finalAmount) || 0 : legacyTotal;
+
+  // Optional: return line prices from pricing engine so list rows align with server-side pricing.
+  if (usePricingEngine && Array.isArray(debugPricing?.items) && debugPricing.items.length) {
+    const linePriceByKey = new Map();
+    debugPricing.items.forEach((line) => {
+      const key = `${String(line.productId || '')}::${String(line.variantId || '')}`;
+      if (key && !linePriceByKey.has(key)) {
+        linePriceByKey.set(key, Number(line.effectiveUnitPrice ?? line.unitPrice ?? line.baseUnitPrice ?? 0));
+      }
+    });
+    items = items.map((item) => {
+      const key = `${String(item.productId || '')}::${String(item.variantId || '')}`;
+      const engineUnitPrice = linePriceByKey.get(key);
+      if (!Number.isFinite(engineUnitPrice) || engineUnitPrice <= 0) return item;
+      return {
+        ...item,
+        price: engineUnitPrice,
+      };
+    });
+  }
 
   return {
     items,
     itemTotal,
     discount,
     deliveryFee,
+    handlingCharge,
+    tax,
     total,
     debugPricing,
   };
@@ -233,7 +259,7 @@ async function removeItem(userId, itemId, opts = {}) {
  */
 async function clearCart(userId) {
   await Cart.findOneAndUpdate({ userId }, { $set: { items: [] } });
-  return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, total: 0 };
+  return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
 }
 
 module.exports = {

@@ -284,8 +284,9 @@ async function applyFees(context) {
     ...safeContext,
     totals: {
       ...ensureZeroTotals(safeContext.totals),
-      deliveryFee:
-        toNumber(safeContext?.totals?.itemTotal, 0) >= FREE_DELIVERY_THRESHOLD ? 0 : DEFAULT_DELIVERY_FEE,
+      // Fullstack change: force free delivery for customer app.
+      // (Backend pricing engine feeds both cart and order billing totals.)
+      deliveryFee: 0,
       handlingCharge: DEFAULT_HANDLING_CHARGE,
     },
   };
