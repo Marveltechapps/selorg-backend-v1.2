@@ -83,9 +83,9 @@ function resolveWorldlineHashAlgo(requestAlgo) {
 function deviceIdForPlatform(platform, algo) {
   const resolved = resolveWorldlineHashAlgo(algo);
   const isSh1 = resolved === 'sh1';
-  // Paynimo Android SDK samples use "AndroidSH1"/"AndroidSH2" casing; hash algo is derived case-insensitively in hashForDeviceId.
-  if (platform === 'android') return isSh1 ? 'AndroidSH1' : 'AndroidSH2';
-  if (platform === 'ios') return isSh1 ? 'iOSSH1' : 'iOSSH2';
+  // Paynimo Android SDK samples often use uppercase "ANDROIDSH1"/"ANDROIDSH2".
+  if (platform === 'android') return isSh1 ? 'ANDROIDSH1' : 'ANDROIDSH2';
+  if (platform === 'ios') return isSh1 ? 'IOSSH1' : 'IOSSH2';
   return null;
 }
 
@@ -261,8 +261,16 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
       merchantId,
       currency: 'INR',
       consumerId,
+      consumerMobileNo: mobileForHash,
+      consumerEmailId: emailForHash,
       txnId,
       items: [{ itemId: schemeCode, amount: amountStr, comAmt: '0' }],
+      customStyle: {
+        PRIMARY_COLOR_CODE: '#034703',
+        SECONDARY_COLOR_CODE: '#FFFFFF',
+        BUTTON_COLOR_CODE_1: '#034703',
+        BUTTON_COLOR_CODE_2: '#FFFFFF',
+      },
     },
   };
 
