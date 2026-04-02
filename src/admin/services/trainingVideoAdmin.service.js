@@ -4,6 +4,11 @@
  */
 const TrainingVideo = require('../../picker/models/trainingVideo.model');
 
+function toFiniteNumber(value, fallback = 0) {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /**
  * List all training videos (including inactive) for admin
  */
@@ -30,7 +35,7 @@ async function getVideoById(idOrVideoId) {
  * Create a new training video
  */
 async function createVideo(body) {
-  const duration = Number(body.duration) || 0;
+  const duration = toFiniteNumber(body.duration, 0);
   const durationDisplay = body.durationDisplay || `${Math.ceil(duration / 60)} min`;
   const video = new TrainingVideo({
     videoId: body.videoId || `video${Date.now()}`,
@@ -40,8 +45,8 @@ async function createVideo(body) {
     durationDisplay,
     videoUrl: body.videoUrl,
     thumbnailUrl: body.thumbnailUrl || '',
-    order: Number(body.order) ?? 0,
-    minimumWatchPercentage: Number(body.minimumWatchPercentage) || 80,
+    order: toFiniteNumber(body.order, 0),
+    minimumWatchPercentage: toFiniteNumber(body.minimumWatchPercentage, 80),
     isActive: body.isActive !== false,
   });
   await video.save();
@@ -60,7 +65,7 @@ async function updateVideo(idOrVideoId, body) {
   if (body.title != null) video.title = body.title;
   if (body.description != null) video.description = body.description;
   if (body.duration != null) {
-    video.duration = Number(body.duration);
+    video.duration = toFiniteNumber(body.duration, video.duration);
     if (body.durationDisplay != null) {
       video.durationDisplay = body.durationDisplay;
     } else {
@@ -70,8 +75,10 @@ async function updateVideo(idOrVideoId, body) {
   if (body.durationDisplay != null) video.durationDisplay = body.durationDisplay;
   if (body.videoUrl != null) video.videoUrl = body.videoUrl;
   if (body.thumbnailUrl != null) video.thumbnailUrl = body.thumbnailUrl;
-  if (body.order != null) video.order = Number(body.order);
-  if (body.minimumWatchPercentage != null) video.minimumWatchPercentage = Number(body.minimumWatchPercentage);
+  if (body.order != null) video.order = toFiniteNumber(body.order, video.order);
+  if (body.minimumWatchPercentage != null) {
+    video.minimumWatchPercentage = toFiniteNumber(body.minimumWatchPercentage, video.minimumWatchPercentage || 80);
+  }
   if (typeof body.isActive === 'boolean') video.isActive = body.isActive;
 
   await video.save();
