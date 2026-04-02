@@ -47,10 +47,44 @@ function normalizePlatform(platform) {
   return null;
 }
 
+function trimEnv(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+/** Paynimo uses totalamount in the token string; amount must match item line(s) (typically two decimals, e.g. 7.00). */
+function formatWorldlineTxnAmount(amountInr) {
+  const n = Number(amountInr);
+  if (!Number.isFinite(n) || n < 0) return '0.00';
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+function parseAlgoToken(raw) {
+  const a = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (a === 'sh1' || a === 'sha256' || a === 'sha-256') return 'sh1';
+  if (a === 'sh2' || a === 'sha512' || a === 'sha-512') return 'sh2';
+  return null;
+}
+
+/**
+ * Prefer WORLDLINE_HASH_ALGO on the server so PROD TEST vs live kits can be fixed without an app release.
+ * Optional client `algo` only applies when env is unset. Default sh2 matches Paynimo Android sample (SHA-512 / AndroidSH2).
+ */
+function resolveWorldlineHashAlgo(requestAlgo) {
+  const fromEnv = parseAlgoToken(process.env.WORLDLINE_HASH_ALGO);
+  if (fromEnv) return fromEnv;
+  const fromClient = parseAlgoToken(requestAlgo);
+  if (fromClient) return fromClient;
+  return 'sh2';
+}
+
 function deviceIdForPlatform(platform, algo) {
-  const a = String(algo || 'sh2').toLowerCase();
-  const isSh1 = a === 'sh1' || a === 'sha256' || a === 'sha-256';
-  if (platform === 'android') return isSh1 ? 'ANDROIDSH1' : 'ANDROIDSH2';
+  const resolved = resolveWorldlineHashAlgo(algo);
+  const isSh1 = resolved === 'sh1';
+  // Paynimo Android SDK samples use "AndroidSH1"/"AndroidSH2" casing; hash algo is derived case-insensitively in hashForDeviceId.
+  if (platform === 'android') return isSh1 ? 'AndroidSH1' : 'AndroidSH2';
   if (platform === 'ios') return isSh1 ? 'iOSSH1' : 'iOSSH2';
   return null;
 }
@@ -154,10 +188,10 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   const deviceId = deviceIdForPlatform(normalizedPlatform, algo);
   if (!deviceId) return { error: 'Unable to determine deviceId for platform' };
 
-  const merchantId = process.env.WORLDLINE_MERCHANT_ID;
-  const schemeCode = process.env.WORLDLINE_SCHEME_CODE || 'FIRST';
-  const salt = process.env.WORLDLINE_SALT;
-  const returnUrl = process.env.WORLDLINE_RETURN_URL;
+  const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID);
+  const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
+  const salt = trimEnv(process.env.WORLDLINE_SALT);
+  const returnUrl = trimEnv(process.env.WORLDLINE_RETURN_URL);
 
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
@@ -165,6 +199,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   if (!order) return { error: 'Order not found' };
 
   const amount = Number(order.totalBill || 0);
+  const amountStr = formatWorldlineTxnAmount(amount);
   const { min, max } = getAmountLimits();
   if (!(amount >= min && amount <= max)) {
     return { error: worldlineAmountRangeError(amount, min, max) };
@@ -195,14 +230,16 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   }
 
   const consumerId = String(userId).slice(-20);
+  const mobileForHash = trimEnv(consumerMobileNo);
+  const emailForHash = trimEnv(consumerEmailId);
 
   const token = computeToken({
     merchantId,
     txnId,
-    totalAmount: String(amount),
+    totalAmount: amountStr,
     consumerId,
-    consumerMobileNo,
-    consumerEmailId,
+    consumerMobileNo: mobileForHash,
+    consumerEmailId: emailForHash,
     salt,
     deviceId,
   });
@@ -225,7 +262,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
       currency: 'INR',
       consumerId,
       txnId,
-      items: [{ itemId: schemeCode, amount: String(amount), comAmt: '0' }],
+      items: [{ itemId: schemeCode, amount: amountStr, comAmt: '0' }],
     },
   };
 
@@ -268,7 +305,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
 async function completePayment(userId, { orderId, txnId, response }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
 
-  const salt = process.env.WORLDLINE_SALT;
+  const salt = trimEnv(process.env.WORLDLINE_SALT);
   if (!salt) return { error: 'Worldline configuration incomplete' };
 
   const order = await Order.findOne({ _id: orderId, userId: new mongoose.Types.ObjectId(userId) });
@@ -360,7 +397,7 @@ async function completePayment(userId, { orderId, txnId, response }) {
  */
 async function processGatewayReturn({ response }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
-  const salt = process.env.WORLDLINE_SALT;
+  const salt = trimEnv(process.env.WORLDLINE_SALT);
   if (!salt) return { error: 'Worldline configuration incomplete' };
 
   const txnId = String(
@@ -528,6 +565,14 @@ module.exports = {
   processGatewayReturn,
   getStatus,
   // exported for tests
-  _internals: { computeToken, computeResponseHash, mapStatus, isTerminal },
+  _internals: {
+    computeToken,
+    computeResponseHash,
+    mapStatus,
+    isTerminal,
+    formatWorldlineTxnAmount,
+    resolveWorldlineHashAlgo,
+    deviceIdForPlatform,
+  },
 };
 
