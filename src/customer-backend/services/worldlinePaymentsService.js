@@ -83,9 +83,10 @@ function resolveWorldlineHashAlgo(requestAlgo) {
 function deviceIdForPlatform(platform, algo) {
   const resolved = resolveWorldlineHashAlgo(algo);
   const isSh1 = resolved === 'sh1';
-  // Paynimo Android SDK samples often use uppercase "ANDROIDSH1"/"ANDROIDSH2".
-  if (platform === 'android') return isSh1 ? 'ANDROIDSH1' : 'ANDROIDSH2';
-  if (platform === 'ios') return isSh1 ? 'IOSSH1' : 'IOSSH2';
+  // Paynimo Android SDK native code samples use "AndroidSH1"/"AndroidSH2" (mixed case).
+  // Documentation shows "ANDROIDSH1" but actual SDK code uses "AndroidSH1" (capital A, lowercase ndroid, capital SH).
+  if (platform === 'android') return isSh1 ? 'AndroidSH1' : 'AndroidSH2';
+  if (platform === 'ios') return isSh1 ? 'iOSSH1' : 'iOSSH2';
   return null;
 }
 
