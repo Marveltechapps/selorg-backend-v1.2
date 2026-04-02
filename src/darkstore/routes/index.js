@@ -38,6 +38,16 @@ const devTestController = require('../controllers/devTestController');
 // Auth (login only) - no JWT required
 router.use('/auth', authRoutes);
 
+// Operational alerts: also available to rider dashboard JWTs.
+// Kept separate from the main darkstore bundle so riders cannot access inventory/orders APIs.
+router.use(
+  '/alerts',
+  authenticateToken,
+  requireRole('darkstore', 'admin', 'super_admin', 'rider'),
+  cacheMiddleware(appConfig.cache.darkstore),
+  alertRoutes
+);
+
 // All other routes require JWT and role: darkstore, admin, super_admin; cache GET responses
 const protectedRouter = express.Router();
 protectedRouter.use(authenticateToken, requireRole('darkstore', 'admin', 'super_admin'));
@@ -53,7 +63,6 @@ protectedRouter.use('/outbound', outboundRoutes);
 protectedRouter.use('/qc', qcRoutes);
 protectedRouter.use('/health', healthRoutes);
 protectedRouter.use('/staff', staffRoutes);
-protectedRouter.use('/alerts', alertRoutes);
 protectedRouter.use('/analytics', analyticsRoutes);
 protectedRouter.use('/hsd', hsdRoutes);
 protectedRouter.use('/utilities', utilitiesRoutes);

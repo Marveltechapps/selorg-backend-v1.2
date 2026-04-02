@@ -6,6 +6,20 @@ const Contract = require('../models/Contract');
 const { Rider: RiderV2 } = require('../../rider_v2_backend/src/models/Rider');
 const logger = require('../../core/utils/logger');
 
+const MS_PER_DAY = 86400000;
+
+/**
+ * Whole calendar days from record creation to now while status is onboarding.
+ * Uses RiderHR / Rider V2 `createdAt` as onboarding start (HR record creation).
+ */
+function computeOnboardingDaysActive(createdAt, status) {
+  if (status !== 'onboarding') return null;
+  if (!createdAt) return 0;
+  const start = createdAt instanceof Date ? createdAt : new Date(createdAt);
+  if (Number.isNaN(start.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - start.getTime()) / MS_PER_DAY));
+}
+
 const listRiders = async (filters = {}, pagination = {}) => {
   try {
     const {
@@ -99,6 +113,7 @@ const listRiders = async (filters = {}, pagination = {}) => {
       return {
         ...r,
         createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+        onboardingDaysActive: computeOnboardingDaysActive(r.createdAt, r.status),
         contract: {
           startDate: r.contract?.startDate ? new Date(r.contract.startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           endDate: r.contract?.endDate ? new Date(r.contract.endDate).toISOString().split('T')[0] : new Date(Date.now() + 31536000000).toISOString().split('T')[0],
@@ -201,6 +216,7 @@ const getRiderDetails = async (riderId) => {
       deviceId: rider.deviceId || null,
       deviceType: rider.deviceType || null,
       createdAt: rider.createdAt ? rider.createdAt.toISOString() : null, // Include createdAt for days active calculation
+      onboardingDaysActive: computeOnboardingDaysActive(rider.createdAt, rider.status),
       contract: {
         startDate: rider.contract.startDate.toISOString().split('T')[0],
         endDate: rider.contract.endDate.toISOString().split('T')[0],
@@ -363,6 +379,8 @@ const onboardRider = async (riderData) => {
       trainingStatus: rider.trainingStatus,
       appAccess: rider.appAccess,
       deviceAssigned: rider.deviceAssigned,
+      createdAt: rider.createdAt ? rider.createdAt.toISOString() : null,
+      onboardingDaysActive: computeOnboardingDaysActive(rider.createdAt, rider.status),
       contract: {
         startDate: rider.contract.startDate.toISOString().split('T')[0],
         endDate: rider.contract.endDate.toISOString().split('T')[0],

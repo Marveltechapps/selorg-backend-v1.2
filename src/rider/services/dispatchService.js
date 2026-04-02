@@ -72,7 +72,7 @@ const listUnassignedOrders = async (filters = {}) => {
       const distance = calculateOrderDistance(order.id);
       const etaMinutes = Math.ceil(distance * 3); // Rough estimate: 3 minutes per km
       const pickupCoords = extractCoordinates(order.pickupLocation);
-      const dropCoords = extractCoordinates(order.dropLocation);
+      const dropCoords = extractDropCoordinates(order);
 
       return {
         ...order,
@@ -232,7 +232,7 @@ const getMapData = async (filters = {}) => {
       result.orders = orders.map((order) => {
         // Extract coordinates from address (simplified - would need geocoding)
         const pickupCoords = extractCoordinates(order.pickupLocation);
-        const dropCoords = extractCoordinates(order.dropLocation);
+        const dropCoords = extractDropCoordinates(order);
 
         return {
           id: order.id,
@@ -271,7 +271,7 @@ const getMapData = async (filters = {}) => {
       const pickupMap = new Map();
 
       orders.forEach((order) => {
-        const key = order.pickupLocation;
+        const key = order.pickupLocation ?? '';
         if (!pickupMap.has(key)) {
           const coords = extractCoordinates(order.pickupLocation);
           pickupMap.set(key, {
@@ -294,15 +294,39 @@ const getMapData = async (filters = {}) => {
   }
 };
 
+/** Fallback when addresses are missing or not geocoded — must match dashboard default region so map toggles don’t jump to another continent */
+const DEFAULT_MAP_COORDS = { lat: 13.0827, lng: 80.2707 };
+
 /**
- * Extract coordinates from address (simplified - would need geocoding service)
+ * Extract coordinates from address string (simplified - would need geocoding service).
+ * Handles missing/legacy orders where pickup/drop strings are absent.
  */
 const extractCoordinates = (address) => {
-  // Simplified: generate mock coordinates based on address hash
-  const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const lat = 40.7128 + (hash % 100) / 1000; // NYC area
-  const lng = -74.0060 + (hash % 200) / 1000;
+  const str = typeof address === 'string' ? address.trim() : '';
+  if (!str) {
+    return { ...DEFAULT_MAP_COORDS };
+  }
+  const hash = str.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const lat = DEFAULT_MAP_COORDS.lat + (hash % 100) / 1000;
+  const lng = DEFAULT_MAP_COORDS.lng + (hash % 200) / 1000;
   return { lat, lng };
+};
+
+/**
+ * Drop location: prefer embedded delivery coordinates when present on the order document.
+ */
+const extractDropCoordinates = (order) => {
+  const c = order?.delivery?.address?.coordinates;
+  if (
+    c &&
+    typeof c.lat === 'number' &&
+    typeof c.lng === 'number' &&
+    !Number.isNaN(c.lat) &&
+    !Number.isNaN(c.lng)
+  ) {
+    return { lat: c.lat, lng: c.lng };
+  }
+  return extractCoordinates(order?.dropLocation ?? order?.delivery_address);
 };
 
 /**
@@ -374,7 +398,7 @@ const getMapOrders = async (filters = {}) => {
 
     const ordersData = orders.map((order) => {
       const pickupCoords = extractCoordinates(order.pickupLocation);
-      const dropCoords = extractCoordinates(order.dropLocation);
+      const dropCoords = extractDropCoordinates(order);
 
       return {
         id: order.id,
@@ -396,7 +420,7 @@ const getMapOrders = async (filters = {}) => {
     // Get pickup points
     const pickupMap = new Map();
     orders.forEach((order) => {
-      const key = order.pickupLocation;
+      const key = order.pickupLocation ?? '';
       if (!pickupMap.has(key)) {
         const coords = extractCoordinates(order.pickupLocation);
         pickupMap.set(key, {
@@ -1085,14 +1109,10 @@ const groupOrders = async (filters = {}) => {
     }
 
     // Process orders to ensure they have coordinates
-    const processedOrders = orders.map(order => {
-      let coords = order.delivery?.address?.coordinates;
-      if (!coords) {
-        // Fallback to extraction from string address
-        coords = extractCoordinates(order.dropLocation || order.delivery_address || '');
-      }
-      return { ...order, coordinates: coords };
-    });
+    const processedOrders = orders.map((order) => ({
+      ...order,
+      coordinates: extractDropCoordinates(order),
+    }));
 
     const unassigned = [...processedOrders];
     // Sort by coordinates for deterministic results
@@ -1197,14 +1217,11 @@ const listClusters = async (filters = {}) => {
       const orders = await Order.find({ id: { $in: cluster.orderIds } }).lean();
       
       // Add coordinates to orders
-      const processedOrders = orders.map(order => {
-        let coords = order.delivery?.address?.coordinates;
-        if (!coords) {
-          coords = extractCoordinates(order.dropLocation || order.delivery_address || '');
-        }
-        return { ...order, coordinates: coords };
-      });
-      
+      const processedOrders = orders.map((order) => ({
+        ...order,
+        coordinates: extractDropCoordinates(order),
+      }));
+
       return {
         ...cluster,
         orders: processedOrders,
