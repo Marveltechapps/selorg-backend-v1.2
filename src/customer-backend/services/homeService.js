@@ -6,6 +6,7 @@ const { Category } = require('../models/Category');
 const { Banner } = require('../models/Banner');
 const { HomeSection } = require('../models/HomeSection');
 const { Product } = require('../models/Product');
+const { enrichProductsWithVariants } = require('../utils/productVariantsPayload');
 const { LifestyleItem } = require('../models/LifestyleItem');
 const { PromoBlock } = require('../models/PromoBlock');
 const { getDefaultAddress } = require('./addressService');
@@ -26,6 +27,7 @@ async function resolveProducts(productIds = []) {
       sku: 1,
       name: 1,
       size: 1,
+      quantity: 1,
       tag: 1,
       price: 1,
       mrp: 1,
@@ -37,9 +39,12 @@ async function resolveProducts(productIds = []) {
       stock: 1,
       stockQuantity: 1,
       images: 1,
+      hierarchyCode: 1,
+      variants: 1,
     });
   const map = new Map(products.map((p) => [String(p._id), p]));
-  return productIds.map((id) => map.get(String(id))).filter(Boolean);
+  const ordered = productIds.map((id) => map.get(String(id))).filter(Boolean);
+  return enrichProductsWithVariants(ordered);
 }
 
 async function getHomePayload(req = {}) {

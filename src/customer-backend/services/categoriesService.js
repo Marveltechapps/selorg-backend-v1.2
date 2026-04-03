@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const { Category } = require('../models/Category');
 const { Banner } = require('../models/Banner');
 const { Product } = require('../models/Product');
+const { enrichProductsWithVariants } = require('../utils/productVariantsPayload');
 
 const DEFAULT_PRODUCT_LIMIT = 50;
 
@@ -50,7 +51,7 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     classification: 'Style',
   };
 
-  const products = await Product.find(
+  const rawProducts = await Product.find(
     subCategoryId
       ? {
           ...productQueryBase,
@@ -71,6 +72,8 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     .sort({ order: 1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
     .lean();
+
+  const products = await enrichProductsWithVariants(rawProducts);
 
   return {
     category: {
@@ -103,12 +106,7 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
       quantity:
         p.quantity ||
         (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : ''),
-      variants: (Array.isArray(p.variants) ? p.variants : []).map((v, i) => ({
-        id: v._id ? String(v._id) : String(p._id) + '-' + i,
-        size: v.size,
-        price: v.price,
-        originalPrice: v.originalPrice,
-      })),
+      variants: Array.isArray(p.variants) ? p.variants : [],
     })),
   };
 }

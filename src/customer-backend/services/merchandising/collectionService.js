@@ -2,6 +2,7 @@ const { Collection } = require('../../models/Collection');
 const { Product } = require('../../models/Product');
 const { Tag } = require('../../models/Tag');
 const { enrichProduct } = require('../../utils/customerMediaEnrichment');
+const { enrichProductsWithVariants } = require('../../utils/productVariantsPayload');
 
 /**
  * Resolve products for a collection (manual or rule-based)
@@ -59,6 +60,8 @@ async function resolveCollectionProducts(collectionId, options = {}) {
         isSaleable: 1,
         stock: 1,
         stockQuantity: 1,
+        hierarchyCode: 1,
+        variants: 1,
       })
       .limit(100);
 
@@ -70,7 +73,9 @@ async function resolveCollectionProducts(collectionId, options = {}) {
     else if (sortBy === 'sortOrder') products.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
     const start = (page - 1) * limit;
-    return products.slice(start, start + limit).map(enrichProduct);
+    const sliced = products.slice(start, start + limit);
+    const withVariants = await enrichProductsWithVariants(sliced);
+    return withVariants.map(enrichProduct);
   }
 
   if (productIds.length === 0) return [];
@@ -94,11 +99,15 @@ async function resolveCollectionProducts(collectionId, options = {}) {
       isSaleable: 1,
       stock: 1,
       stockQuantity: 1,
+      hierarchyCode: 1,
+      variants: 1,
     });
   const map = new Map(products.map((p) => [String(p._id), p]));
   const ordered = productIds.map((id) => map.get(String(id))).filter(Boolean);
   const start = (page - 1) * limit;
-  return ordered.slice(start, start + limit).map(enrichProduct);
+  const sliced = ordered.slice(start, start + limit);
+  const withVariants = await enrichProductsWithVariants(sliced);
+  return withVariants.map(enrichProduct);
 }
 
 module.exports = { resolveCollectionProducts };

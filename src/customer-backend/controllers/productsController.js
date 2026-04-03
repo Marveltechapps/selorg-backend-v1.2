@@ -1,5 +1,11 @@
 const { Product } = require('../models/Product');
 const { HomeConfig } = require('../models/HomeConfig');
+const {
+  mapEmbeddedVariants,
+  enrichProductsWithVariants,
+  pickImageFields,
+  filterHierarchySiblingsForProductLine,
+} = require('../utils/productVariantsPayload');
 
 async function getProductDetail(req, res) {
   try {
@@ -32,13 +38,66 @@ async function getProductDetail(req, res) {
         data: { product: { _id: id, isActive: false }, variants: [], relatedProducts: [] },
       });
     }
-    const variants = await Product.find({
-      hierarchyCode: product.hierarchyCode,
-      isActive: true,
-      isSaleable: true,
-    })
-      .select({ baseCost: 0, vendorCode: 0, mfgSkuCode: 0, hsnCode: 0, udf: 0, meta: 0 })
-      .lean();
+
+    let variants = [];
+    const embedded = mapEmbeddedVariants(product);
+    if (embedded.length > 1) {
+      variants = embedded;
+    } else if (product.hierarchyCode && String(product.hierarchyCode).trim()) {
+      const siblings = await Product.find({
+        hierarchyCode: product.hierarchyCode,
+        isActive: true,
+        isSaleable: true,
+      })
+        .select({ baseCost: 0, vendorCode: 0, mfgSkuCode: 0, hsnCode: 0, udf: 0, meta: 0 })
+        .lean();
+      const line = filterHierarchySiblingsForProductLine(product, siblings);
+      if (line.length > 1) {
+        variants = line.map((s) => {
+          const sid = String(s._id);
+          return {
+            id: sid,
+            productId: sid,
+            name: s.name,
+            size: String(s.size || s.quantity || '').trim() || '1 unit',
+            price: Number(s.price ?? 0),
+            originalPrice: Number(s.mrp ?? s.originalPrice ?? s.price ?? 0),
+            ...pickImageFields(s),
+          };
+        });
+      } else if (line.length === 1) {
+        const s = line[0];
+        const sid = String(s._id);
+        variants = [
+          {
+            id: sid,
+            productId: sid,
+            name: s.name,
+            size: String(s.size || s.quantity || product.size || product.quantity || '').trim() || '1 unit',
+            price: Number(s.price ?? product.price ?? 0),
+            originalPrice: Number(s.mrp ?? s.originalPrice ?? product.mrp ?? product.price ?? 0),
+            ...pickImageFields(s),
+          },
+        ];
+      }
+    } else if (embedded.length === 1) {
+      variants = embedded;
+    }
+    if (variants.length === 0) {
+      const pid = String(product._id);
+      variants = [
+        {
+          id: pid,
+          productId: pid,
+          name: product.name,
+          size: String(product.size || product.quantity || '').trim() || '1 unit',
+          price: Number(product.price || 0),
+          originalPrice: Number(product.mrp ?? product.originalPrice ?? product.price ?? 0),
+          ...pickImageFields(product),
+        },
+      ];
+    }
+
     let relatedProducts = [];
     if (Array.isArray(product.relatedProductIds) && product.relatedProductIds.length > 0) {
       relatedProducts = await Product.find({
@@ -61,6 +120,7 @@ async function getProductDetail(req, res) {
         .limit(8)
         .lean();
     }
+    relatedProducts = await enrichProductsWithVariants(relatedProducts);
     const homeConfig = await HomeConfig.findOne({ key: 'main' }).select('deliveryLabel').lean();
     const enrichedProduct = {
       ...product,
@@ -91,7 +151,7 @@ async function searchProducts(req, res) {
       classification: 'Style',
     };
     if (category) searchFilter.categoryId = category;
-    const [products, total] = await Promise.all([
+    const [rawProducts, total] = await Promise.all([
       Product.find(searchFilter, { score: { $meta: 'textScore' } })
         .sort({ score: { $meta: 'textScore' }, sortOrder: 1, order: 1 })
         .skip(skip)
@@ -100,6 +160,7 @@ async function searchProducts(req, res) {
         .lean(),
       Product.countDocuments(searchFilter),
     ]);
+    const products = await enrichProductsWithVariants(rawProducts);
 
     return res.status(200).json({
       success: true,
