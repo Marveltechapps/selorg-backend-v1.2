@@ -13,6 +13,19 @@ function productBaseName(name) {
 }
 
 /**
+ * Key for carousel / similar-products dedupe: same pack SKUs often differ only by a leading brand word
+ * ("Nagarathar Turmeric Powder" vs "Turmeric Powder") and must show as one card with variants.
+ */
+function productLineDedupeKey(name) {
+  const base = productBaseName(name);
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length >= 3) {
+    return parts.slice(1).join(' ');
+  }
+  return base;
+}
+
+/**
  * `hierarchyCode` is often shared too broadly in data; only treat docs as size-SKUs of the same
  * product when their base names match (e.g. exclude Turmeric vs Chilli that share a code).
  */
@@ -25,6 +38,29 @@ function filterHierarchySiblingsForProductLine(product, siblings) {
     return [product];
   }
   return filtered;
+}
+
+/**
+ * One carousel / grid row per catalog product line (same base title, different pack SKUs).
+ * Uses `hierarchyCode` + normalized line when present so multiple Product docs for the same
+ * family (e.g. three Turmeric SKUs sharing a code) collapse to one card with variants.
+ * @param {number} [maxCount] - optional cap after dedupe (e.g. similar products = 8).
+ */
+function dedupeProductsByBaseName(products, maxCount) {
+  if (!Array.isArray(products) || products.length === 0) return products;
+  const seen = new Set();
+  const out = [];
+  for (const p of products) {
+    if (!p) continue;
+    const line = productLineDedupeKey(p.name);
+    const code = p.hierarchyCode && String(p.hierarchyCode).trim();
+    const k = code ? `h:${code}::${line || String(p._id)}` : line || `__id:${String(p._id)}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+    if (typeof maxCount === 'number' && maxCount > 0 && out.length >= maxCount) break;
+  }
+  return out;
 }
 
 /** Media fields so each variant row can show the correct SKU image (esp. hierarchy siblings). */
@@ -95,10 +131,16 @@ function singleVariantFallback(p) {
  * A single embedded row often duplicates the default size; real multi-size SKUs may live as
  * separate Product docs under the same code — do not let one embedded row block hierarchy expansion.
  */
-async function enrichProductsWithVariants(products) {
-  if (!Array.isArray(products) || products.length === 0) return products;
+async function enrichProductsWithVariants(products, options = {}) {
+  const dedupeLines = options.dedupeProductLines !== false;
+  let list = Array.isArray(products) ? products : [];
+  if (dedupeLines && list.length > 0) {
+    const max = typeof options.maxProductLines === 'number' ? options.maxProductLines : undefined;
+    list = dedupeProductsByBaseName(list, max);
+  }
+  if (!Array.isArray(list) || list.length === 0) return list;
 
-  const enriched = products.map((p) => ({ ...p }));
+  const enriched = list.map((p) => ({ ...p }));
   const needHierarchy = [];
 
   for (let i = 0; i < enriched.length; i += 1) {
@@ -193,5 +235,7 @@ module.exports = {
   singleVariantFallback,
   pickImageFields,
   productBaseName,
+  productLineDedupeKey,
   filterHierarchySiblingsForProductLine,
+  dedupeProductsByBaseName,
 };

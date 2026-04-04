@@ -4,12 +4,13 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.updateKitStatus = exports.verifyOtp = exports.uploadProfilePhoto = exports.requestOtp = exports.refreshToken = exports.getProfile = exports.completeTraining = exports.getOnboardingState = void 0;
+exports.updateKitStatus = exports.deleteAccount = exports.verifyOtp = exports.uploadProfilePhoto = exports.requestOtp = exports.refreshToken = exports.getProfile = exports.completeTraining = exports.getOnboardingState = void 0;
 var _nodeCrypto = require("node:crypto");
 var _env = require("../../config/env.js");
 var _appConfig = require("../../config/appConfig.js");
 var _token = require("../../utils/token.js");
 var _Rider = require("../../models/Rider.js");
+var _Order = require("../../models/Order.js");
 var _RiderKit = require("../../../../rider/models/Kit.js");
 var _Otp = require("../../models/Otp.js");
 var _kycService = require("../kyc/kyc.service.js");
@@ -225,6 +226,9 @@ var verifyOtp = exports.verifyOtp = /*#__PURE__*/function () {
             _context3.n = 7;
             break;
           }
+          if (rider.status === "deleted") {
+            throw new Error("This account has been closed.");
+          }
           if (!(rider.accountLockedUntil && new Date() < rider.accountLockedUntil)) {
             _context3.n = 6;
             break;
@@ -284,6 +288,9 @@ var verifyOtp = exports.verifyOtp = /*#__PURE__*/function () {
           }
           throw new Error("Rider not found. Please register first.");
         case 14:
+          if (_rider.status === "deleted") {
+            throw new Error("This account has been closed.");
+          }
           // Reset failed login attempts on successful login
           _rider.failedLoginAttempts = 0;
           _rider.accountLockedUntil = undefined;
@@ -412,6 +419,9 @@ var refreshToken = exports.refreshToken = /*#__PURE__*/function () {
           }
           throw new Error("Rider not found");
         case 3:
+          if (rider.status === "deleted") {
+            throw new Error("Account no longer active");
+          }
           newAccessToken = (0, _token.signToken)({
             sub: rider.riderId,
             phoneNumber: rider.phoneNumber,
@@ -452,6 +462,9 @@ var getProfile = exports.getProfile = /*#__PURE__*/function () {
           }
           return _context5.a(2, null);
         case 2:
+          if (rider.status === "deleted") {
+            return _context5.a(2, null);
+          }
           _context5.n = 3;
           return Promise.all([(0, _kycService.getUserStatus)(rider.riderId), _RiderKit.findOne({
             isActive: true
@@ -510,7 +523,10 @@ var completeTraining = exports.completeTraining = /*#__PURE__*/function () {
         case 0:
           _context6.n = 1;
           return _Rider.Rider.findOneAndUpdate({
-            riderId: riderId
+            riderId: riderId,
+            status: {
+              $ne: "deleted"
+            }
           }, {
             trainingCompleted: true
           }, {
@@ -553,6 +569,9 @@ var getOnboardingState = exports.getOnboardingState = /*#__PURE__*/function () {
           }
           throw new Error("Rider not found");
         case 2:
+          if (rider.status === "deleted") {
+            throw new Error("This account has been closed.");
+          }
           _context7.n = 3;
           return Promise.all([(0, _kycService.getUserStatus)(riderId), _RiderKit.findOne({
             isActive: true
@@ -590,15 +609,17 @@ var getOnboardingState = exports.getOnboardingState = /*#__PURE__*/function () {
             if (!kitComplete) return false;
             return true;
           })(rider, documents, kitComplete);
+          // Navigation step order matches rider app: location → vehicle → selfie → personal details → KYC → training → kit.
+          // Placeholder name "Rider XXXX" must NOT skip earlier steps (was causing AuthGuard to jump to profile mid-flow).
           currentStep = "complete";
-          if (!rider.name || !String(rider.name).trim() || /^Rider\s+\d{4}$/.test(String(rider.name).trim())) {
-            currentStep = "profile";
-          } else if (!rider.preferredLocation || !rider.preferredLocation.cityId || !rider.preferredLocation.hubId) {
+          if (!rider.preferredLocation || !rider.preferredLocation.cityId || !rider.preferredLocation.hubId) {
             currentStep = "location";
           } else if (!rider.vehicle || !rider.vehicle.type || !rider.vehicle.registrationNumber) {
             currentStep = "vehicle";
           } else if (!rider.profilePicture) {
             currentStep = "profile-photo";
+          } else if (!rider.name || !String(rider.name).trim() || /^Rider\s+\d{4}$/.test(String(rider.name).trim())) {
+            currentStep = "profile";
           } else {
             var required = (documents || []).filter(function (d) {
               return d.required;
@@ -653,7 +674,10 @@ var updateKitStatus = exports.updateKitStatus = /*#__PURE__*/function () {
           });
           _contextKitStatus.n = 2;
           return _Rider.Rider.findOneAndUpdate({
-            riderId: riderId
+            riderId: riderId,
+            status: {
+              $ne: "deleted"
+            }
           }, {
             checkedKitItems: checkedItemIds,
             checkedKitItemLabels: checkedKitItemLabels
@@ -678,5 +702,99 @@ var updateKitStatus = exports.updateKitStatus = /*#__PURE__*/function () {
   }));
   return function updateKitStatus(riderId, checkedItemIds) {
     return _refKitStatus.apply(this, arguments);
+  };
+}();
+var deleteAccount = exports.deleteAccount = /*#__PURE__*/function () {
+  var _refDeleteAccount = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeDeleteAccount(riderId) {
+    var rider, activeOrders, now, syntheticPhone;
+    return _regenerator().w(function (_ctxDel) {
+      while (1) switch (_ctxDel.n) {
+        case 0:
+          if (riderId) {
+            _ctxDel.n = 1;
+            break;
+          }
+          throw new Error("Rider id required");
+        case 1:
+          _ctxDel.n = 2;
+          return _Rider.Rider.findOne({
+            riderId: riderId
+          });
+        case 2:
+          rider = _ctxDel.v;
+          if (rider) {
+            _ctxDel.n = 3;
+            break;
+          }
+          throw new Error("Rider not found");
+        case 3:
+          if (!(rider.status === "deleted")) {
+            _ctxDel.n = 4;
+            break;
+          }
+          throw new Error("Account already deleted");
+        case 4:
+          _ctxDel.n = 5;
+          return _Order.Order.countDocuments({
+            "riderAssignment.riderId": riderId,
+            status: {
+              $nin: ["delivered", "cancelled"]
+            }
+          });
+        case 5:
+          activeOrders = _ctxDel.v;
+          if (!(activeOrders > 0)) {
+            _ctxDel.n = 6;
+            break;
+          }
+          throw new Error("ACTIVE_ORDERS");
+        case 6:
+          now = new Date();
+          syntheticPhone = "deleted_".concat(riderId, "_").concat(now.getTime());
+          _ctxDel.n = 7;
+          return _Rider.Rider.findOneAndUpdate({
+            riderId: riderId
+          }, {
+            $set: {
+              status: "deleted",
+              deletedAt: now,
+              phoneNumber: syntheticPhone,
+              email: "",
+              name: "Deleted User",
+              profilePicture: "",
+              availability: "offline",
+              otp: null,
+              otpExpiry: null,
+              isVerified: false,
+              trustedDevices: [],
+              sessions: [],
+              mfa: {
+                enabled: false,
+                secret: null,
+                backupCodes: []
+              },
+              bankDetails: {
+                accountNumber: "",
+                ifscCode: "",
+                accountHolderName: ""
+              }
+            },
+            $unset: {
+              currentShift: "",
+              currentLocation: ""
+            }
+          }, {
+            "new": true
+          });
+        case 7:
+          return _ctxDel.a(2, {
+            success: true,
+            message: "Account deleted"
+          });
+      }
+    }, _calleeDeleteAccount);
+  }));
+  return function deleteAccount(_xDel) {
+    return _refDeleteAccount.apply(this, arguments);
   };
 }();

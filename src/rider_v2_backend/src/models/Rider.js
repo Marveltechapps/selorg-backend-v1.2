@@ -90,8 +90,13 @@ var RiderSchema = new _mongoose.Schema({
   },
   status: {
     type: String,
-    "enum": ["pending", "approved", "active", "inactive", "suspended"],
+    "enum": ["pending", "approved", "active", "inactive", "suspended", "deleted"],
     "default": "pending",
+    index: true
+  },
+  /** Set when rider self-deletes (soft delete); original phone is released for new signup */
+  deletedAt: {
+    type: Date,
     index: true
   },
   currentShift: {

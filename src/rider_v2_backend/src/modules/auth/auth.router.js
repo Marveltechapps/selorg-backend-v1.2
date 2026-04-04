@@ -197,6 +197,32 @@ authRouter.post("/logout", _authenticate.authenticate, /*#__PURE__*/function () 
     return _ref4.apply(this, arguments);
   };
 }());
+var deleteAccountBodySchema = _zod.z.object({
+  confirm: _zod.z.literal(true)
+});
+authRouter.post("/delete-account", _authenticate.authenticate, function (req, res) {
+  var parsed = deleteAccountBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "confirm must be true"
+    });
+  }
+  (0, _authService.deleteAccount)(req.user.id).then(function (result) {
+    res.json(result);
+  })["catch"](function (err) {
+    var msg = err && err.message ? err.message : "Delete failed";
+    if (msg === "ACTIVE_ORDERS") {
+      return res.status(409).json({
+        success: false,
+        error: "Complete or cancel active deliveries before deleting your account."
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      error: msg
+    });
+  });
+});
 authRouter.get("/me", _authenticate.authenticate, /*#__PURE__*/function () {
   var _ref5 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee5(req, res) {
     var profile;

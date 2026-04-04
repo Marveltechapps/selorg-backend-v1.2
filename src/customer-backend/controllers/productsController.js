@@ -6,6 +6,7 @@ const {
   pickImageFields,
   filterHierarchySiblingsForProductLine,
 } = require('../utils/productVariantsPayload');
+const { normalizeDescriptionForClient } = require('../utils/productDescriptionNormalize');
 
 async function getProductDetail(req, res) {
   try {
@@ -27,7 +28,7 @@ async function getProductDetail(req, res) {
         hazardous: 0,
         poisonous: 0,
         udf: 0,
-        meta: 0,
+        // Keep `meta` for product detail (Origin / Health copy in meta.title/description; customer app Product Information).
         storeLinks: 0,
         thresholdQty: 0,
       })
@@ -107,7 +108,7 @@ async function getProductDetail(req, res) {
         classification: 'Style',
       })
         .select({ baseCost: 0, vendorCode: 0, mfgSkuCode: 0, hsnCode: 0, udf: 0, meta: 0 })
-        .limit(8)
+        .limit(32)
         .lean();
     } else if (product.hierarchyCode) {
       relatedProducts = await Product.find({
@@ -117,13 +118,15 @@ async function getProductDetail(req, res) {
         isSaleable: true,
       })
         .select({ baseCost: 0, vendorCode: 0, mfgSkuCode: 0, hsnCode: 0, udf: 0, meta: 0 })
-        .limit(8)
+        .limit(32)
         .lean();
     }
-    relatedProducts = await enrichProductsWithVariants(relatedProducts);
+    // One card per product line; pack SKUs collapse into variants on each card (dedupe by base title, max 8 lines).
+    relatedProducts = await enrichProductsWithVariants(relatedProducts, { maxProductLines: 8 });
     const homeConfig = await HomeConfig.findOne({ key: 'main' }).select('deliveryLabel').lean();
     const enrichedProduct = {
       ...product,
+      description: normalizeDescriptionForClient(product.description),
       deliveryInfo: product.deliveryInfo || homeConfig?.deliveryLabel || '10-min delivery',
     };
     res.status(200).json({ success: true, data: { product: enrichedProduct, variants, relatedProducts } });
@@ -160,7 +163,7 @@ async function searchProducts(req, res) {
         .lean(),
       Product.countDocuments(searchFilter),
     ]);
-    const products = await enrichProductsWithVariants(rawProducts);
+    const products = await enrichProductsWithVariants(rawProducts, { dedupeProductLines: false });
 
     return res.status(200).json({
       success: true,

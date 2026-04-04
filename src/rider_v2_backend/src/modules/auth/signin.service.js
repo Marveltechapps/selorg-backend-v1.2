@@ -182,6 +182,7 @@ var existingUserLogin = exports.existingUserLogin = function existingUserLogin(m
 
   return _Rider.Rider.findOne({ phoneNumber: mobile }).then(function (user) {
     if (!user) return Promise.resolve({ canSkipOtp: false });
+    if (user.status === "deleted") return Promise.resolve({ canSkipOtp: false });
     return (0, _kycService.getUserStatus)(user.riderId)
       .then(function (documents) {
         var onboardingComplete = hasCompletedOnboarding(user, documents);
