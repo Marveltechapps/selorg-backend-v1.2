@@ -71,6 +71,7 @@ const getSummary = async (req, res, next) => {
 
 /**
  * GET /staff/shifts
+ * Query: date (YYYY-MM-DD), filter = all | checked-in | absent (matches StaffShifts summary cards)
  */
 const listShifts = async (req, res, next) => {
   try {
@@ -80,9 +81,17 @@ const listShifts = async (req, res, next) => {
     const endOfDay = new Date(dateStr);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const shifts = await Shift.find({
+    const filter = (req.query.filter || 'all').toLowerCase();
+    const query = {
       date: { $gte: startOfDay, $lte: endOfDay },
-    })
+    };
+    if (filter === 'checked-in') {
+      query.status = { $in: ['active', 'completed'] };
+    } else if (filter === 'absent') {
+      query.status = { $in: ['absent', 'late'] };
+    }
+
+    const shifts = await Shift.find(query)
       .sort({ startTime: 1 })
       .lean();
 

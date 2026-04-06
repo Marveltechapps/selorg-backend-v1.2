@@ -4,6 +4,28 @@ const mongoose = require('mongoose');
 const { Order } = require('../models/Order');
 const { WorldlinePayment } = require('../models/WorldlinePayment');
 const logger = require('../../core/utils/logger');
+const fs = require('fs');
+
+// #region agent log
+const DEBUG_SESSION = '636da9';
+const DEBUG_LOG_PATH =
+  process.env.DEBUG_WORLDLINE_LOG_PATH ||
+  '/Users/muthuramanveerashekar/Desktop/Dev/selorg-combined/.cursor/debug-636da9.log';
+
+function appendPaynimoDebugLog(payload) {
+  const line =
+    JSON.stringify({
+      sessionId: DEBUG_SESSION,
+      timestamp: Date.now(),
+      ...payload,
+    }) + '\n';
+  try {
+    fs.appendFileSync(DEBUG_LOG_PATH, line);
+  } catch (_) {
+    /* log path missing on remote hosts — same payload goes to logger below */
+  }
+}
+// #endregion
 
 function isEnabled() {
   const raw = String(process.env.WORLDLINE_ENABLED || '').trim().toLowerCase();
@@ -244,6 +266,60 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     salt,
     deviceId,
   });
+
+  // #region agent log
+  const resolvedAlgo = resolveWorldlineHashAlgo(algo);
+  const preSaltParts = [
+    merchantId,
+    txnId,
+    amountStr,
+    '',
+    consumerId,
+    mobileForHash,
+    emailForHash,
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+    '',
+  ];
+  const preSaltJoin = preSaltParts.join('|');
+  const paynimoDebugData = {
+    resolvedAlgo,
+    algoEnvRaw: process.env.WORLDLINE_HASH_ALGO != null ? String(process.env.WORLDLINE_HASH_ALGO).trim() : null,
+    algoSource: trimEnv(process.env.WORLDLINE_HASH_ALGO)
+      ? 'env'
+      : parseAlgoToken(algo)
+        ? 'client'
+        : 'default_sh2',
+    deviceId,
+    platform: normalizedPlatform,
+    amountStr,
+    merchantIdLen: merchantId.length,
+    saltLen: salt.length,
+    schemeCode,
+    txnId,
+    consumerIdLen: String(consumerId).length,
+    consumerMobileLen: mobileForHash.length,
+    consumerEmailLen: emailForHash.length,
+    tokenLen: token.length,
+    hashFn: deviceId.toUpperCase().endsWith('SH1') ? 'sha256' : 'sha512',
+    preSaltPipeSha256_16: crypto.createHash('sha256').update(preSaltJoin, 'utf8').digest('hex').slice(0, 16),
+    item0Amount: amountStr,
+    shouldCreateNew,
+  };
+  appendPaynimoDebugLog({
+    hypothesisId: 'H1-H5',
+    location: 'worldlinePaymentsService.createSession',
+    message: 'paynimo request token inputs',
+    data: paynimoDebugData,
+  });
+  logger.info('Worldline Paynimo hash diagnostics', paynimoDebugData);
+  // #endregion
 
   const idempotencyKey = `worldline:${orderId}:${normalizedPlatform}:${attemptNo}`;
 

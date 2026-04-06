@@ -264,6 +264,12 @@ app.use('/api/v1/rider/kit', riderKitRoutes);
 const riderOrderRoutes = require('./rider/routes/orderRoutes');
 app.use('/api/v1/rider/orders', riderOrderRoutes);
 
+// Rider shift master CRUD + flows (available/list, my, select, start, end).
+// Must be mounted before the main /api/v1/rider router: when USE_LEGACY_RIDER is off,
+// riderMain is the v2 delivery router, which does not expose /shifts.
+const riderShiftRoutes = require('./rider/routes/shiftRoutes');
+app.use('/api/v1/rider/shifts', riderShiftRoutes);
+
 const riderDashboardNotificationRoutes = require('./rider/routes/dashboardNotificationRoutes');
 app.use(
   '/api/v1/rider/notifications',
