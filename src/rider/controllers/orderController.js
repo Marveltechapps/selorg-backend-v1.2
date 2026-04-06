@@ -5,6 +5,7 @@
 const orderService = require('../../warehouse/services/orderService');
 const cache = require('../../utils/cache');
 const logger = require('../../core/utils/logger');
+const riderDashboardNotificationService = require('../services/riderDashboardNotificationService');
 
 const listOrders = async (req, res, next) => {
   try {
@@ -52,6 +53,10 @@ const assignOrder = async (req, res, next) => {
     await cache.del('distribution');
     await cache.del('rider:overview:summary');
 
+    riderDashboardNotificationService
+      .notifyOrderAssigned(req, { orderId, riderName: order.rider?.name })
+      .catch((err) => logger.warn('Rider dashboard notification (assign) failed', { err: err.message }));
+
     res.status(200).json({
       orderId: order.id,
       riderId: order.riderId,
@@ -86,6 +91,10 @@ const alertOrder = async (req, res, next) => {
     await cache.delByPattern('orders:*');
     await cache.delByPattern('alerts:*');
     await cache.del('rider:overview:summary');
+
+    riderDashboardNotificationService
+      .notifyOrderAlert(req, { orderId, reason: reason || 'Delayed Order Alert' })
+      .catch((err) => logger.warn('Rider dashboard notification (alert) failed', { err: err.message }));
 
     res.status(200).json(result || { success: true });
   } catch (error) {

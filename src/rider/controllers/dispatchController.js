@@ -1,4 +1,5 @@
 const dispatchService = require('../services/dispatchService');
+const riderDashboardNotificationService = require('../services/riderDashboardNotificationService');
 const cache = require('../../utils/cache');
 const logger = require('../../core/utils/logger');
 
@@ -159,7 +160,14 @@ const assignOrder = async (req, res, next) => {
     await cache.del('distribution');
     await cache.delByPattern('dashboard:*');
     await cache.delByPattern('dispatch:*');
-    
+
+    riderDashboardNotificationService
+      .notifyOrderAssigned(req, {
+        orderId: result.orderId,
+        riderName: result.riderName,
+      })
+      .catch((err) => logger.warn('Rider dashboard notification (dispatch assign) failed', { err: err.message }));
+
     res.status(200).json(result);
   } catch (error) {
     logger.error('Error in assignOrder controller:', error);

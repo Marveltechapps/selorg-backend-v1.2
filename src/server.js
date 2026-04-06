@@ -14,7 +14,13 @@ const xss = require('xss-clean');
 const { createServer } = require('http');
 const connectDB = require('./config/db');
 const websocketService = require('./utils/websocket');
-const { requestIdMiddleware, errorHandler, validateJWTSecret } = require('./core/middleware');
+const {
+  requestIdMiddleware,
+  errorHandler,
+  validateJWTSecret,
+  authenticateToken,
+  requireRole,
+} = require('./core/middleware');
 const { requestLoggerMiddleware } = require('./core/middleware/requestLogger.middleware');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const validateEnvironment = require('./config/validateEnv');
@@ -257,6 +263,14 @@ app.use('/api/v1/rider/kit', riderKitRoutes);
 // with RiderOperational (string id), not ProductionRider/DarkstoreRider (ObjectId _id).
 const riderOrderRoutes = require('./rider/routes/orderRoutes');
 app.use('/api/v1/rider/orders', riderOrderRoutes);
+
+const riderDashboardNotificationRoutes = require('./rider/routes/dashboardNotificationRoutes');
+app.use(
+  '/api/v1/rider/notifications',
+  authenticateToken,
+  requireRole('rider', 'admin', 'super_admin'),
+  riderDashboardNotificationRoutes
+);
 
 // Rider wrapper: health route + main router (v2 exports riderRouter, legacy exports router)
 const riderMain = riderRoutes.riderRouter || riderRoutes;
