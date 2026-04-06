@@ -11,7 +11,7 @@ const worldlinePaymentSchema = new mongoose.Schema(
     schemeCode: { type: String, required: true }, // itemId in Paynimo request (e.g. FIRST)
 
     platform: { type: String, enum: ['android', 'ios'], required: true },
-    deviceId: { type: String, enum: ['ANDROIDSH1', 'ANDROIDSH2', 'iOSSH1', 'iOSSH2'], required: true },
+    deviceId: { type: String, enum: ['AndroidSH1', 'AndroidSH2', 'iOSSH1', 'iOSSH2'], required: true },
 
     txnId: { type: String, required: true }, // merchant txn id
     attemptNo: { type: Number, default: 1 },

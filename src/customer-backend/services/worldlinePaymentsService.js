@@ -113,8 +113,8 @@ function deviceIdForPlatform(platform, algo) {
 }
 
 function hashForDeviceId(deviceId, value) {
-  const did = String(deviceId || '');
-  const algo = did.toUpperCase().endsWith('SH1') ? 'sha256' : 'sha512';
+  const did = String(deviceId || '').toUpperCase();
+  const algo = did.endsWith('SH1') ? 'sha256' : 'sha512';
   return crypto.createHash(algo).update(String(value), 'utf8').digest('hex');
 }
 
@@ -139,6 +139,10 @@ function computeToken({ merchantId, txnId, totalAmount, consumerId, consumerMobi
     '', // cvvCode
     salt,
   ];
+  // Must be 17 segments (16 fields + salt); Paynimo rebuilds the same pipe string for request validation.
+  if (parts.length !== 17) {
+    logger.warn('Worldline Paynimo token pipe segment count mismatch', { pipeCount: parts.length, expect: 17 });
+  }
   return hashForDeviceId(deviceId, parts.join('|'));
 }
 
