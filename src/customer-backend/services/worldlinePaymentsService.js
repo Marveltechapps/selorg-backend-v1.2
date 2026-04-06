@@ -257,8 +257,9 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   }
 
   const consumerId = String(userId).slice(-20);
-  const mobileForHash = trimEnv(consumerMobileNo);
-  const emailForHash = trimEnv(consumerEmailId);
+  // Must match SDK/JSON: use '' when missing (not undefined), so pipe string matches gateway rebuild.
+  const mobileForHash = consumerMobileNo ? String(consumerMobileNo).trim() : '';
+  const emailForHash = consumerEmailId ? String(consumerEmailId).trim() : '';
 
   const token = computeToken({
     merchantId,
@@ -360,9 +361,19 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   const sessionDurationMs = 30 * 60 * 1000; // 30 minutes
   const sessionExpiresAt = new Date(Date.now() + sessionDurationMs);
 
+  // $setOnInsert alone skips updates when the doc already exists — stale token/txnId vs new session payload.
   const doc = await WorldlinePayment.findOneAndUpdate(
     { orderId, attemptNo },
     {
+      $set: {
+        token,
+        txnId,
+        deviceId,
+        amountInr: amount,
+        status: 'created',
+        sessionExpiresAt,
+        rawSessionRequest: sessionPayload,
+      },
       $setOnInsert: {
         userId: new mongoose.Types.ObjectId(userId),
         orderId: new mongoose.Types.ObjectId(orderId),
@@ -370,14 +381,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
         merchantId,
         schemeCode,
         platform: normalizedPlatform,
-        deviceId,
-        txnId,
         attemptNo,
-        amountInr: amount,
-        token,
-        status: 'created',
-        sessionExpiresAt,
-        rawSessionRequest: sessionPayload,
       },
     },
     { upsert: true, new: true }
