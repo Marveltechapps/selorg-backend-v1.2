@@ -343,7 +343,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
       txnId,
       // Paynimo / Weipl sample: totalAmount must match token segment 3 and sum of items[].amount (two decimals).
       totalAmount: amountStr,
-      items: [{ itemId: schemeCode, amount: amountStr, comAmt: '0' }],
+      items: [{ itemId: schemeCode, amount: amountStr, comAmt: '0.00' }],
       customStyle: {
         PRIMARY_COLOR_CODE: '#034703',
         SECONDARY_COLOR_CODE: '#FFFFFF',
