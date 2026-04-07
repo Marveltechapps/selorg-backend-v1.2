@@ -324,9 +324,26 @@ var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
             if (updates.vehicle.model) update["vehicle.model"] = updates.vehicle.model;
           }
           if (updates.bankDetails) {
-            update["bankDetails.accountNumber"] = updates.bankDetails.accountNumber;
-            update["bankDetails.ifscCode"] = updates.bankDetails.ifscCode;
-            update["bankDetails.accountHolderName"] = updates.bankDetails.accountHolderName;
+            if (updates.bankDetails.accountNumber !== undefined) {
+              update["bankDetails.accountNumber"] = updates.bankDetails.accountNumber;
+            }
+            if (updates.bankDetails.ifscCode !== undefined) {
+              update["bankDetails.ifscCode"] = updates.bankDetails.ifscCode;
+            }
+            if (updates.bankDetails.accountHolderName !== undefined) {
+              update["bankDetails.accountHolderName"] = updates.bankDetails.accountHolderName;
+            }
+            if (updates.bankDetails.bankName !== undefined) {
+              update["bankDetails.bankName"] = updates.bankDetails.bankName;
+            }
+          }
+          if (updates.upiDetails) {
+            if (updates.upiDetails.upiId !== undefined) {
+              update["upiDetails.upiId"] = updates.upiDetails.upiId;
+            }
+            if (updates.upiDetails.accountHolderName !== undefined) {
+              update["upiDetails.accountHolderName"] = updates.upiDetails.accountHolderName;
+            }
           }
           _context9.n = 1;
           return _Rider.Rider.findOneAndUpdate({ riderId: riderId }, { $set: update }, { "new": true });

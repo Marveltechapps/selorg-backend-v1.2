@@ -616,6 +616,11 @@ var updateProfileSchema = _zod.z.object({
   bankDetails: _zod.z.object({
     accountNumber: _zod.z.string().optional(),
     ifscCode: _zod.z.string().optional(),
+    accountHolderName: _zod.z.string().optional(),
+    bankName: _zod.z.string().optional()
+  }).optional(),
+  upiDetails: _zod.z.object({
+    upiId: _zod.z.string().optional(),
     accountHolderName: _zod.z.string().optional()
   }).optional()
 });

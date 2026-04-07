@@ -161,6 +161,11 @@ var RiderSchema = new _mongoose.Schema({
   bankDetails: {
     accountNumber: String,
     ifscCode: String,
+    accountHolderName: String,
+    bankName: String
+  },
+  upiDetails: {
+    upiId: String,
     accountHolderName: String
   },
   mfa: {
