@@ -623,8 +623,24 @@ async function getStatus(userId, { orderId }) {
     } else if (payment.status === 'created' || payment.status === 'initiated') {
       uiState = 'WAITING_FOR_PAYMENT';
       recommendedAction = 'OPEN_GATEWAY';
+    } else if (payment.status === 'failed') {
+      uiState = 'FAILED';
+      recommendedAction = 'RETRY_PAYMENT';
+    } else if (payment.status === 'cancelled') {
+      uiState = 'RETRY_AVAILABLE';
+      recommendedAction = 'RETRY_PAYMENT';
     }
   }
+
+  // Log status checks for debugging
+  logger.info('Payment status check', {
+    orderId: String(orderId),
+    paymentExists: !!payment,
+    status: payment?.status,
+    uiState,
+    verificationError: payment?.verificationError,
+    isExpired: payment && payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt,
+  });
 
   return {
     data: {
@@ -642,12 +658,17 @@ async function getStatus(userId, { orderId }) {
             verificationError: payment.verificationError,
             isExpired: payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt,
             updatedAt: payment.updatedAt,
+            verificationSource: payment.verificationSource,
+            tpslTxnId: payment.tpslTxnId,
+            bankTxnId: payment.bankTxnId,
           }
         : null,
       allAttempts: payments.map((p) => ({
         txnId: p.txnId,
         attemptNo: p.attemptNo,
         status: p.status,
+        statusCode: p.statusCode,
+        verificationError: p.verificationError,
         createdAt: p.createdAt,
       })),
     },

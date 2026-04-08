@@ -2,17 +2,26 @@ const logger = require('../../utils/logger');
 
 let Payout;
 let Order;
+let Rider;
 try {
   const payoutModule = require('../../rider_v2_backend/src/models/Payout.js');
   Payout = payoutModule.Payout || payoutModule.default;
   const orderModule = require('../../rider_v2_backend/src/models/Order.js');
   Order = orderModule.Order || orderModule.default;
+  const riderModule = require('../../rider_v2_backend/src/models/Rider.js');
+  Rider = riderModule.Rider || riderModule.default;
 } catch (e) {
   logger.warn('Rider v2 models not available, rider cash features disabled:', e.message);
 }
 
 function ensureModels() {
   if (!Payout || !Order) {
+    throw new Error('Rider cash module not available');
+  }
+}
+
+function ensureRiderModel() {
+  if (!Rider) {
     throw new Error('Rider cash module not available');
   }
 }
@@ -98,6 +107,7 @@ async function getRiderPayoutsList(page = 1, pageSize = 20, status) {
         incentiveAmount: p.incentiveAmount,
         status: p.status,
         method: p.method,
+        accountDetails: p.accountDetails || null,
         requestedAt: p.requestedAt,
         completedAt: p.completedAt,
         periodStart: p.periodStart,
@@ -113,8 +123,23 @@ async function getRiderPayoutsList(page = 1, pageSize = 20, status) {
   }
 }
 
+async function getRiderPaymentDetails(riderId) {
+  ensureRiderModel();
+  const doc = await Rider.findOne({ riderId }).select('riderId name phoneNumber bankDetails upiDetails updatedAt').lean();
+  if (!doc) return null;
+  return {
+    riderId: doc.riderId,
+    name: doc.name,
+    phoneNumber: doc.phoneNumber,
+    bankDetails: doc.bankDetails || null,
+    upiDetails: doc.upiDetails || null,
+    updatedAt: doc.updatedAt,
+  };
+}
+
 module.exports = {
   getRiderCashSummary,
   getCodReconciliationStats,
   getRiderPayoutsList,
+  getRiderPaymentDetails,
 };

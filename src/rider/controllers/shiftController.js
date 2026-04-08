@@ -111,6 +111,23 @@ async function select(req, res) {
   }
 }
 
+async function cancel(req, res) {
+  try {
+    const riderId = req.user?.id || req.body.riderId;
+    if (!riderId) {
+      return res.status(400).json({ success: false, error: 'Missing riderId' });
+    }
+    const { shiftId } = req.body;
+    if (!shiftId) {
+      return res.status(400).json({ success: false, error: 'Missing shiftId' });
+    }
+    await shiftService.cancelShiftSelection(riderId, shiftId);
+    res.json({ success: true, data: {} });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
 async function start(req, res) {
   try {
     const riderId = req.user?.id || req.body.riderId;
@@ -165,6 +182,7 @@ module.exports = {
   remove,
   getAvailable,
   select,
+  cancel,
   start,
   end,
   myShifts,

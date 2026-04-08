@@ -40,6 +40,18 @@ class RiderCashController {
       throw e;
     }
   });
+
+  getRiderPaymentDetails = asyncHandler(async (req, res) => {
+    try {
+      const result = await riderCashService.getRiderPaymentDetails(req.params.riderId);
+      res.json({ success: true, data: result });
+    } catch (e) {
+      if (e.message === 'Rider cash module not available') {
+        return res.status(503).json({ success: false, message: 'Rider cash module not available', data: null });
+      }
+      throw e;
+    }
+  });
 }
 
 module.exports = new RiderCashController();

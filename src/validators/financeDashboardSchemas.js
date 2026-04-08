@@ -205,6 +205,12 @@ const getRiderPayoutsSchema = z.object({
   }),
 });
 
+const getRiderPaymentDetailsSchema = z.object({
+  params: z.object({
+    riderId: z.string().min(1, 'Rider ID is required'),
+  }),
+});
+
 const getExceptionsSchema = z.object({
   query: z.object({
     status: z.enum(['open', 'in_review', 'resolved', 'ignored', 'all']).optional(),
@@ -448,6 +454,7 @@ module.exports = {
   // Reconciliation
   getReconSummarySchema,
   getRiderPayoutsSchema,
+  getRiderPaymentDetailsSchema,
   getExceptionsSchema,
   runReconciliationSchema,
   getRunStatusSchema,

@@ -46,6 +46,7 @@ const {
   getRunStatusSchema,
   investigateExceptionSchema,
   resolveExceptionSchema,
+  getRiderPaymentDetailsSchema,
   getGatewayDetailsSchema,
   getLedgerEntriesSchema,
   createJournalEntrySchema,
@@ -136,6 +137,7 @@ router.post('/refunds/:id/mark-completed', ...financeAuth, refundsController.mar
 router.get('/rider-cash/summary', ...financeAuth, riderCashController.getSummary);
 router.get('/rider-cash/payouts', ...financeAuth, validateRequest(getRiderPayoutsSchema), riderCashController.getPayouts);
 router.get('/rider-cash/cod-reconciliation', ...financeAuth, riderCashController.getCodReconciliation);
+router.get('/rider-cash/riders/:riderId/payment-details', ...financeAuth, validateRequest(getRiderPaymentDetailsSchema), riderCashController.getRiderPaymentDetails);
 
 // Reconciliation routes
 router.get('/reconciliation/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.reconciliation), validateRequest(getReconSummarySchema), reconciliationController.getReconSummary);

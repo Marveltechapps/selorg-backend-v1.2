@@ -7,6 +7,7 @@ const router = express.Router();
 router.get('/available/list', shiftController.getAvailable);
 router.get('/my', shiftController.myShifts);
 router.post('/select', shiftController.select);
+router.post('/cancel', shiftController.cancel);
 router.post('/start', shiftController.start);
 router.post('/end', shiftController.end);
 

@@ -38,6 +38,13 @@ function shiftsOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 
+function computeShiftStartDateTime(shift) {
+  const shiftStart = new Date(shift.date);
+  const [h, m] = String(shift.startTime || '').split(':').map((v) => parseInt(v, 10));
+  shiftStart.setHours(h || 0, m || 0, 0, 0);
+  return shiftStart;
+}
+
 async function createShift(payload) {
   const { startTime, endTime } = payload;
   const startMinutes = parseTimeToMinutes(startTime);
@@ -277,6 +284,51 @@ async function selectShifts(riderId, shiftIds = []) {
   }
 }
 
+async function cancelShiftSelection(riderId, shiftId, timestamp = new Date()) {
+  const shift = await RiderShift.findOne({ id: shiftId });
+  if (!shift) {
+    const error = new Error('Shift not found');
+    error.code = 'SHIFT_NOT_FOUND';
+    throw error;
+  }
+
+  const assignment = await RiderShiftAssignment.findOne({
+    riderId,
+    shiftId: shift._id,
+    status: 'selected',
+  });
+
+  if (!assignment) {
+    const existing = await RiderShiftAssignment.findOne({ riderId, shiftId: shift._id }).select('status');
+    if (existing && existing.status && existing.status !== 'selected') {
+      const error = new Error('Cannot cancel shift after it has started');
+      error.code = 'SHIFT_ALREADY_STARTED';
+      throw error;
+    }
+    const error = new Error('Shift not selected');
+    error.code = 'SHIFT_NOT_SELECTED';
+    throw error;
+  }
+
+  const now = new Date(timestamp);
+  const shiftStart = computeShiftStartDateTime(shift);
+  if (now >= shiftStart) {
+    const error = new Error('Cannot cancel shift after it has started');
+    error.code = 'CANNOT_CANCEL_AFTER_START';
+    throw error;
+  }
+
+  assignment.status = 'cancelled';
+  assignment.endedAt = now;
+  await assignment.save();
+
+  // Keep RiderShift.bookedCount in sync for dashboard views.
+  await RiderShift.updateOne({ _id: shift._id }, { $inc: { bookedCount: -1 } });
+  await RiderShift.updateOne({ _id: shift._id, bookedCount: { $lt: 0 } }, { $set: { bookedCount: 0 } });
+
+  return {};
+}
+
 async function startShift(riderId, shiftId, timestamp = new Date()) {
   const shift = await RiderShift.findOne({ id: shiftId, status: 'published' });
   if (!shift) {
@@ -299,9 +351,7 @@ async function startShift(riderId, shiftId, timestamp = new Date()) {
 
   const buf = shift.walkInBufferMinutes ?? 0;
   const now = new Date(timestamp);
-  const shiftStart = new Date(shift.date);
-  const [h, m] = shift.startTime.split(':').map((v) => parseInt(v, 10));
-  shiftStart.setHours(h || 0, m || 0, 0, 0);
+  const shiftStart = computeShiftStartDateTime(shift);
 
   const earliest = new Date(shiftStart.getTime() - buf * 60 * 1000);
   const latest = new Date(shiftStart.getTime() + buf * 60 * 1000);
@@ -475,6 +525,7 @@ module.exports = {
   deleteShift,
   getAvailableForRider,
   selectShifts,
+  cancelShiftSelection,
   startShift,
   endShift,
   listRiderShifts,
