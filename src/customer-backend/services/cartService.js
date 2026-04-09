@@ -262,10 +262,39 @@ async function clearCart(userId) {
   return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
 }
 
+/**
+ * Replace server cart with line items from a customer order (e.g. after failed online payment).
+ */
+function mapOrderItemsToCartItems(orderItems) {
+  return (orderItems || []).map((it) => ({
+    productId: new mongoose.Types.ObjectId(it.productId),
+    variantId: it.variantId || '',
+    variantSize: it.variantSize || '',
+    quantity: it.quantity,
+    price: it.price,
+    originalPrice: it.originalPrice ?? it.price,
+    gstRate: it.gstRate || 0,
+    productName: it.productName || '',
+    image: it.image || '',
+  }));
+}
+
+async function restoreCartFromOrder(userId, order) {
+  const uid = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+  const items = mapOrderItemsToCartItems(order.items || []);
+  await Cart.findOneAndUpdate(
+    { userId: uid },
+    { $set: { items } },
+    { upsert: true, new: true }
+  );
+  return { ok: true };
+}
+
 module.exports = {
   getCartForUser,
   addItem,
   updateItem,
   removeItem,
   clearCart,
+  restoreCartFromOrder,
 };

@@ -2,6 +2,7 @@ const { CancellationPolicy } = require('../models/CancellationPolicy');
 const { Order } = require('../models/Order');
 const { sendOrderStatusNotification } = require('./notificationService');
 const { triggerAutoRefundForMissingItems, creditWallet } = require('./autoRefundService');
+const { restoreCartFromOrder } = require('./cartService');
 
 /** Daily cancel cap per user (calendar day). Default 1000; override with CUSTOMER_MAX_CANCELLATIONS_PER_DAY. */
 function getEffectiveMaxCancellationsPerDay() {
@@ -97,9 +98,28 @@ async function executeCancellation(userId, orderId, reason = '') {
     actor: 'customer',
   });
 
+  const isUnreleasedGateway =
+    order.fulfillmentReleased === false &&
+    (order.paymentMethod?.methodType === 'card' || order.paymentMethod?.methodType === 'upi');
+  if (isUnreleasedGateway) {
+    order.paymentStatus = 'failed';
+  }
+
   await order.save();
 
-  if (check.policy.autoRefundOnCancel && order.paymentMethod?.methodType !== 'cash') {
+  if (isUnreleasedGateway) {
+    try {
+      await restoreCartFromOrder(userId, order);
+    } catch (e) {
+      console.warn('restoreCartFromOrder on cancel failed (non-blocking):', e?.message);
+    }
+  }
+
+  if (
+    check.policy.autoRefundOnCancel &&
+    order.paymentMethod?.methodType !== 'cash' &&
+    order.paymentStatus === 'paid'
+  ) {
     const refundAmount = order.totalBill - (check.cancellationFee || 0);
     if (refundAmount > 0) {
       if (check.policy.refundMethod === 'wallet') {

@@ -1,6 +1,7 @@
 const logger = require('../../core/utils/logger');
 const { WorldlinePayment } = require('../models/WorldlinePayment');
 const { Order } = require('../models/Order');
+const { voidUnpaidOnlineOrder } = require('../services/orderService');
 
 function isEnabled() {
   return process.env.WORLDLINE_ENABLED === '1' || process.env.WORLDLINE_ENABLED === 'true';
@@ -49,7 +50,19 @@ async function runOnce() {
       const latestAttempt = await WorldlinePayment.findOne({ orderId: p.orderId }).sort({ attemptNo: -1 });
       if (latestAttempt && String(latestAttempt._id) === String(p._id)) {
         if (update.status === 'failed') {
-          await Order.updateOne({ _id: p.orderId }, { $set: { paymentStatus: 'failed' } });
+          const o = await Order.findById(p.orderId).lean();
+          if (o && o.fulfillmentReleased === false) {
+            try {
+              await voidUnpaidOnlineOrder(String(o.userId), String(o._id), update.statusMessage || 'Payment timed out');
+            } catch (e) {
+              logger.warn('[worldlineReconciliationJob] voidUnpaidOnlineOrder failed', {
+                orderId: String(p.orderId),
+                error: e?.message,
+              });
+            }
+          } else {
+            await Order.updateOne({ _id: p.orderId }, { $set: { paymentStatus: 'failed' } });
+          }
         } else {
           await Order.updateOne({ _id: p.orderId }, { $set: { paymentStatus: 'pending' } });
         }

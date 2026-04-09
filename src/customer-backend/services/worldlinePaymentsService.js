@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const mongoose = require('mongoose');
 const { Order } = require('../models/Order');
 const { WorldlinePayment } = require('../models/WorldlinePayment');
+const { releaseOrderFulfillment, voidUnpaidOnlineOrder } = require('./orderService');
 const logger = require('../../core/utils/logger');
 const fs = require('fs');
 
@@ -72,6 +73,18 @@ function normalizePlatform(platform) {
 function trimEnv(value) {
   if (value == null) return '';
   return String(value).trim();
+}
+
+function canonicalizePaynimoPaymentMode(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return 'all';
+  const lower = raw.toLowerCase();
+  if (lower === 'upi') return 'UPI';
+  if (lower === 'netbanking' || lower === 'nb') return 'netBanking';
+  if (lower === 'card' || lower === 'cards') return 'cards';
+  if (lower === 'wallet' || lower === 'wallets') return 'wallets';
+  if (lower === 'all') return 'all';
+  return raw;
 }
 
 /** Paynimo uses totalamount in the token string; amount must match item line(s) (typically two decimals, e.g. 7.00). */
@@ -272,6 +285,8 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     deviceId,
   });
 
+  const resolvedPaymentMode = canonicalizePaynimoPaymentMode(paymentMode);
+
   // #region agent log
   const resolvedAlgo = resolveWorldlineHashAlgo(algo);
   const preSaltParts = [
@@ -339,7 +354,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
       deviceId,
       token,
       returnUrl,
-      paymentMode: paymentMode || 'all',
+      paymentMode: resolvedPaymentMode,
       merchantId,
       currency: 'INR',
       consumerId,
@@ -411,6 +426,13 @@ async function completePayment(userId, { orderId, txnId, response }) {
 
   // Idempotency: if already processed to a terminal status, return it as-is.
   if (isTerminal(payment.status) && payment.responseHash) {
+    if (payment.status === 'success' && payment.verificationError === 'none') {
+      try {
+        await releaseOrderFulfillment(String(orderId));
+      } catch (e) {
+        logger.warn('releaseOrderFulfillment idempotent path failed', { orderId: String(orderId), error: e?.message });
+      }
+    }
     return {
       data: {
         orderId: String(orderId),
@@ -464,11 +486,21 @@ async function completePayment(userId, { orderId, txnId, response }) {
   if (effectivePayment.status === 'success' && effectivePayment.verificationError === 'none') {
     order.paymentStatus = 'paid';
     await order.save();
+    try {
+      await releaseOrderFulfillment(String(orderId));
+    } catch (e) {
+      logger.warn('releaseOrderFulfillment failed', { orderId: String(orderId), error: e?.message });
+    }
   } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
     // Only move to failed if verified, or if we decide to trust cancelled even if unverified (risky)
     if (effectivePayment.verificationError === 'none') {
       order.paymentStatus = 'failed';
       await order.save();
+      try {
+        await voidUnpaidOnlineOrder(userId, orderId, effectivePayment.statusMessage || 'Payment failed');
+      } catch (e) {
+        logger.warn('voidUnpaidOnlineOrder failed', { orderId: String(orderId), error: e?.message });
+      }
     }
   }
 
@@ -512,6 +544,16 @@ async function processGatewayReturn({ response }) {
 
   // Idempotency: if already terminal, don't mutate.
   if (isTerminal(payment.status) && payment.responseHash) {
+    if (payment.status === 'success' && payment.verificationError === 'none') {
+      try {
+        await releaseOrderFulfillment(String(order._id));
+      } catch (e) {
+        logger.warn('releaseOrderFulfillment gateway return idempotent path failed', {
+          orderId: String(order._id),
+          error: e?.message,
+        });
+      }
+    }
     return {
       data: {
         orderId: String(order._id),
@@ -562,10 +604,20 @@ async function processGatewayReturn({ response }) {
   if (effectivePayment.status === 'success' && effectivePayment.verificationError === 'none') {
     order.paymentStatus = 'paid';
     await order.save();
+    try {
+      await releaseOrderFulfillment(String(order._id));
+    } catch (e) {
+      logger.warn('releaseOrderFulfillment gateway return failed', { orderId: String(order._id), error: e?.message });
+    }
   } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
     if (effectivePayment.verificationError === 'none') {
       order.paymentStatus = 'failed';
       await order.save();
+      try {
+        await voidUnpaidOnlineOrder(String(order.userId), String(order._id), effectivePayment.statusMessage || 'Payment failed');
+      } catch (e) {
+        logger.warn('voidUnpaidOnlineOrder gateway return failed', { orderId: String(order._id), error: e?.message });
+      }
     }
   }
 
@@ -641,6 +693,20 @@ async function getStatus(userId, { orderId }) {
     verificationError: payment?.verificationError,
     isExpired: payment && payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt,
   });
+
+  if (
+    payment &&
+    payment.status === 'success' &&
+    payment.verificationError === 'none' &&
+    order.paymentStatus === 'paid' &&
+    order.fulfillmentReleased === false
+  ) {
+    try {
+      await releaseOrderFulfillment(String(orderId));
+    } catch (e) {
+      logger.warn('releaseOrderFulfillment getStatus self-heal failed', { orderId: String(orderId), error: e?.message });
+    }
+  }
 
   return {
     data: {

@@ -97,6 +97,10 @@ const orderSchema = new mongoose.Schema(
     riderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Rider' },
     ratingScore: { type: Number, min: 1, max: 5 },
     ratingComment: { type: String, default: '' },
+    /** When true, cart was cleared and darkstore/finance side-effects ran (or immediate checkout path). */
+    fulfillmentReleased: { type: Boolean, default: false },
+    /** Coupon code applied at checkout (for deferred redemption on card/UPI after payment). */
+    checkoutCouponCode: { type: String, default: '' },
   },
   { timestamps: true }
 );
