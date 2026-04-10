@@ -181,6 +181,15 @@ function parseHierarchyCode(code) {
   return { letter, num, width, mainCode, subCode };
 }
 
+/** Stable hierarchy key when sheet omits code: path from main → sub → leaf (no numeric parent rules). */
+function stableSheetHierarchyCode(level, carryMain, carrySub, name, row) {
+  const sm = slugify(carryMain || 'root');
+  const leaf = slugify(name || 'item');
+  if (level === 1) return `__sheet/L1/r${row}/${leaf}`;
+  if (level === 2) return `__sheet/L2/${sm}/r${row}/${leaf}`;
+  return `__sheet/L3/${sm}/${slugify(carrySub || 'sub')}/r${row}/${leaf}`;
+}
+
 function normalizeForMatch(str) {
   const s = String(str || '')
     .toLowerCase()
@@ -295,270 +304,168 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             message: `Missing required headers. Found: ${[...headerMap.keys()].join(', ')}`,
           });
         } else {
+          // Categories: 3 levels follow sheet order (forward-filled main/sub). No numeric parent rules on hierarchy codes.
+          let carryMain = '';
+          let carrySub = '';
+          let currentMainId = null;
+          let currentSubId = null;
+          const productNameToParent = new Map();
+          let mainIdx = 0;
+          let subIdx = 0;
+          let productIdx = 0;
+
+          const upsertCategoryNode = async (level, name, parentId, orderVal, userCode, rowNum, rawRow) => {
+            const codeTrim = String(userCode || '').trim();
+            const internalKey = codeTrim || stableSheetHierarchyCode(level, carryMain, carrySub, name, rowNum);
+            let existing = null;
+            if (codeTrim) {
+              existing = await Category.findOne({ hierarchyCodes: codeTrim }).session(session).lean();
+            }
+            if (!existing && parentId != null) {
+              existing = await Category.findOne({ parentId, level, name }).session(session).lean();
+            }
+            if (!existing && level === 1) {
+              existing = await Category.findOne({ level: 1, name, parentId: null }).session(session).lean();
+            }
+            const desiredSlug = slugify(name);
+            const slug = existing
+              ? existing.slug
+              : await ensureUniqueCategorySlug(desiredSlug, null, session);
+            const codesToSet = codeTrim
+              ? Array.from(new Set([...(Array.isArray(existing?.hierarchyCodes) ? existing.hierarchyCodes : []), codeTrim]))
+              : [internalKey];
+            if (existing) {
+              await Category.findByIdAndUpdate(
+                existing._id,
+                {
+                  $set: {
+                    name,
+                    slug,
+                    isActive: true,
+                    order: orderVal,
+                    parentId: parentId || null,
+                    level,
+                    importRaw: rawRow,
+                    hierarchyCodes: codesToSet,
+                  },
+                },
+                { session }
+              );
+              counts.categories.updated += 1;
+              return String(existing._id);
+            }
+            const created = await Category.create(
+              [
+                {
+                  name,
+                  slug: slug || desiredSlug,
+                  description: '',
+                  imageUrl: '',
+                  hierarchyCodes: codeTrim ? [codeTrim] : [internalKey],
+                  level,
+                  isActive: true,
+                  order: orderVal,
+                  parentId: parentId || null,
+                  importRaw: rawRow,
+                },
+              ],
+              { session }
+            );
+            counts.categories.created += 1;
+            return String(created[0]._id);
+          };
+
           for (let r = 2; r <= catsWs.rowCount; r += 1) {
             const row = catsWs.getRow(r);
-            const mainName = getCellText(row, headerMap.get(mainCol));
-            const subName = getCellText(row, headerMap.get(subCol));
-            const productName = getCellText(row, headerMap.get(productCol));
-            const code = getCellText(row, headerMap.get(hierarchyCodeCol));
+            const mainRaw = getCellText(row, headerMap.get(mainCol));
+            const subRaw = getCellText(row, headerMap.get(subCol));
+            const productRaw = getCellText(row, headerMap.get(productCol));
+            const codeRaw = getCellText(row, headerMap.get(hierarchyCodeCol));
 
-            if (!code && !mainName && !subName && !productName) continue;
+            if (!mainRaw && !subRaw && !productRaw) continue;
 
-            let level = null;
-            let name = '';
-            if (mainName) {
-              level = 1;
-              name = mainName;
-            } else if (subName) {
-              level = 2;
-              name = subName;
-            } else if (productName) {
-              level = 3;
-              name = productName;
-            } else {
-              continue;
+            const raw = rowToRawObject(row, headerMap);
+            const productTrim = productRaw ? String(productRaw).trim() : '';
+
+            if (mainRaw) {
+              carryMain = String(mainRaw).trim();
+              carrySub = '';
+              currentSubId = null;
+            }
+            if (subRaw) {
+              carrySub = String(subRaw).trim();
             }
 
-            if (!code) {
-              warnings.push({ sheet: 'Categories', row: r, message: `Missing hierarchy code for "${name}"` });
-              continue;
-            }
-
-            entries.push({ level, name, code, row: r, raw: rowToRawObject(row, headerMap) });
-          }
-
-          const mainByCode = new Map();
-          const subByCode = new Map();
-          const productByCode = new Map();
-          const productNameToParent = new Map(); // normalized productName -> { categoryId, subcategoryId }
-
-          const uniqueMain = new Map(); // code -> entry
-          const uniqueSub = new Map();
-          const uniqueProduct = new Map();
-          for (const e of entries) {
-            if (e.level === 1 && !uniqueMain.has(e.code)) uniqueMain.set(e.code, e);
-            if (e.level === 2 && !uniqueSub.has(e.code)) uniqueSub.set(e.code, e);
-            if (e.level === 3 && !uniqueProduct.has(e.code)) uniqueProduct.set(e.code, e);
-          }
-
-          // Phase A: Level-1 categories
-          const mainOrderCounters = new Map(); // parentKey -> counter
-          let mainIdx = 0;
-          for (const e of [...uniqueMain.values()].sort((a, b) => a.row - b.row)) {
-            // eslint-disable-next-line no-await-in-loop
-            const existing = await Category.findOne({ hierarchyCodes: e.code }).session(session).lean();
-            const desiredSlug = slugify(e.name);
-            const slug = existing
-              ? existing.slug
-              : await ensureUniqueCategorySlug(desiredSlug, null, session);
-            const desiredOrder = ++mainIdx;
-            if (existing) {
-              await Category.findByIdAndUpdate(
-                existing._id,
-                {
-                  $set: {
-                    name: e.name,
-                    slug,
-                    description: existing.description || '',
-                    isActive: true,
-                    order: desiredOrder,
-                    parentId: null,
-                    level: 1,
-                    importRaw: e.raw,
-                    hierarchyCodes: Array.isArray(existing.hierarchyCodes)
-                      ? Array.from(new Set([...existing.hierarchyCodes, e.code]))
-                      : [e.code],
-                  },
-                },
-                { session }
-              );
-              counts.categories.updated += 1;
-            } else {
-              await Category.create(
-                [
-                  {
-                    name: e.name,
-                    slug: slug || desiredSlug,
-                    description: '',
-                    imageUrl: '',
-                    hierarchyCodes: [e.code],
-                    level: 1,
-                    isActive: true,
-                    order: desiredOrder,
-                    parentId: null,
-                    importRaw: e.raw,
-                  },
-                ],
-                { session }
-              );
-              counts.categories.created += 1;
-            }
-            const docId = existing ? String(existing._id) : await Category.findOne({ hierarchyCodes: e.code }).session(session).lean().then((d)=>d?String(d._id):null);
-            if (docId) mainByCode.set(e.code, docId);
-          }
-
-          // Phase B: Level-2 categories
-          let subIdx = 0;
-          for (const e of [...uniqueSub.values()].sort((a, b) => a.row - b.row)) {
-            // eslint-disable-next-line no-await-in-loop
-            const hc = parseHierarchyCode(e.code);
-            if (!hc) {
-              errors.push({ sheet: 'Categories', row: e.row, message: `Invalid hierarchy code: ${e.code}` });
-              continue;
-            }
-            const parentMainId = mainByCode.get(hc.mainCode);
-            if (!parentMainId) {
-              errors.push({
-                sheet: 'Categories',
-                row: e.row,
-                message: `Missing level-1 parent for subcategory "${e.name}" code=${e.code} parentMain=${hc.mainCode}`,
-              });
-              continue;
-            }
-
-            const existing = await Category.findOne({ hierarchyCodes: e.code }).session(session).lean();
-            const desiredSlug = slugify(e.name);
-            const slug = existing
-              ? existing.slug
-              : await ensureUniqueCategorySlug(desiredSlug, null, session);
-            const desiredOrder = ++subIdx;
-
-            if (existing) {
-              await Category.findByIdAndUpdate(
-                existing._id,
-                {
-                  $set: {
-                    name: e.name,
-                    slug,
-                    isActive: true,
-                    order: desiredOrder,
-                    parentId: parentMainId,
-                    level: 2,
-                    importRaw: e.raw,
-                    hierarchyCodes: Array.isArray(existing.hierarchyCodes)
-                      ? Array.from(new Set([...existing.hierarchyCodes, e.code]))
-                      : [e.code],
-                  },
-                },
-                { session }
-              );
-              counts.categories.updated += 1;
-            } else {
-              await Category.create(
-                [
-                  {
-                    name: e.name,
-                    slug: slug || desiredSlug,
-                    description: '',
-                    imageUrl: '',
-                    hierarchyCodes: [e.code],
-                    level: 2,
-                    isActive: true,
-                    order: desiredOrder,
-                    parentId: parentMainId,
-                    importRaw: e.raw,
-                  },
-                ],
-                { session }
-              );
-              counts.categories.created += 1;
-            }
-
-            const doc = await Category.findOne({ hierarchyCodes: e.code }).session(session).lean();
-            if (doc?._id) subByCode.set(e.code, String(doc._id));
-          }
-
-          // Phase C: Level-3 categories
-          let productIdx = 0;
-          for (const e of [...uniqueProduct.values()].sort((a, b) => a.row - b.row)) {
-            // eslint-disable-next-line no-await-in-loop
-            const hc = parseHierarchyCode(e.code);
-            if (!hc) {
-              errors.push({ sheet: 'Categories', row: e.row, message: `Invalid hierarchy code: ${e.code}` });
-              continue;
-            }
-            const parentSubId = subByCode.get(hc.subCode);
-            if (!parentSubId) {
-              errors.push({
-                sheet: 'Categories',
-                row: e.row,
-                message: `Missing level-2 parent for products "${e.name}" code=${e.code} parentSub=${hc.subCode}`,
-              });
-              continue;
-            }
-
-            // Find parent main id via parentSubId
-            // eslint-disable-next-line no-await-in-loop
-            const parentSubDoc = await Category.findById(parentSubId).session(session).lean();
-            const parentMainId = parentSubDoc?.parentId ? String(parentSubDoc.parentId) : null;
-            if (!parentMainId) {
-              errors.push({
-                sheet: 'Categories',
-                row: e.row,
-                message: `Missing level-1 parent for products "${e.name}" (via sub=${parentSubId})`,
-              });
-              continue;
-            }
-
-            const existing = await Category.findOne({ hierarchyCodes: e.code }).session(session).lean();
-            const desiredSlug = slugify(e.name);
-            const slug = existing
-              ? existing.slug
-              : await ensureUniqueCategorySlug(desiredSlug, null, session);
-            const desiredOrder = ++productIdx;
-
-            if (existing) {
-              await Category.findByIdAndUpdate(
-                existing._id,
-                {
-                  $set: {
-                    name: e.name,
-                    slug,
-                    isActive: true,
-                    order: desiredOrder,
-                    parentId: parentSubId,
-                    level: 3,
-                    importRaw: e.raw,
-                    hierarchyCodes: Array.isArray(existing.hierarchyCodes)
-                      ? Array.from(new Set([...existing.hierarchyCodes, e.code]))
-                      : [e.code],
-                  },
-                },
-                { session }
-              );
-              counts.categories.updated += 1;
-            } else {
-              await Category.create(
-                [
-                  {
-                    name: e.name,
-                    slug: slug || desiredSlug,
-                    description: '',
-                    imageUrl: '',
-                    hierarchyCodes: [e.code],
-                    level: 3,
-                    isActive: true,
-                    order: desiredOrder,
-                    parentId: parentSubId,
-                    importRaw: e.raw,
-                  },
-                ],
-                { session }
-              );
-              counts.categories.created += 1;
-            }
-
-            const doc = await Category.findOne({ hierarchyCodes: e.code }).session(session).lean();
-            if (doc?._id) {
-              productByCode.set(e.code, String(doc._id));
-              productNameToParent.set(normalizeForMatch(e.name), {
+            if (productTrim) {
+              const name = productTrim;
+              if (!carryMain) {
+                errors.push({
+                  sheet: 'Categories',
+                  row: r,
+                  message: `Product "${name}" has no Main Category row above it`,
+                });
+                continue;
+              }
+              if (!carrySub) {
+                errors.push({
+                  sheet: 'Categories',
+                  row: r,
+                  message: `Product "${name}" has no Sub Category row above it`,
+                });
+                continue;
+              }
+              if (!currentMainId) {
+                errors.push({
+                  sheet: 'Categories',
+                  row: r,
+                  message: `Product "${name}" — process a Main Category row before product rows`,
+                });
+                continue;
+              }
+              if (!currentSubId) {
+                errors.push({
+                  sheet: 'Categories',
+                  row: r,
+                  message: `Product "${name}" — process a Sub Category row before product rows`,
+                });
+                continue;
+              }
+              const parentMainId = currentMainId;
+              const parentSubId = currentSubId;
+              // eslint-disable-next-line no-await-in-loop
+              await upsertCategoryNode(3, name, parentSubId, ++productIdx, codeRaw, r, raw);
+              productNameToParent.set(normalizeForMatch(name), {
                 categoryId: parentMainId,
                 subcategoryId: parentSubId,
               });
+            } else {
+              if (mainRaw) {
+                const name = String(mainRaw).trim();
+                // eslint-disable-next-line no-await-in-loop
+                currentMainId = await upsertCategoryNode(1, name, null, ++mainIdx, codeRaw, r, raw);
+              }
+              if (subRaw) {
+                const name = String(subRaw).trim();
+                if (!carryMain) {
+                  errors.push({ sheet: 'Categories', row: r, message: `Subcategory "${name}" has no Main Category above` });
+                  continue;
+                }
+                if (!currentMainId) {
+                  errors.push({
+                    sheet: 'Categories',
+                    row: r,
+                    message: `Subcategory "${name}" — add a Main Category row first (with name in Main column)`,
+                  });
+                  continue;
+                }
+                // If Main and Sub are on the same row, hierarchy code applies to Main only; Sub uses auto-key or lookup by parent+name.
+                const subCodeForRow = mainRaw ? '' : codeRaw;
+                // eslint-disable-next-line no-await-in-loop
+                currentSubId = await upsertCategoryNode(2, name, currentMainId, ++subIdx, subCodeForRow, r, raw);
+              }
             }
           }
 
-          // Products match index - keep list to support non-exact matches.
           const productNameCandidates = [...productNameToParent.entries()].map(([normName, ids]) => ({
             normName,
             ...ids,
@@ -704,7 +611,23 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             .lean();
 
           for (const p of productsForRelink) {
-            const hc = parseHierarchyCode(p.hierarchyCode);
+            const hcRaw = String(p.hierarchyCode || '').trim();
+            if (!hcRaw) continue;
+            // eslint-disable-next-line no-await-in-loop
+            const leaf = await Category.findOne({ hierarchyCodes: hcRaw, level: 3 }).session(session).lean();
+            if (leaf?.parentId) {
+              // eslint-disable-next-line no-await-in-loop
+              const subDoc = await Category.findById(leaf.parentId).session(session).lean();
+              if (subDoc?.parentId) {
+                await Product.updateOne(
+                  { _id: p._id },
+                  { $set: { categoryId: subDoc.parentId, subcategoryId: subDoc._id } },
+                  { session }
+                );
+                continue;
+              }
+            }
+            const hc = parseHierarchyCode(hcRaw);
             if (!hc) continue;
             // eslint-disable-next-line no-await-in-loop
             const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode }).session(session).lean();
