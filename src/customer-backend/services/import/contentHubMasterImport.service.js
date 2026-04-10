@@ -555,6 +555,29 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   if (!matched || cand.normName.length > matched.normName.length) matched = cand;
                 }
 
+                // Fallback: Try hierarchy-code-based matching when name matching fails
+                if (!matched && doc.hierarchyCode) {
+                  const hc = parseHierarchyCode(String(doc.hierarchyCode || '').trim());
+                  if (hc) {
+                    // eslint-disable-next-line no-await-in-loop
+                    const leaf = await Category.findOne({ hierarchyCodes: hc.productCode || hc.fullCode, level: 3 }).session(session).lean();
+                    if (leaf?.parentId) {
+                      // eslint-disable-next-line no-await-in-loop
+                      const subDoc = await Category.findById(leaf.parentId).session(session).lean();
+                      if (subDoc?.parentId) {
+                        matched = { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
+                      }
+                    }
+                    if (!matched && hc.subCode) {
+                      // eslint-disable-next-line no-await-in-loop
+                      const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode, level: 2 }).session(session).lean();
+                      if (subDoc?._id && subDoc.parentId) {
+                        matched = { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
+                      }
+                    }
+                  }
+                }
+
                 if (!matched) {
                   counts.products.unmatched += 1;
                   // Leave category/subcategory unset (still upserts, but won't appear in category listing).

@@ -124,10 +124,23 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     };
   }
 
-  const rawProducts = await Product.find(productFilter)
+  let rawProducts = await Product.find(productFilter)
     .sort({ order: 1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
     .lean();
+
+  // FALLBACK: If subcategory selected but no products found, try broader category-level query
+  // This handles cases where products have hierarchyCode but categoryId/subcategoryId weren't set during import
+  if (subCategoryId != null && String(subCategoryId).trim() !== '' && rawProducts.length === 0) {
+    const fallbackFilter = {
+      ...productQueryBase,
+      $or: productTaxonomyOrForMainCategory(catId, subcategories),
+    };
+    rawProducts = await Product.find(fallbackFilter)
+      .sort({ order: 1 })
+      .limit(DEFAULT_PRODUCT_LIMIT)
+      .lean();
+  }
 
   const products = await enrichProductsWithVariants(rawProducts);
 
