@@ -17,6 +17,7 @@ router.post(
   uploadExcel({ maxFileSizeMB: 20 }),
   cmsAdminController.uploadContentHubMaster
 );
+router.get('/import-history/content-hub', adminAuth, cmsAdminController.listContentHubImportRuns);
 
 router.get('/pages', adminAuth, cmsAdminController.listPages);
 router.get('/pages/:id', adminAuth, cmsAdminController.getPage);

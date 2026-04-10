@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { Category } = require('../../models/Category');
 const { Product } = require('../../models/Product');
 const { Banner } = require('../../models/Banner');
+const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
 
 function slugify(str) {
   if (!str || typeof str !== 'string') return 'category';
@@ -573,90 +574,6 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             const headerMap = makeHeaderIndexMap(skuWs, 1);
             const skuCol = findHeaderCol(headerMap, ['SKU Code', 'SKU code']);
             const nameCol = findHeaderCol(headerMap, ['SKU Name']);
-            const classificationCol = findHeaderCol(headerMap, ['SKU Classification (col C)', 'SKU Classification']) ?? 3;
-            const hierarchyCodeCol = findHeaderCol(headerMap, ['Category hierarchy code', 'Hierarchy Code']) ?? 14;
-            const vendorCodeCol = findHeaderCol(headerMap, ['Primary Vendor', 'Vendor Code']) ?? 16;
-            const mfgSkuCodeCol = findHeaderCol(headerMap, ['Mfg SKU code', 'Mfg SKU Code']) ?? 15;
-            const countryCol = findHeaderCol(headerMap, ['Country of Origin', 'Country Of Origin']) ?? 13;
-            const sizeCol = findHeaderCol(headerMap, ['SKU Size', 'Size']) ?? 9;
-            const uomCol = findHeaderCol(headerMap, ['SKU UOM', 'UOM']) ?? 89;
-            const salePriceCol = findHeaderCol(headerMap, ['Sale Price']);
-            const mrpCol = findHeaderCol(headerMap, ['MSRP/MRP', 'MRP', 'MSRP']);
-            const baseCostCol = findHeaderCol(headerMap, ['Base Cost']) ?? 23;
-            const hsnCol = findHeaderCol(headerMap, ['Tax Category', 'HSN Code']) ?? 24;
-            const taxPercentCol = findHeaderCol(headerMap, ['TaxPercent', 'Tax Percent']) ?? 90;
-            const imageUrlCol = findHeaderCol(headerMap, ['SKUimgURL', 'SKU Img URL']);
-            const imageCols = [...headerMap.entries()]
-              .filter(([k]) => /^skuimg\d+$/i.test(String(k).trim()))
-              .map(([, col]) => col)
-              .sort((a, b) => a - b);
-            const detailsCol = findHeaderCol(headerMap, ['Product Details', 'Description']) ?? 41;
-            const metaTitleCol = findHeaderCol(headerMap, ['Meta Title']) ?? 47;
-            const metaKeywordsCol = findHeaderCol(headerMap, ['Meta Keyword', 'Meta Keywords']) ?? 48;
-            const metaDescriptionCol = findHeaderCol(headerMap, ['Meta Description']) ?? 49;
-            const shelfLifeValueCol = findHeaderCol(headerMap, ['Shelf Life Value', 'Shelf Life']) ?? 51;
-            const shelfLifeTypeCol = findHeaderCol(headerMap, ['Shelf life Type', 'Shelf Life Type']) ?? 52;
-            const shelfLifeTotalCol = findHeaderCol(headerMap, ['Total shelf Life', 'Total Shelf Life']) ?? 53;
-            const shelfLifeReceivingCol = findHeaderCol(headerMap, ['Shelf Life on Receiving']) ?? 54;
-            const shelfLifePickingCol = findHeaderCol(headerMap, ['Shelf life on Picking', 'Shelf Life on Picking']) ?? 55;
-            const storeLinksCol = findHeaderCol(headerMap, ['Store Links', 'Link To Store']) ?? 25;
-            const tagCol = findHeaderCol(headerMap, ['SKU Tag', 'Tag', 'SKU Classification.1']) ?? 4;
-            const qcRequiredCol = findHeaderCol(headerMap, ['QC Required']) ?? 18;
-            const backOrderAllowedCol = findHeaderCol(headerMap, ['Back Order']) ?? 19;
-            const serialTrackingCol = findHeaderCol(headerMap, ['Serial Tracking']) ?? 56;
-            const stackableCol = findHeaderCol(headerMap, ['Stackable']) ?? 57;
-            const hazardousCol = findHeaderCol(headerMap, ['Hazardous']) ?? 58;
-            const poisonousCol = findHeaderCol(headerMap, ['Poisonous']) ?? 59;
-            const isPurchasableCol = findHeaderCol(headerMap, ['Is Purchasable']) ?? 60;
-            const isSaleableCol = findHeaderCol(headerMap, ['Is Saleable']) ?? 61;
-            const isStockedCol = findHeaderCol(headerMap, ['Is Stocked']) ?? 62;
-            const associatedClientNameCol = findHeaderCol(headerMap, ['Associated Client Name']) ?? 5;
-            const styleAttributesCol = findHeaderCol(headerMap, ['Style Attributes']) ?? 6;
-            const styleCol = findHeaderCol(headerMap, ['Style']) ?? 7;
-            const skuSourceCol = findHeaderCol(headerMap, ['SKU Source']) ?? 8;
-            const colourCol = findHeaderCol(headerMap, ['Colour']) ?? 10;
-            const materialCol = findHeaderCol(headerMap, ['Material']) ?? 11;
-            const upcEanCol = findHeaderCol(headerMap, ['Primary UPC/EAN']) ?? 12;
-            const brandCodeCol = findHeaderCol(headerMap, ['Brand Code']) ?? 17;
-            const backOrderQtyCol = findHeaderCol(headerMap, ['Back Order Qty']) ?? 20;
-            const heightCmCol = findHeaderCol(headerMap, ['Height(cm)']) ?? 26;
-            const lengthCmCol = findHeaderCol(headerMap, ['Length(cm)']) ?? 27;
-            const widthCmCol = findHeaderCol(headerMap, ['Width(cm)']) ?? 28;
-            const cubeCol = findHeaderCol(headerMap, ['Cube']) ?? 29;
-            const weightKgCol = findHeaderCol(headerMap, ['Weight(kg)']) ?? 30;
-            const washAndCareCol = findHeaderCol(headerMap, ['Wash & Care']) ?? 43;
-            const shippingAndReturnsCol = findHeaderCol(headerMap, ['Shipping & Returns']) ?? 44;
-            const budf8Col = findHeaderCol(headerMap, ['BUDF 8']) ?? 48;
-            const lottableValidationCol = findHeaderCol(headerMap, ['Lottable Validation']) ?? 61;
-            const skuRotationCol = findHeaderCol(headerMap, ['SKU Rotation']) ?? 62;
-            const rotateByCol = findHeaderCol(headerMap, ['Rotate By']) ?? 63;
-            const recvValidationCodeCol = findHeaderCol(headerMap, ['Recv. Validation Code']) ?? 64;
-            const pickingInstructionsCol = findHeaderCol(headerMap, ['Picking Instructions']) ?? 65;
-            const shippingInstructionsCol = findHeaderCol(headerMap, ['Shipping Instructions']) ?? 66;
-            const thresholdAlertRequiredCol = findHeaderCol(headerMap, ['Threshold Alert Required']) ?? 67;
-            const thresholdQtyCol = findHeaderCol(headerMap, ['Threshold Qty']) ?? 68;
-            const shippingChargesCol = findHeaderCol(headerMap, ['Shipping Charges']) ?? 69;
-            const handlingChargesCol = findHeaderCol(headerMap, ['Handling Charges']) ?? 70;
-            const isArsApplicableCol = findHeaderCol(headerMap, ['Is ARS Applicable?']) ?? 71;
-            const followStyleCol = findHeaderCol(headerMap, ['Follow Style']) ?? 72;
-            const arsCalculationMethodCol = findHeaderCol(headerMap, ['ARS Calculation Method']) ?? 73;
-            const fixedStockCol = findHeaderCol(headerMap, ['Fixed Stock']) ?? 74;
-            const modelStockCol = findHeaderCol(headerMap, ['Model Stock']) ?? 75;
-            const imageDescCols = [...headerMap.entries()]
-              .filter(([k]) => /^skuimgdesc\d+$/i.test(String(k).trim()))
-              .map(([, col]) => col)
-              .sort((a, b) => a - b);
-            const sgstPercentCol = findHeaderCol(headerMap, ['SGST %']) ?? 91;
-            const cgstPercentCol = findHeaderCol(headerMap, ['CGST %']) ?? 92;
-            const igstPercentCol = findHeaderCol(headerMap, ['IGST %']) ?? 93;
-            const cessPercentCol = findHeaderCol(headerMap, ['Cess %']) ?? 94;
-            const sgstAmountCol = findHeaderCol(headerMap, ['SGST Amount (₹)']) ?? 95;
-            const cgstAmountCol = findHeaderCol(headerMap, ['CGST Amount (₹)']) ?? 96;
-            const igstAmountCol = findHeaderCol(headerMap, ['IGST Amount (₹)']) ?? 97;
-            const cessAmountCol = findHeaderCol(headerMap, ['Cess Amount (₹)']) ?? 98;
-            const priceInclGstCol = findHeaderCol(headerMap, ['Price incl. GST (₹)']) ?? 99;
-            const isUniqueBarcodeCol = findHeaderCol(headerMap, ['Is Unique Barcode', 'Is Unique Barcode.1']) ?? 100;
-
             if (!skuCol || !nameCol) {
               errors.push({
                 sheet: 'SKU Master',
@@ -699,29 +616,23 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   continue;
                 }
 
-                let classification = normalizeClassification(getCellText(row, classificationCol));
-                if (classification !== 'Style' && classification !== 'Variant') classification = 'Style';
-
-                let price = salePriceCol ? parsePrice(getCellText(row, salePriceCol)) : null;
-                let mrp = mrpCol ? parsePrice(getCellText(row, mrpCol)) : null;
-                const baseCost = baseCostCol ? parsePrice(getCellText(row, baseCostCol)) ?? 0 : 0;
-                const hsnCode = String(getCellText(row, hsnCol) || '').replace(/^'/, '');
-                const taxPercentRaw = getCellText(row, taxPercentCol);
-                const taxPercentFromCell = taxPercentRaw ? parseNumberCell(taxPercentRaw, 0) : null;
-                const sgstPercentVal = parseNumberCell(getCellText(row, sgstPercentCol), 0);
-                const cgstPercentVal = parseNumberCell(getCellText(row, cgstPercentCol), 0);
-                const igstPercentVal = parseNumberCell(getCellText(row, igstPercentCol), 0);
-                const derivedTaxPercent = sgstPercentVal + cgstPercentVal + igstPercentVal;
-                const taxPercent = taxPercentFromCell != null ? taxPercentFromCell : derivedTaxPercent;
-                const imageUrl = imageUrlCol ? getCellText(row, imageUrlCol) : '';
-                const additionalImages = imageCols.map((c) => getCellText(row, c)).filter(Boolean);
-
-                if (mrp != null && price != null && mrp < price) {
-                  mrp = price;
+                const doc = {};
+                applySkuRowToProductDoc(doc, row, headerMap, { getCellText });
+                rebuildSkuMediaFromRow(doc, row, headerMap, getCellText);
+                doc.sku = sku;
+                doc.name = name;
+                if (!doc.classification || (doc.classification !== 'Style' && doc.classification !== 'Variant')) {
+                  doc.classification = 'Style';
+                }
+                doc.price = doc.price == null || Number.isNaN(Number(doc.price)) ? 0 : Number(doc.price);
+                doc.mrp = doc.mrp == null || Number.isNaN(Number(doc.mrp)) ? 0 : Number(doc.mrp);
+                doc.baseCost = doc.baseCost == null || Number.isNaN(Number(doc.baseCost)) ? 0 : Number(doc.baseCost);
+                if (doc.mrp < doc.price) {
+                  doc.mrp = doc.price;
                   warnings.push({ row: r, sku, message: 'MRP was lower than price, adjusted to match sale price' });
                 }
-                if (price == null) price = 0;
-                if (mrp == null) mrp = 0;
+                doc.originalPrice = doc.mrp;
+                doc.costPrice = doc.baseCost || 0;
 
                 // Best-effort taxonomy linkage from Categories sheet (level-3 "Products").
                 const baseName = normalizeForMatch(getSkuBaseName(name));
@@ -737,123 +648,6 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   counts.products.unmatched += 1;
                   // Leave category/subcategory unset (still upserts, but won't appear in category listing).
                 }
-
-                const hierarchyCode = getCellText(row, hierarchyCodeCol) || '';
-                const vendorCode = getCellText(row, vendorCodeCol) || '';
-                const size = getCellText(row, sizeCol) || '';
-                const qty = getCellText(row, sizeCol) || '';
-                const uom = getCellText(row, uomCol) || 'EACH';
-
-                const doc = {
-                  sku,
-                  name,
-                  classification,
-                  tag: getCellText(row, tagCol),
-                  hierarchyCode,
-                  mfgSkuCode: getCellText(row, mfgSkuCodeCol),
-                  vendorCode,
-                  countryOfOrigin: getCellText(row, countryCol) || 'India',
-                  size,
-                  quantity: qty,
-                  uom,
-                  // Stock controls used by ProductsIntroductionScreen filters.
-                  stockQuantity: parseNumberCell(getCellText(row, fixedStockCol), 0),
-                  lowStockThreshold: parseNumberCell(getCellText(row, thresholdQtyCol), 10),
-                  associatedClientName: getCellText(row, associatedClientNameCol),
-                  styleAttributes: getCellText(row, styleAttributesCol),
-                  style: getCellText(row, styleCol),
-                  skuSource: getCellText(row, skuSourceCol),
-                  colour: getCellText(row, colourCol),
-                  material: getCellText(row, materialCol),
-                  upcEan: getCellText(row, upcEanCol),
-                  price,
-                  mrp,
-                  originalPrice: mrp,
-                  baseCost,
-                  costPrice: baseCost || 0,
-                  hsnCode,
-                  taxCategory: getCellText(row, hsnCol),
-                  taxPercent,
-                  gstRate: taxPercent,
-                  imageUrl,
-                  images: [imageUrl, ...additionalImages].filter(Boolean),
-                  additionalImages,
-                  description: splitDescription(getCellText(row, detailsCol)),
-                  meta: {
-                    title: getCellText(row, metaTitleCol),
-                    keywords: getCellText(row, metaKeywordsCol),
-                    description: getCellText(row, metaDescriptionCol),
-                  },
-                  shelfLife: {
-                    value: parseFloat(getCellText(row, shelfLifeValueCol)) || 0,
-                    type: getCellText(row, shelfLifeTypeCol),
-                    total: parseFloat(getCellText(row, shelfLifeTotalCol)) || 0,
-                    onReceiving: parseFloat(getCellText(row, shelfLifeReceivingCol)) || 0,
-                    onPicking: parseFloat(getCellText(row, shelfLifePickingCol)) || 0,
-                  },
-                  storeLinks: getCellText(row, storeLinksCol),
-                  qcRequired: parseBoolean(getCellText(row, qcRequiredCol), false),
-                  backOrderAllowed: parseBoolean(getCellText(row, backOrderAllowedCol), false),
-                  backOrderQty: parseNumberCell(getCellText(row, backOrderQtyCol), 0),
-                  isPurchasable: parseBoolean(getCellText(row, isPurchasableCol), true),
-                  isSaleable: parseBoolean(getCellText(row, isSaleableCol), true),
-                  isStocked: parseBoolean(getCellText(row, isStockedCol), true),
-                  serialTracking: parseBoolean(getCellText(row, serialTrackingCol), false),
-                  stackable: parseBoolean(getCellText(row, stackableCol), false),
-                  hazardous: parseBoolean(getCellText(row, hazardousCol), false),
-                  poisonous: parseBoolean(getCellText(row, poisonousCol), false),
-                  brandCode: getCellText(row, brandCodeCol),
-                  dimensions: {
-                    heightCm: parseNumberCell(getCellText(row, heightCmCol), 0),
-                    lengthCm: parseNumberCell(getCellText(row, lengthCmCol), 0),
-                    widthCm: parseNumberCell(getCellText(row, widthCmCol), 0),
-                    cube: parseNumberCell(getCellText(row, cubeCol), 0),
-                    weightKg: parseNumberCell(getCellText(row, weightKgCol), 0),
-                  },
-                  washAndCare: getCellText(row, washAndCareCol),
-                  shippingAndReturns: getCellText(row, shippingAndReturnsCol),
-                  lottableValidation: getCellText(row, lottableValidationCol),
-                  skuRotation: getCellText(row, skuRotationCol),
-                  rotateBy: getCellText(row, rotateByCol),
-                  recvValidationCode: getCellText(row, recvValidationCodeCol),
-                  pickingInstructions: getCellText(row, pickingInstructionsCol),
-                  shippingInstructions: getCellText(row, shippingInstructionsCol),
-                  thresholdAlertRequired: parseBoolean(getCellText(row, thresholdAlertRequiredCol), false),
-                  thresholdQty: parseNumberCell(getCellText(row, thresholdQtyCol), 0),
-                  shippingCharges: parseNumberCell(getCellText(row, shippingChargesCol), 0),
-                  handlingCharges: parseNumberCell(getCellText(row, handlingChargesCol), 0),
-                  isArsApplicable: parseBoolean(getCellText(row, isArsApplicableCol), false),
-                  followStyle: getCellText(row, followStyleCol),
-                  arsCalculationMethod: getCellText(row, arsCalculationMethodCol),
-                  fixedStock: parseNumberCell(getCellText(row, fixedStockCol), 0),
-                  modelStock: parseNumberCell(getCellText(row, modelStockCol), 0),
-                  imageDescriptions: imageDescCols.map((c) => getCellText(row, c)).filter(Boolean),
-                  isUniqueBarcode: parseBoolean(getCellText(row, isUniqueBarcodeCol), false),
-                  taxBreakup: {
-                    sgstPercent: parseNumberCell(getCellText(row, sgstPercentCol), 0),
-                    cgstPercent: parseNumberCell(getCellText(row, cgstPercentCol), 0),
-                    igstPercent: parseNumberCell(getCellText(row, igstPercentCol), 0),
-                    cessPercent: parseNumberCell(getCellText(row, cessPercentCol), 0),
-                    sgstAmount: parseNumberCell(getCellText(row, sgstAmountCol), 0),
-                    cgstAmount: parseNumberCell(getCellText(row, cgstAmountCol), 0),
-                    igstAmount: parseNumberCell(getCellText(row, igstAmountCol), 0),
-                    cessAmount: parseNumberCell(getCellText(row, cessAmountCol), 0),
-                    priceInclGst: parseNumberCell(getCellText(row, priceInclGstCol), 0),
-                  },
-                  udf: {
-                    udf1: getCellText(row, 31),
-                    udf2: getCellText(row, 32),
-                    udf3: getCellText(row, 33),
-                    udf4: getCellText(row, 34),
-                    udf5: getCellText(row, 35),
-                    udf6: getCellText(row, 36),
-                    udf7: getCellText(row, 37),
-                    udf8: getCellText(row, 38) || getCellText(row, budf8Col),
-                    udf9: getCellText(row, 39),
-                    udf10: getCellText(row, 40),
-                  },
-                  importRaw: rowToRawObject(row, headerMap),
-                };
 
                 if (!doc.imageUrl) {
                   errors.push({ sheet: 'SKU Master', row: r, sku, message: 'Missing imageUrl' });
@@ -885,7 +679,10 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   delete updateDoc.sku;
                   await Product.updateOne(
                     { _id: existing._id },
-                    { $set: updateDoc, $setOnInsert: {} },
+                    {
+                      $set: updateDoc,
+                      $unset: { importRaw: 1, mastersheetFields: 1 },
+                    },
                     { session }
                   );
                   counts.products.updated += 1;

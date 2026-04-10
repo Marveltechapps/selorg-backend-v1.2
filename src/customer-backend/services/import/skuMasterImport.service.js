@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { Product } = require('../../models/Product');
 const { Category } = require('../../models/Category');
 const { Banner } = require('../../models/Banner');
+const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
 
 const SKIP_VALUES = new Set([
   'SKU Code',
@@ -13,64 +14,6 @@ const SKIP_VALUES = new Set([
   'varchar(20)',
   'varchar(100)',
 ]);
-
-function parsePrice(val) {
-  if (val == null) return null;
-  const str = String(val).replace(/Rs\.?\s*/gi, '').replace(/[^\d.]/g, '');
-  const n = Number.parseFloat(str);
-  return Number.isFinite(n) ? n : null;
-}
-
-function parseBooleanYN(val, fallback = false) {
-  const t = String(val || '').trim().toUpperCase();
-  if (!t) return fallback;
-  return t === 'Y';
-}
-
-function normalizeClassification(val) {
-  const t = String(val || '').trim();
-  if (!t) return 'Style';
-  if (t.toLowerCase() === 'varient') return 'Variant';
-  if (t.toLowerCase() === 'variant') return 'Variant';
-  return t;
-}
-
-function splitDescription(val) {
-  const raw = String(val || '').trim();
-  if (!raw) {
-    return {
-      about: '',
-      nutrition: '',
-      originOfPlace: '',
-      healthBenefits: '',
-      raw: '',
-    };
-  }
-  const patterns = [
-    { key: 'about', prefix: 'About - ' },
-    { key: 'nutrition', prefix: 'Nutrition - ' },
-    { key: 'originOfPlace', prefix: 'Origin of Place - ' },
-    { key: 'healthBenefits', prefix: 'Health Benefits - ' },
-  ];
-  const out = { about: '', nutrition: '', originOfPlace: '', healthBenefits: '', raw };
-  for (let i = 0; i < patterns.length; i += 1) {
-    const current = patterns[i];
-    const start = raw.indexOf(current.prefix);
-    if (start === -1) continue;
-    let end = raw.length;
-    for (let j = i + 1; j < patterns.length; j += 1) {
-      const nextPos = raw.indexOf(patterns[j].prefix, start + current.prefix.length);
-      if (nextPos !== -1) {
-        end = Math.min(end, nextPos);
-      }
-    }
-    out[current.key] = raw.slice(start + current.prefix.length, end).trim();
-  }
-  if (!out.about && !out.nutrition && !out.originOfPlace && !out.healthBenefits) {
-    out.about = raw;
-  }
-  return out;
-}
 
 function slugify(str) {
   if (!str || typeof str !== 'string') return 'category';
@@ -146,43 +89,6 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
     const headerMap = makeHeaderIndexMap(ws, 1);
     const skuCol = headerMap.get('SKU Code') || headerMap.get('SKU code');
     const nameCol = headerMap.get('SKU Name') ?? headerMap.get('SKU Name ');
-    const classificationCol = headerMap.get('SKU Classification (col C)') ?? headerMap.get('SKU Classification') ?? 3;
-    const tagCol = headerMap.get('SKU Tag') ?? headerMap.get('Tag') ?? 4;
-    const hierarchyCodeCol = headerMap.get('Category hierarchy code') ?? headerMap.get('Hierarchy Code') ?? 14;
-    const vendorCodeCol = headerMap.get('Primary Vendor') ?? headerMap.get('Vendor Code') ?? 16;
-    const mfgSkuCodeCol = headerMap.get('Mfg SKU code') ?? headerMap.get('Mfg SKU Code') ?? 15;
-    const countryCol = headerMap.get('Country of Origin') ?? 13;
-    const sizeCol = headerMap.get('SKU Size') ?? headerMap.get('Size') ?? 9;
-    const uomCol = headerMap.get('SKU UOM') ?? 89;
-    const salePriceCol = headerMap.get('Sale Price') ?? headerMap.get('Sale Price ');
-    const mrpCol = headerMap.get('MSRP/MRP') ?? headerMap.get('MRP') ?? headerMap.get('MSRP');
-    const baseCostCol = headerMap.get('Base Cost') ?? 23;
-    const hsnCol = headerMap.get('Tax Category') ?? headerMap.get('HSN Code') ?? 24;
-    const taxPercentCol = headerMap.get('TaxPercent') ?? headerMap.get('Tax Percent') ?? 90;
-    const imageUrlCol = headerMap.get('SKUimgURL') ?? headerMap.get('SKUimgURL ');
-    const imageCols = [66, 68, 70, 72, 74, 76];
-    const detailsCol = headerMap.get('Product Details') ?? 41;
-    const metaTitleCol = headerMap.get('Meta Title') ?? 47;
-    const metaKeywordsCol = headerMap.get('Meta Keyword') ?? 48;
-    const metaDescriptionCol = headerMap.get('Meta Description') ?? 49;
-    const shelfLifeValueCol = headerMap.get('Shelf Life Value') ?? 51;
-    const shelfLifeTypeCol = headerMap.get('Shelf life Type') ?? 52;
-    const shelfLifeTotalCol = headerMap.get('Total shelf Life') ?? 53;
-    const shelfLifeReceivingCol = headerMap.get('Shelf Life on Receiving') ?? 54;
-    const shelfLifePickingCol = headerMap.get('Shelf life on Picking') ?? 55;
-    const storeLinksCol = headerMap.get('Store Links') ?? 25;
-    const udfStart = 31; // AE
-    const boolCols = {
-      qcRequired: 18,
-      backOrderAllowed: 19,
-      isPurchasable: 60,
-      isSaleable: 61,
-      isStocked: 62,
-      serialTracking: 56,
-      stackable: 57,
-      hazardous: 58,
-      poisonous: 59,
-    };
 
     if (!skuCol || !nameCol) {
       throw new Error('Missing required columns: "SKU Code" and/or "SKU Name"');
@@ -221,83 +127,25 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
         continue;
       }
 
-      let classification = normalizeClassification(getCellText(row, classificationCol));
-      if (classification !== 'Style' && classification !== 'Variant') classification = 'Style';
-
-      let price = salePriceCol ? parsePrice(getCellText(row, salePriceCol)) : null;
-      let mrp = mrpCol ? parsePrice(getCellText(row, mrpCol)) : null;
-      const baseCost = baseCostCol ? parsePrice(getCellText(row, baseCostCol)) : null;
-      const hsnCode = String(getCellText(row, hsnCol) || '').replace(/^'/, '');
-      const taxPercent = parseFloat(String(getCellText(row, taxPercentCol) || '0').replace('%', '')) || 0;
-      const imageUrl = imageUrlCol ? getCellText(row, imageUrlCol) : '';
-      const additionalImages = imageCols.map((c) => getCellText(row, c)).filter(Boolean);
-
-      if (mrp != null && price != null && mrp < price) {
-        mrp = price;
+      const doc = {};
+      applySkuRowToProductDoc(doc, row, headerMap, { getCellText });
+      rebuildSkuMediaFromRow(doc, row, headerMap, getCellText);
+      doc.sku = sku;
+      doc.name = name;
+      if (!doc.classification || (doc.classification !== 'Style' && doc.classification !== 'Variant')) {
+        doc.classification = 'Style';
+      }
+      doc.price = doc.price == null || Number.isNaN(Number(doc.price)) ? 0 : Number(doc.price);
+      doc.mrp = doc.mrp == null || Number.isNaN(Number(doc.mrp)) ? 0 : Number(doc.mrp);
+      if (doc.baseCost == null || Number.isNaN(Number(doc.baseCost))) {
+        doc.baseCost = 0;
+      }
+      if (doc.mrp < doc.price) {
+        doc.mrp = doc.price;
         warnings.push({ row: r, sku, message: 'MRP was lower than price, adjusted to match sale price' });
       }
-      if (price == null) price = 0;
-      if (mrp == null) mrp = 0;
-
-      const doc = {
-        sku,
-        name,
-        classification,
-        tag: getCellText(row, tagCol),
-        hierarchyCode: getCellText(row, hierarchyCodeCol),
-        mfgSkuCode: getCellText(row, mfgSkuCodeCol),
-        vendorCode: getCellText(row, vendorCodeCol),
-        countryOfOrigin: getCellText(row, countryCol) || 'India',
-        size: getCellText(row, sizeCol),
-        quantity: getCellText(row, sizeCol),
-        uom: getCellText(row, uomCol) || 'EACH',
-        price,
-        mrp,
-        originalPrice: mrp,
-        baseCost,
-        costPrice: baseCost || 0,
-        hsnCode,
-        taxPercent,
-        gstRate: taxPercent,
-        imageUrl,
-        images: [imageUrl, ...additionalImages].filter(Boolean),
-        additionalImages,
-        description: splitDescription(getCellText(row, detailsCol)),
-        meta: {
-          title: getCellText(row, metaTitleCol),
-          keywords: getCellText(row, metaKeywordsCol),
-          description: getCellText(row, metaDescriptionCol),
-        },
-        shelfLife: {
-          value: parseFloat(getCellText(row, shelfLifeValueCol)) || 0,
-          type: getCellText(row, shelfLifeTypeCol),
-          total: parseFloat(getCellText(row, shelfLifeTotalCol)) || 0,
-          onReceiving: parseFloat(getCellText(row, shelfLifeReceivingCol)) || 0,
-          onPicking: parseFloat(getCellText(row, shelfLifePickingCol)) || 0,
-        },
-        storeLinks: getCellText(row, storeLinksCol),
-        qcRequired: parseBooleanYN(getCellText(row, boolCols.qcRequired), false),
-        backOrderAllowed: parseBooleanYN(getCellText(row, boolCols.backOrderAllowed), false),
-        isPurchasable: parseBooleanYN(getCellText(row, boolCols.isPurchasable), true),
-        isSaleable: parseBooleanYN(getCellText(row, boolCols.isSaleable), true),
-        isStocked: parseBooleanYN(getCellText(row, boolCols.isStocked), true),
-        serialTracking: parseBooleanYN(getCellText(row, boolCols.serialTracking), false),
-        stackable: parseBooleanYN(getCellText(row, boolCols.stackable), false),
-        hazardous: parseBooleanYN(getCellText(row, boolCols.hazardous), false),
-        poisonous: parseBooleanYN(getCellText(row, boolCols.poisonous), false),
-        udf: {
-          udf1: getCellText(row, udfStart + 0),
-          udf2: getCellText(row, udfStart + 1),
-          udf3: getCellText(row, udfStart + 2),
-          udf4: getCellText(row, udfStart + 3),
-          udf5: getCellText(row, udfStart + 4),
-          udf6: getCellText(row, udfStart + 5),
-          udf7: getCellText(row, udfStart + 6),
-          udf8: getCellText(row, udfStart + 7),
-          udf9: getCellText(row, udfStart + 8),
-          udf10: getCellText(row, udfStart + 9),
-        },
-      };
+      doc.originalPrice = doc.mrp;
+      doc.costPrice = doc.baseCost || 0;
 
       const missingField = mandatory.find((k) => {
         const val = doc[k];
@@ -335,7 +183,7 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
             { _id: existing._id },
             {
               $set: updateDoc,
-              $setOnInsert: {},
+              $unset: { importRaw: 1, mastersheetFields: 1 },
             },
             { session }
           );

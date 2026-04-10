@@ -14,12 +14,52 @@ async function createWorldlineSession(req, res) {
     if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
     if (!platform) return res.status(400).json({ success: false, message: 'platform is required (android|ios)' });
 
+    // Log request for LM Group support
+    console.log('\n========================================');
+    console.log('WORLDLINE SESSION REQUEST');
+    console.log('========================================');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('User ID:', userId);
+    console.log('Order ID:', orderId);
+    console.log('Platform:', platform);
+    console.log('Payment Mode:', paymentMode);
+    console.log('Consumer Email:', consumerEmailId);
+    console.log('Consumer Mobile:', consumerMobileNo);
+    console.log('========================================\n');
+
     const result = await createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode });
-    if (result.error) return res.status(400).json({ success: false, message: result.error });
+    
+    if (result.error) {
+      console.log('\n========================================');
+      console.log('WORLDLINE SESSION ERROR');
+      console.log('========================================');
+      console.log('Error:', result.error);
+      console.log('========================================\n');
+      return res.status(400).json({ success: false, message: result.error });
+    }
+
+    // Log response for LM Group support
+    console.log('\n========================================');
+    console.log('WORLDLINE SESSION RESPONSE');
+    console.log('========================================');
+    console.log('Merchant ID:', result.data?.sessionPayload?.consumerData?.merchantId);
+    console.log('Transaction ID:', result.data?.txnId);
+    console.log('Attempt Number:', result.data?.attemptNo);
+    console.log('Total Amount:', result.data?.sessionPayload?.consumerData?.totalAmount);
+    console.log('Payment Mode:', result.data?.sessionPayload?.consumerData?.paymentMode);
+    console.log('Device ID:', result.data?.sessionPayload?.consumerData?.deviceId);
+    console.log('Token Length:', result.data?.sessionPayload?.consumerData?.token?.length);
+    console.log('========================================\n');
+
     return res.status(200).json({ success: true, data: result.data });
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error('worldline create session error:', err);
+    console.error('\n========================================');
+    console.error('WORLDLINE SESSION EXCEPTION');
+    console.error('========================================');
+    console.error('Error:', err.message);
+    console.error('Stack:', err.stack);
+    console.error('========================================\n');
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 }
@@ -36,12 +76,45 @@ async function completeWorldlinePayment(req, res) {
       return res.status(400).json({ success: false, message: 'response object is required' });
     }
 
+    // Log SDK response for LM Group support
+    console.log('\n========================================');
+    console.log('WORLDLINE COMPLETE PAYMENT REQUEST');
+    console.log('========================================');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('User ID:', userId);
+    console.log('Order ID:', orderId);
+    console.log('Transaction ID:', txnId);
+    console.log('SDK Response:', JSON.stringify(response, null, 2));
+    console.log('========================================\n');
+
     const result = await completePayment(userId, { orderId, txnId, response });
-    if (result.error) return res.status(400).json({ success: false, message: result.error });
+    
+    if (result.error) {
+      console.log('\n========================================');
+      console.log('WORLDLINE COMPLETE PAYMENT ERROR');
+      console.log('========================================');
+      console.log('Error:', result.error);
+      console.log('========================================\n');
+      return res.status(400).json({ success: false, message: result.error });
+    }
+
+    // Log completion result
+    console.log('\n========================================');
+    console.log('WORLDLINE COMPLETE PAYMENT RESPONSE');
+    console.log('========================================');
+    console.log('Status:', result.data?.status);
+    console.log('Payment Status:', result.data?.paymentStatus);
+    console.log('========================================\n');
+
     return res.status(200).json({ success: true, data: result.data });
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error('worldline complete payment error:', err);
+    console.error('\n========================================');
+    console.error('WORLDLINE COMPLETE PAYMENT EXCEPTION');
+    console.error('========================================');
+    console.error('Error:', err.message);
+    console.error('Stack:', err.stack);
+    console.error('========================================\n');
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 }

@@ -1,4 +1,41 @@
 const mongoose = require('mongoose');
+
+/**
+ * SKU Master (`Selorg_Updated_Rice_Mandi.xlsx` and compatible workbooks) → schema paths
+ * are applied in `services/import/skuMasterProductHydration.js` (HEADER_PATH_MAP).
+ *
+ * | Sheet header | Product field |
+ * |---------------------------|---------------|
+ * | SKU Code                  | sku |
+ * | SKU Name                  | name |
+ * | SKU Classification        | classification |
+ * | SKU Classification.1      | tag |
+ * | Similar Products          | similarProducts |
+ * | Associated Client Name    | associatedClientName |
+ * | Style Attributes / Style / SKU Source | styleAttributes, style, skuSource |
+ * | Size, Colour, Material    | size, colour, material |
+ * | Primary UPC/EAN           | upcEan |
+ * | Country Of Origin         | countryOfOrigin |
+ * | Hierarchy Code            | hierarchyCode |
+ * | Mfg SKU Code / Primary Vendor / Brand Code | mfgSkuCode, vendorCode, brandCode |
+ * | QC Required … Poisonous   | qcRequired, backOrderAllowed, … poisonous |
+ * | MSRP/MRP, Sale Price, Base Cost | mrp, price, baseCost |
+ * | Tax Category              | hsnCode + taxCategory |
+ * | Link To Store             | storeLinks |
+ * | Height(cm)…Weight(kg)     | dimensions.* |
+ * | UDF 1–10                  | udf.udf1 … udf.udf10 |
+ * | BUDF 8                    | budf8 |
+ * | About, Nutrition, Origin of Place, Health Benefit | description.* |
+ * | Wash & Care, Shipping & Returns | washAndCare, shippingAndReturns |
+ * | Meta Keywords / Title / Description | meta.* |
+ * | Shelf Life*               | shelfLife.* |
+ * | … operational columns … | (see hydration map) |
+ * | SKUImg1–6, SKUimgDesc1–6, SKUimgURL | imageUrl, additionalImages, imageDescriptions |
+ * | TaxPercent, SGST/CGST/IGST/Cess % and ₹, Price incl. GST | taxPercent, taxBreakup.* |
+ * | Is Unique Barcode(×2)     | isUniqueBarcode |
+ * | Fixed Stock               | fixedStock + stockQuantity |
+ */
+
 const productSchema = new mongoose.Schema(
   {
     // Core identity
@@ -143,6 +180,8 @@ const productSchema = new mongoose.Schema(
         udf10: '',
       }),
     },
+    /** Mastersheet “BUDF 8” column (separate from UDF 8). */
+    budf8: { type: String, default: '' },
 
     attributes: {
       weight: String,
@@ -215,8 +254,13 @@ const productSchema = new mongoose.Schema(
         priceInclGst: 0,
       }),
     },
-    // Raw import payload from mastersheet row (for full-fidelity storage/audit).
-    importRaw: { type: mongoose.Schema.Types.Mixed, default: null },
+    /** Free-text “similar SKUs” from mastersheet (not yet resolved to relatedProductIds). */
+    similarProducts: { type: String, default: '' },
+    /**
+     * SKU Master columns that have no entry in HEADER_PATH_MAP (exact header string → cell text).
+     * Rebuilt on each import so the document reflects the current sheet only.
+     */
+    additionalImportedFields: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     tags: [{ type: String }],
     isActive: { type: Boolean, default: true },
     order: { type: Number },
@@ -232,8 +276,22 @@ productSchema.index({ status: 1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ hierarchyCode: 1, classification: 1, isActive: 1, isSaleable: 1 });
 productSchema.index(
-  { name: 'text', 'description.about': 'text', 'description.nutrition': 'text', tag: 'text' },
-  { weights: { name: 10, tag: 5, 'description.about': 2, 'description.nutrition': 1 } }
+  {
+    name: 'text',
+    'description.about': 'text',
+    'description.nutrition': 'text',
+    'description.healthBenefits': 'text',
+    tag: 'text',
+  },
+  {
+    weights: {
+      name: 10,
+      tag: 5,
+      'description.about': 2,
+      'description.nutrition': 1,
+      'description.healthBenefits': 1,
+    },
+  }
 );
 const Product = mongoose.models.CustomerProduct || mongoose.model('CustomerProduct', productSchema, 'customer_products');
 module.exports = { Product };

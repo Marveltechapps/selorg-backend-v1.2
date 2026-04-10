@@ -3,6 +3,8 @@ const { Collection } = require('../../models/Collection');
 const { Media } = require('../../models/Media');
 const { Banner } = require('../../models/Banner');
 const { Product } = require('../../models/Product');
+const mongoose = require('mongoose');
+const { ContentHubImportRun } = require('../../models/ContentHubImportRun');
 const { importSkuMaster } = require('../../services/import/skuMasterImport.service');
 const { importCmsPages } = require('../../services/import/cmsPagesImport.service');
 const { importContentHubMaster } = require('../../services/import/contentHubMasterImport.service');
@@ -258,8 +260,32 @@ module.exports = {
     }
     const overwriteRaw = req.body?.overwrite ?? req.query?.overwrite;
     const overwrite = overwriteRaw === undefined ? true : String(overwriteRaw) === 'true';
+    const startedAt = Date.now();
+    const uploadedByRaw = req.user?.userId || req.user?._id || null;
+    const uploadedBy = mongoose.Types.ObjectId.isValid(String(uploadedByRaw || ''))
+      ? new mongoose.Types.ObjectId(String(uploadedByRaw))
+      : null;
     try {
       const { counts, errors, warnings, success } = await importContentHubMaster(req.file.buffer, { overwrite });
+      try {
+        await ContentHubImportRun.create({
+          source: 'content-hub',
+          uploadedBy,
+          file: {
+            originalName: req.file?.originalname || '',
+            mimeType: req.file?.mimetype || '',
+            sizeBytes: Number(req.file?.size || 0),
+          },
+          overwrite,
+          success: Boolean(success),
+          durationMs: Date.now() - startedAt,
+          counts: counts || {},
+          warnings: Array.isArray(warnings) ? warnings : [],
+          errors: Array.isArray(errors) ? errors : [],
+        });
+      } catch (e) {
+        console.error('ContentHubImportRun.create failed', e);
+      }
       return res.status(200).json({
         success,
         counts,
@@ -267,11 +293,44 @@ module.exports = {
         errors,
       });
     } catch (err) {
+      try {
+        await ContentHubImportRun.create({
+          source: 'content-hub',
+          uploadedBy,
+          file: {
+            originalName: req.file?.originalname || '',
+            mimeType: req.file?.mimetype || '',
+            sizeBytes: Number(req.file?.size || 0),
+          },
+          overwrite,
+          success: false,
+          durationMs: Date.now() - startedAt,
+          counts: {},
+          warnings: [],
+          errors: [{ message: err.message }],
+        });
+      } catch (e) {
+        console.error('ContentHubImportRun.create failed', e);
+      }
       return res.status(200).json({
         success: false,
         counts: {},
         errors: [{ message: err.message }],
       });
+    }
+  },
+  listContentHubImportRuns: async (req, res) => {
+    try {
+      const limitRaw = req.query?.limit;
+      const limit = Math.min(50, Math.max(1, Number.parseInt(String(limitRaw || '20'), 10) || 20));
+      const items = await ContentHubImportRun.find({ source: 'content-hub' })
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean();
+      return res.status(200).json({ success: true, data: items });
+    } catch (err) {
+      console.error('listContentHubImportRuns error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error' });
     }
   },
   uploadCmsPages: async (req, res) => {

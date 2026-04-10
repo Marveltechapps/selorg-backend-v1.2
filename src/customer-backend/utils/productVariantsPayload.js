@@ -63,6 +63,34 @@ function dedupeProductsByBaseName(products, maxCount) {
   return out;
 }
 
+/**
+ * Ensure a stable, client-friendly image order.
+ * Rule: if `imageUrl` exists, it MUST be index 0. Remaining URLs preserve order.
+ */
+function normalizeImagesForClient(p) {
+  const primary = typeof p?.imageUrl === 'string' ? p.imageUrl.trim() : '';
+  const urls = [];
+  if (primary) urls.push(primary);
+  if (Array.isArray(p?.images)) {
+    for (const u of p.images) {
+      if (typeof u === 'string' && u.trim()) urls.push(u.trim());
+    }
+  }
+  if (Array.isArray(p?.additionalImages)) {
+    for (const u of p.additionalImages) {
+      if (typeof u === 'string' && u.trim()) urls.push(u.trim());
+    }
+  }
+  const seen = new Set();
+  const out = [];
+  for (const u of urls) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
 /** Media fields so each variant row can show the correct SKU image (esp. hierarchy siblings). */
 function pickImageFields(p) {
   if (!p) return {};
@@ -71,9 +99,7 @@ function pickImageFields(p) {
     thumbnailUrl: p.thumbnailUrl || '',
     cardImageUrl: p.cardImageUrl || '',
   };
-  if (Array.isArray(p.images) && p.images.length > 0) {
-    o.images = p.images;
-  }
+  o.images = normalizeImagesForClient(p);
   return o;
 }
 
@@ -234,6 +260,7 @@ module.exports = {
   enrichProductsWithVariants,
   singleVariantFallback,
   pickImageFields,
+  normalizeImagesForClient,
   productBaseName,
   productLineDedupeKey,
   filterHierarchySiblingsForProductLine,

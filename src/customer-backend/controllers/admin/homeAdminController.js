@@ -860,7 +860,7 @@ exports.uploadProductImage = async (req, res) => {
 
 const PRODUCT_UPDATE_KEYS = [
   'name', 'sku', 'description', 'brand', 'price', 'costPrice', 'originalPrice', 'gstRate',
-  'stockQuantity', 'lowStockThreshold', 'imageUrl', 'images', 'status', 'featured',
+  'stockQuantity', 'lowStockThreshold', 'imageUrl', 'images', 'additionalImages', 'status', 'featured',
   'attributes', 'tags', 'categoryId', 'subcategoryId', 'variants', 'order', 'quantity', 'discount',
   // Extended structured fields (mastersheet import).
   'associatedClientName',
@@ -905,8 +905,9 @@ const PRODUCT_UPDATE_KEYS = [
   'shelfLife',
   'meta',
   'udf',
-  // Full fidelity import payload (optional).
-  'importRaw',
+  'budf8',
+  'similarProducts',
+  'additionalImportedFields',
 ];
 exports.updateProduct = async (req, res) => {
   const body = {};

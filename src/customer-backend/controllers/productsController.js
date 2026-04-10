@@ -5,6 +5,7 @@ const {
   enrichProductsWithVariants,
   pickImageFields,
   filterHierarchySiblingsForProductLine,
+  normalizeImagesForClient,
 } = require('../utils/productVariantsPayload');
 const { normalizeDescriptionForClient } = require('../utils/productDescriptionNormalize');
 
@@ -100,7 +101,23 @@ async function getProductDetail(req, res) {
     }
 
     let relatedProducts = [];
-    if (Array.isArray(product.relatedProductIds) && product.relatedProductIds.length > 0) {
+    const similarSkus = String(product.similarProducts || '')
+      .split(/[,;\n\r]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (similarSkus.length > 0) {
+      const docs = await Product.find({
+        sku: { $in: similarSkus },
+        isActive: true,
+        isSaleable: true,
+        classification: 'Style',
+      })
+        .select({ baseCost: 0, vendorCode: 0, mfgSkuCode: 0, hsnCode: 0, udf: 0, meta: 0 })
+        .limit(64)
+        .lean();
+      const bySku = new Map(docs.map((d) => [String(d.sku || ''), d]));
+      relatedProducts = similarSkus.map((s) => bySku.get(s)).filter(Boolean);
+    } else if (Array.isArray(product.relatedProductIds) && product.relatedProductIds.length > 0) {
       relatedProducts = await Product.find({
         _id: { $in: product.relatedProductIds },
         isActive: true,
@@ -126,6 +143,7 @@ async function getProductDetail(req, res) {
     const homeConfig = await HomeConfig.findOne({ key: 'main' }).select('deliveryLabel').lean();
     const enrichedProduct = {
       ...product,
+      images: normalizeImagesForClient(product),
       description: normalizeDescriptionForClient(product.description),
       deliveryInfo: product.deliveryInfo || homeConfig?.deliveryLabel || '10-min delivery',
     };
