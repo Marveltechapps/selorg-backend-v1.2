@@ -495,6 +495,10 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 'varchar(20)',
                 'varchar(100)',
               ]);
+              const salePriceCol = findHeaderCol(headerMap, ['Sale Price']);
+              const mrpCol = findHeaderCol(headerMap, ['MSRP/MRP', 'MRP', 'MSRP']);
+              const baseCostCol = findHeaderCol(headerMap, ['Base Cost']);
+              const isSaleableCol = findHeaderCol(headerMap, ['Is Saleable']);
 
               let firstDataRow = 6;
               for (let r = 2; r <= Math.min(20, skuWs.rowCount); r += 1) {
@@ -560,6 +564,14 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 // This prevents unnecessary skips for maintenance-only sheet updates.
                 // eslint-disable-next-line no-await-in-loop
                 const existing = await Product.findOne({ sku: doc.sku }).session(session).lean();
+                const rawSalePrice = salePriceCol ? getCellText(row, salePriceCol) : '';
+                const rawMrp = mrpCol ? getCellText(row, mrpCol) : '';
+                const rawBaseCost = baseCostCol ? getCellText(row, baseCostCol) : '';
+                const rawIsSaleable = isSaleableCol ? getCellText(row, isSaleableCol) : '';
+                const hasSalePrice = String(rawSalePrice || '').trim() !== '';
+                const hasMrp = String(rawMrp || '').trim() !== '';
+                const hasBaseCost = String(rawBaseCost || '').trim() !== '';
+                const hasIsSaleable = String(rawIsSaleable || '').trim() !== '';
                 if (!doc.imageUrl && existing?.imageUrl) {
                   doc.imageUrl = String(existing.imageUrl);
                 }
@@ -584,7 +596,30 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   continue;
                 }
 
-                if (doc.price === 0) {
+                if (existing && !hasSalePrice) {
+                  doc.price = Number(existing.price) || 0;
+                }
+                if (existing && !hasMrp) {
+                  doc.mrp = Number(existing.mrp) || doc.price || 0;
+                  doc.originalPrice = doc.mrp;
+                }
+                if (existing && !hasBaseCost) {
+                  doc.baseCost = Number(existing.baseCost) || 0;
+                  doc.costPrice = Number(existing.costPrice) || doc.baseCost || 0;
+                }
+                if (existing && !hasIsSaleable) {
+                  doc.isSaleable = existing.isSaleable !== false;
+                } else if (!existing && !hasIsSaleable) {
+                  doc.isSaleable = true;
+                }
+
+                if (!existing && !hasSalePrice) {
+                  errors.push({ sheet: 'SKU Master', row: r, sku, message: 'Missing Sale Price for new SKU' });
+                  counts.products.skipped += 1;
+                  continue;
+                }
+
+                if (doc.price === 0 || doc.isSaleable === false) {
                   doc.isActive = false;
                   doc.status = 'inactive';
                 } else {
@@ -655,6 +690,39 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             await Product.updateOne(
               { _id: p._id },
               { $set: { categoryId: subDoc.parentId, subcategoryId: subDoc._id } },
+              { session }
+            );
+          }
+
+          // -------------------------
+          // 6) Backfill category imageUrl from linked product image (when sheet has no display-image rows)
+          // -------------------------
+          const categoriesMissingImage = await Category.find({
+            isActive: true,
+            level: { $in: [1, 2] },
+            $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }, { imageUrl: null }],
+          })
+            .select('_id level')
+            .session(session)
+            .lean();
+
+          for (const cat of categoriesMissingImage) {
+            const productFilter =
+              Number(cat.level) === 1
+                ? { categoryId: cat._id, imageUrl: { $exists: true, $ne: '' } }
+                : {
+                    $or: [{ subcategoryId: cat._id }, { categoryId: cat._id }],
+                    imageUrl: { $exists: true, $ne: '' },
+                  };
+
+            // eslint-disable-next-line no-await-in-loop
+            const sampleProduct = await Product.findOne(productFilter).select('imageUrl').session(session).lean();
+            if (!sampleProduct?.imageUrl) continue;
+
+            // eslint-disable-next-line no-await-in-loop
+            await Category.updateOne(
+              { _id: cat._id, $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }, { imageUrl: null }] },
+              { $set: { imageUrl: String(sampleProduct.imageUrl) } },
               { session }
             );
           }
