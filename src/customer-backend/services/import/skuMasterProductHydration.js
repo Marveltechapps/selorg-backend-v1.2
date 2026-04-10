@@ -420,7 +420,7 @@ function rebuildSkuMediaFromRow(doc, row, headerMap, getCellText) {
       if (!cellRaw) continue;
       const n = parseInt(String(h).replace(/^\D+/g, ''), 10) || 0;
       for (const u of parseCommaSeparatedImageUrls(cellRaw)) {
-        extras.push({ n, u });
+        extras.push({ n, u: applySkuImgUrlParams(u) });
       }
     }
   }
