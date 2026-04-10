@@ -1,7 +1,12 @@
 const mongoose = require('mongoose');
 const { Category } = require('../models/Category');
 const { Product } = require('../models/Product');
-const { getCategoryPayload } = require('../services/categoriesService');
+const {
+  getCategoryPayload,
+  collectHierarchyCodesForSubcategory,
+  productTaxonomyOrForSubcategory,
+  productTaxonomyOrForMainCategory,
+} = require('../services/categoriesService');
 
 function isValidObjectId(id) {
   if (!id || typeof id !== 'string') return false;
@@ -75,16 +80,28 @@ async function getCategoryProductsBySlug(req, res) {
 
     const subcategories = await Category.find({ parentId: category._id, isActive: true }).sort({ order: 1 }).lean();
     const subcategoryId = subcategory ? subcategories.find((s) => s.slug === subcategory)?._id : null;
-    const targetCategoryIds = subcategoryId ? [subcategoryId] : subcategories.map((s) => s._id);
 
-    const query = {
-      categoryId: { $in: targetCategoryIds.length ? targetCategoryIds : [category._id] },
+    let taxonomyOr;
+    if (subcategoryId) {
+      const codes = await collectHierarchyCodesForSubcategory(subcategoryId);
+      taxonomyOr = productTaxonomyOrForSubcategory(subcategoryId, codes);
+    } else {
+      taxonomyOr = productTaxonomyOrForMainCategory(category._id, subcategories);
+    }
+
+    let query = {
       classification: 'Style',
       isActive: true,
       isSaleable: true,
+      $or: taxonomyOr,
     };
     if (String(inStock).toLowerCase() === 'true') {
-      query.$or = [{ stock: { $gt: 0 } }, { stockQuantity: { $gt: 0 } }];
+      query = {
+        $and: [
+          query,
+          { $or: [{ stock: { $gt: 0 } }, { stockQuantity: { $gt: 0 } }] },
+        ],
+      };
     }
 
     const sortMap = {
@@ -106,11 +123,20 @@ async function getCategoryProductsBySlug(req, res) {
       Product.countDocuments(query),
     ]);
 
-    const productCountBySub = await Product.aggregate([
-      { $match: { categoryId: { $in: subcategories.map((s) => s._id) }, classification: 'Style', isActive: true, isSaleable: true } },
-      { $group: { _id: '$categoryId', count: { $sum: 1 } } },
-    ]);
-    const countMap = new Map(productCountBySub.map((c) => [String(c._id), c.count]));
+    const productCountEntries = await Promise.all(
+      subcategories.map(async (s) => {
+        const codes = await collectHierarchyCodesForSubcategory(s._id);
+        const match = {
+          classification: 'Style',
+          isActive: true,
+          isSaleable: true,
+          $or: productTaxonomyOrForSubcategory(s._id, codes),
+        };
+        const count = await Product.countDocuments(match);
+        return [String(s._id), count];
+      })
+    );
+    const countMap = new Map(productCountEntries);
 
     return res.json({
       success: true,
@@ -150,11 +176,20 @@ async function getSubcategoriesByCategorySlug(req, res) {
     const category = await Category.findOne({ slug, isActive: true, level: 1 }).lean();
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
     const subcategories = await Category.find({ parentId: category._id, isActive: true }).sort({ order: 1 }).lean();
-    const counts = await Product.aggregate([
-      { $match: { categoryId: { $in: subcategories.map((s) => s._id) }, classification: 'Style', isActive: true, isSaleable: true } },
-      { $group: { _id: '$categoryId', count: { $sum: 1 } } },
-    ]);
-    const countMap = new Map(counts.map((c) => [String(c._id), c.count]));
+    const countEntries = await Promise.all(
+      subcategories.map(async (s) => {
+        const codes = await collectHierarchyCodesForSubcategory(s._id);
+        const match = {
+          classification: 'Style',
+          isActive: true,
+          isSaleable: true,
+          $or: productTaxonomyOrForSubcategory(s._id, codes),
+        };
+        const count = await Product.countDocuments(match);
+        return [String(s._id), count];
+      })
+    );
+    const countMap = new Map(countEntries);
     return res.json({
       success: true,
       data: subcategories.map((s) => ({

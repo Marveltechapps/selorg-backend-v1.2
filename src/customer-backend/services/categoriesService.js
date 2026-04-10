@@ -10,6 +10,61 @@ const { enrichProductsWithVariants } = require('../utils/productVariantsPayload'
 const DEFAULT_PRODUCT_LIMIT = 50;
 
 /**
+ * Collect hierarchy code strings for a level-2 subcategory: its own `hierarchyCodes`
+ * plus every level-3 leaf under it. Used when products are linked via `hierarchyCode`
+ * but `categoryId` / `subcategoryId` were not set during import.
+ * @param {string|import('mongoose').Types.ObjectId} subCategoryId
+ * @returns {Promise<string[]>}
+ */
+async function collectHierarchyCodesForSubcategory(subCategoryId) {
+  if (subCategoryId == null || subCategoryId === '') return [];
+  if (!mongoose.Types.ObjectId.isValid(String(subCategoryId))) return [];
+  const subOid = new mongoose.Types.ObjectId(String(subCategoryId));
+  const [subDoc, leaves] = await Promise.all([
+    Category.findOne({ _id: subOid, isActive: true }).select('hierarchyCodes').lean(),
+    Category.find({ parentId: subOid, level: 3, isActive: true }).select('hierarchyCodes').lean(),
+  ]);
+  const set = new Set();
+  for (const c of subDoc?.hierarchyCodes || []) {
+    const t = String(c || '').trim();
+    if (t) set.add(t);
+  }
+  for (const leaf of leaves) {
+    for (const c of leaf.hierarchyCodes || []) {
+      const t = String(c || '').trim();
+      if (t) set.add(t);
+    }
+  }
+  return [...set];
+}
+
+/**
+ * @param {string|import('mongoose').Types.ObjectId} subCategoryId
+ * @param {string[]} hierarchyCodes
+ */
+function productTaxonomyOrForSubcategory(subCategoryId, hierarchyCodes) {
+  const subOid = new mongoose.Types.ObjectId(String(subCategoryId));
+  const or = [{ subcategoryId: subOid }, { categoryId: subOid }];
+  if (Array.isArray(hierarchyCodes) && hierarchyCodes.length > 0) {
+    or.push({ hierarchyCode: { $in: hierarchyCodes } });
+  }
+  return or;
+}
+
+/**
+ * @param {import('mongoose').Types.ObjectId} mainCategoryId
+ * @param {Array<{ _id: import('mongoose').Types.ObjectId }>} subcategoryDocs
+ */
+function productTaxonomyOrForMainCategory(mainCategoryId, subcategoryDocs) {
+  const subIds = (subcategoryDocs || []).map((s) => s._id);
+  return [
+    { categoryId: mainCategoryId },
+    { subcategoryId: { $in: subIds } },
+    { categoryId: { $in: subIds } },
+  ];
+}
+
+/**
  * Get full category payload: category, subcategories, banners, products.
  * Products are filtered by category + all subcategories, or by subCategoryId when provided.
  * @param {string} categoryId - Main category (top-level or any) id
@@ -51,24 +106,25 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     classification: 'Style',
   };
 
-  const rawProducts = await Product.find(
-    subCategoryId
-      ? {
-          ...productQueryBase,
-          $or: [
-            { categoryId: new mongoose.Types.ObjectId(subCategoryId) },
-            { subcategoryId: new mongoose.Types.ObjectId(subCategoryId) },
-          ],
-        }
-      : {
-          ...productQueryBase,
-          $or: [
-            { categoryId: catId },
-            { subcategoryId: { $in: subcategoryIds } },
-            { categoryId: { $in: subcategoryIds } },
-          ],
-        }
-  )
+  let productFilter;
+  if (subCategoryId != null && String(subCategoryId).trim() !== '') {
+    if (!mongoose.Types.ObjectId.isValid(String(subCategoryId))) {
+      productFilter = { ...productQueryBase, _id: { $in: [] } };
+    } else {
+      const hierarchyCodes = await collectHierarchyCodesForSubcategory(subCategoryId);
+      productFilter = {
+        ...productQueryBase,
+        $or: productTaxonomyOrForSubcategory(subCategoryId, hierarchyCodes),
+      };
+    }
+  } else {
+    productFilter = {
+      ...productQueryBase,
+      $or: productTaxonomyOrForMainCategory(catId, subcategories),
+    };
+  }
+
+  const rawProducts = await Product.find(productFilter)
     .sort({ order: 1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
     .lean();
@@ -111,4 +167,9 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
   };
 }
 
-module.exports = { getCategoryPayload };
+module.exports = {
+  getCategoryPayload,
+  collectHierarchyCodesForSubcategory,
+  productTaxonomyOrForSubcategory,
+  productTaxonomyOrForMainCategory,
+};
