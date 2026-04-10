@@ -556,6 +556,28 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   // Leave category/subcategory unset (still upserts, but won't appear in category listing).
                 }
 
+                // Reuse existing media when SKU row omits image columns.
+                // This prevents unnecessary skips for maintenance-only sheet updates.
+                // eslint-disable-next-line no-await-in-loop
+                const existing = await Product.findOne({ sku: doc.sku }).session(session).lean();
+                if (!doc.imageUrl && existing?.imageUrl) {
+                  doc.imageUrl = String(existing.imageUrl);
+                }
+                if (!Array.isArray(doc.images) || doc.images.length === 0) {
+                  if (Array.isArray(existing?.images) && existing.images.length > 0) {
+                    doc.images = existing.images;
+                  } else if (doc.imageUrl) {
+                    doc.images = [doc.imageUrl];
+                  }
+                }
+                if (!Array.isArray(doc.additionalImages) || doc.additionalImages.length === 0) {
+                  if (Array.isArray(existing?.additionalImages) && existing.additionalImages.length > 0) {
+                    doc.additionalImages = existing.additionalImages;
+                  } else if (Array.isArray(doc.images) && doc.images.length > 1) {
+                    doc.additionalImages = doc.images.slice(1);
+                  }
+                }
+
                 if (!doc.imageUrl) {
                   errors.push({ sheet: 'SKU Master', row: r, sku, message: 'Missing imageUrl' });
                   counts.products.skipped += 1;
@@ -575,8 +597,6 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   doc.subcategoryId = matched.subcategoryId;
                 }
 
-                // eslint-disable-next-line no-await-in-loop
-                const existing = await Product.findOne({ sku: doc.sku }).session(session).lean();
                 if (existing) {
                   if (!overwrite) {
                     counts.products.skipped += 1;
