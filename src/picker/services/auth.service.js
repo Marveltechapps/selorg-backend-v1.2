@@ -14,9 +14,17 @@ const { OTP_ERROR_CODES } = require('../config/otp.constants');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'picker-app-secret-change-in-production';
 
-/** Normalize phone: digits only, exactly 10 digits, not all zeros. */
+/** Normalize phone: handle 10-digit, 11-digit (leading 0), and 12-digit (leading 91) to return exactly 10 digits. */
 function normalizePhone(phone) {
-  const digits = String(phone ?? '').replace(/\D/g, '');
+  const raw = String(phone ?? '').replace(/\D/g, '');
+  let digits = raw;
+  if (raw.length === 12 && raw.startsWith('91')) {
+    digits = raw.slice(2);
+  } else if (raw.length === 11 && raw.startsWith('0')) {
+    digits = raw.slice(1);
+  } else if (raw.length > 10) {
+    digits = raw.slice(-10);
+  }
   if (digits.length !== 10 || /^0+$/.test(digits)) return null;
   return digits;
 }
@@ -130,7 +138,9 @@ const verifyOtp = async (phone, otp) => {
   let isValid;
   try {
     isValid = await verifyOTP(trimmed, otpStr);
+    logPickerOtp('info', `[Picker OTP] verifyOtp: mobile=${trimmed}, otp=${otpStr}, isValid=${isValid}`);
   } catch (err) {
+    logPickerOtp('warn', `[Picker OTP] verifyOtp: error for ${trimmed} – ${err?.message}`);
     return { success: false, message: 'Verification failed. Please try again.' };
   }
 
