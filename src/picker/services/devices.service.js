@@ -4,6 +4,7 @@
  * Emits DEVICE_RETURNED WebSocket event.
  */
 const PickerDevice = require('../models/device.model');
+const PickerUser = require('../models/user.model');
 const { DEVICE_STATUS } = require('../../constants/pickerEnums');
 const mongoose = require('mongoose');
 
@@ -95,4 +96,21 @@ async function getAssignedDevice(pickerUserId) {
   };
 }
 
-module.exports = { returnDevice, getAssignedDevice };
+/**
+ * Picker confirms they collected the handheld (after manager OTP).
+ * @param {string} pickerUserId
+ */
+async function acknowledgeDeviceCollection(pickerUserId) {
+  const doc = await PickerUser.findById(pickerUserId);
+  if (!doc) throw new Error('User not found');
+  if (!doc.managerOtpVerifiedAt) {
+    const err = new Error('Manager approval is required before confirming device collection');
+    err.statusCode = 400;
+    throw err;
+  }
+  doc.deviceCollectionCompletedAt = new Date();
+  await doc.save();
+  return { success: true };
+}
+
+module.exports = { returnDevice, getAssignedDevice, acknowledgeDeviceCollection };

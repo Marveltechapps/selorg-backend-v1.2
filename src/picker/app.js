@@ -4,6 +4,7 @@
  * role checks. See picker/rbac.plan.js for intended roles per endpoint area.
  */
 const express = require('express');
+const crypto = require('crypto');
 const cors = require('cors');
 const { isDbConnected } = require('./config/db');
 const { errorHandler } = require('./middlewares/error.middleware');
@@ -29,9 +30,15 @@ const sharedOrdersRoutes = require('./routes/sharedOrders.routes');
 const performanceRoutes = require('./routes/performance.routes');
 const devicesRoutes = require('./routes/devices.routes');
 const heartbeatRoutes = require('./routes/heartbeat.routes');
+const managerRoutes = require('./routes/manager.routes');
+const presenceRoutes = require('./routes/presence.routes');
 const issueRoutes = require('./routes/issue.routes');
+const { startPickerPresenceMonitor } = require('./jobs/pickerPresenceMonitor.job');
 const onboardingRoutes = require('./routes/onboarding.routes');
 const configRoutes = require('./routes/config.routes');
+const legalRoutes = require('./routes/legalRoutes');
+const adminLegalRoutes = require('./routes/admin/legalAdminRoutes');
+const accountRoutes = require('./routes/account.routes');
 
 const app = express();
 
@@ -65,13 +72,24 @@ app.use(requireDb);
 
 const { cacheMiddleware } = require('../core/middleware');
 const appConfig = require('../config/app');
-app.use(cacheMiddleware(appConfig.cache.picker.default));
+// Scope GET cache by Authorization so different users never share an entry. Skip /documents so approval status is always fresh.
+app.use(
+  cacheMiddleware(appConfig.cache.picker.default, {
+    skipPaths: ['/documents'],
+    cacheKeyExtra: (req) => {
+      const raw = typeof req.get === 'function' ? req.get('authorization') : req.headers?.authorization;
+      if (!raw) return ':anon';
+      return ':' + crypto.createHash('sha256').update(String(raw)).digest('hex').slice(0, 32);
+    },
+  })
+);
 
 app.use('/auth', authRoutes);
 app.get('/me', requireAuth, userController.getProfile);
 app.get('/me/link-status', requireAuth, userController.getLinkStatus);
 app.use('/onboarding', onboardingRoutes);
 app.use('/users', userRoutes);
+app.use('/account', accountRoutes);
 app.use('/documents', documentsRoutes);
 app.use('/verify', verifyRoutes);
 app.use('/training', trainingRoutes);
@@ -89,9 +107,21 @@ app.use('/orders', sharedOrdersRoutes);
 app.use('/performance', performanceRoutes);
 app.use('/devices', devicesRoutes);
 app.use('/heartbeat', heartbeatRoutes);
+app.use('/manager', managerRoutes);
+app.use('/presence', presenceRoutes);
 app.use('/issues', issueRoutes);
 app.use('/config', configRoutes);
+app.use('/legal', legalRoutes);
+app.use('/admin/legal', adminLegalRoutes);
 
 app.use(errorHandler);
+
+try {
+  if (String(process.env.DISABLE_PICKER_PRESENCE_MONITOR || '').toLowerCase() !== 'true') {
+    startPickerPresenceMonitor();
+  }
+} catch (e) {
+  console.warn('[picker app] presence monitor failed to start:', e?.message || e);
+}
 
 module.exports = app;

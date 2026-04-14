@@ -13,6 +13,8 @@ const PICKER_STATUS = {
   REJECTED: 'REJECTED',
   BLOCKED: 'BLOCKED',
   SUSPENDED: 'SUSPENDED',
+  /** User requested account removal; admin completes deletion after review. */
+  DELETION_PENDING: 'DELETION_PENDING',
 };
 
 /** Workforce order lifecycle (picker assignment → ready for dispatch) */

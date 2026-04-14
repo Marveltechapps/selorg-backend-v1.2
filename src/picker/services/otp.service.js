@@ -26,14 +26,22 @@ async function createOTP(phone, otpOverride) {
   const expiresAt = new Date();
   expiresAt.setMinutes(expiresAt.getMinutes() + expireMinutes);
 
-  // We no longer deleteMany({ phone: normalizedMobile, isUsed: false }) 
-  // to avoid race conditions with multiple concurrent send-otp requests.
-  // TTL index on picker_otps will automatically clean up expired records.
+  // Delete old unused OTPs for this phone to prevent verification issues
+  // This ensures only the latest OTP is valid
+  try {
+    const deleteResult = await Otp.deleteMany({ phone: normalizedMobile, isUsed: false });
+    if (deleteResult.deletedCount > 0) {
+      console.log(`[Picker OTP] Deleted ${deleteResult.deletedCount} old unused OTP(s) for ${normalizedMobile}`);
+    }
+  } catch (err) {
+    console.warn(`[Picker OTP] Failed to delete old OTPs for ${normalizedMobile}: ${err?.message}`);
+  }
 
   const otpString = String(otp).trim();
   if (!/^\d{4}$/.test(otpString)) throw new Error(`Invalid OTP format: ${otpString}`);
 
   await Otp.create({ phone: normalizedMobile, code: otpString, expiresAt, isUsed: false });
+  console.log(`[Picker OTP] Created new OTP for ${normalizedMobile}, expires at ${expiresAt.toISOString()}`);
   return otpString;
 }
 
@@ -48,42 +56,53 @@ async function verifyOTP(phone, otp) {
   const normalizedOtp = String(otp).trim();
   const currentTime = new Date();
 
-  // Try to find an exact match first
-  let otpRecord = await Otp.findOne({
+  console.log(`[Picker OTP] Verifying OTP for ${normalizedMobile}, entered OTP: ${normalizedOtp}`);
+
+  // Find all unused, non-expired OTPs for this phone, sorted by newest first
+  const potentialOtps = await Otp.find({
     phone: normalizedMobile,
-    code: normalizedOtp,
     isUsed: false,
     expiresAt: { $gt: currentTime },
-  }).sort({ createdAt: -1 });
+  }).sort({ createdAt: -1 }).limit(5);
 
-  if (!otpRecord) {
-    // Robust search: Look for ANY unused OTP for this phone that might match, 
-    // including those about to expire or with slight clock skew (60s buffer).
-    const bufferTime = 60000; // 60 seconds grace period
-    const potentialOtps = await Otp.find({
-      phone: normalizedMobile,
-      isUsed: false,
-      expiresAt: { $gt: new Date(currentTime.getTime() - bufferTime) },
-    }).sort({ createdAt: -1 }).limit(10);
+  console.log(`[Picker OTP] Found ${potentialOtps.length} unused OTP record(s) for ${normalizedMobile}`);
 
-    console.log(`[Picker OTP] No direct match for ${normalizedMobile} with ${normalizedOtp}. Found ${potentialOtps.length} potential records with buffer.`);
-    for (const record of potentialOtps) {
-      const recordOtp = String(record.code).trim();
-      console.log(`[Picker OTP] Comparing stored "${recordOtp}" with entered "${normalizedOtp}"`);
-      if (recordOtp === normalizedOtp || parseInt(recordOtp, 10) === parseInt(normalizedOtp, 10)) {
-        otpRecord = record;
-        break;
-      }
-    }
-  }
-
-  if (!otpRecord) {
-    console.log(`[Picker OTP] Verification failed for ${normalizedMobile} with OTP ${normalizedOtp}`);
+  if (potentialOtps.length === 0) {
+    console.log(`[Picker OTP] Verification failed for ${normalizedMobile}: No valid OTP found`);
     return false;
   }
 
-  await Otp.updateOne({ _id: otpRecord._id, isUsed: false }, { $set: { isUsed: true } });
-  console.log(`[Picker OTP] Verification successful for ${normalizedMobile} with OTP ${normalizedOtp} (recordId=${otpRecord._id})`);
+  // Try to find a matching OTP
+  let matchedRecord = null;
+  for (const record of potentialOtps) {
+    const storedOtp = String(record.code).trim();
+    console.log(`[Picker OTP] Comparing: stored="${storedOtp}", entered="${normalizedOtp}", recordId=${record._id}, createdAt=${record.createdAt.toISOString()}, expiresAt=${record.expiresAt.toISOString()}`);
+    
+    // Direct string comparison (most reliable)
+    if (storedOtp === normalizedOtp) {
+      matchedRecord = record;
+      console.log(`[Picker OTP] ✓ Match found (string comparison)`);
+      break;
+    }
+  }
+
+  if (!matchedRecord) {
+    console.log(`[Picker OTP] Verification failed for ${normalizedMobile}: OTP ${normalizedOtp} does not match any stored OTP`);
+    return false;
+  }
+
+  // Mark the OTP as used
+  const updateResult = await Otp.updateOne(
+    { _id: matchedRecord._id, isUsed: false },
+    { $set: { isUsed: true } }
+  );
+
+  if (updateResult.modifiedCount === 0) {
+    console.warn(`[Picker OTP] Failed to mark OTP as used for ${normalizedMobile} (recordId=${matchedRecord._id}). It may have been used already.`);
+    return false;
+  }
+
+  console.log(`[Picker OTP] ✓ Verification successful for ${normalizedMobile}, OTP marked as used (recordId=${matchedRecord._id})`);
   return true;
 }
 

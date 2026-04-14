@@ -10,12 +10,17 @@ const legalDocumentSchema = new mongoose.Schema(
     contentFormat: { type: String, enum: ['plain', 'html', 'markdown'], default: 'plain' },
     content: { type: String, required: true },
     isCurrent: { type: Boolean, default: true },
+    appTarget: {
+      type: String,
+      enum: ['customer', 'picker', 'rider', 'hhd'],
+      default: 'customer',
+    },
   },
   { timestamps: true }
 );
 
 legalDocumentSchema.index({ type: 1, isCurrent: 1 });
-legalDocumentSchema.index({ type: 1, version: 1 }, { unique: true });
+legalDocumentSchema.index({ type: 1, version: 1, appTarget: 1 }, { unique: true });
 
 const LegalDocument = mongoose.models.CustomerLegalDocument || mongoose.model('CustomerLegalDocument', legalDocumentSchema, 'customer_legal_documents');
 module.exports = { LegalDocument };

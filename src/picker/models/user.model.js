@@ -41,6 +41,13 @@ const userSchema = new mongoose.Schema(
     },
     upiId: { type: String },
     upiName: { type: String },
+    /** Finance / ops UPI payout verification (picker payouts UI). */
+    upiPayoutVerificationStatus: {
+      type: String,
+      enum: ['none', 'pending', 'verified', 'rejected'],
+      default: 'none',
+    },
+    upiPayoutRejectionReason: { type: String, default: '' },
     /** When using shared DB: HHD User _id (users collection) for orders-to-order-complete flow. No ref – other app’s collection. */
     hhdUserId: { type: mongoose.Schema.Types.ObjectId, default: null },
     contractInfo: {
@@ -60,6 +67,17 @@ const userSchema = new mongoose.Schema(
     lastSeenAt: { type: Date },
     batteryLevel: { type: Number }, // 0-100
     activeOrderId: { type: String },
+    /** Face verification profile used by admin review workflows. */
+    faceVerificationStatus: {
+      type: String,
+      enum: ['pending', 'verified', 'rejected', 'overridden_approved', 'overridden_rejected'],
+      default: 'pending',
+    },
+    faceVerificationVerifiedAt: { type: Date, default: null },
+    faceVerificationConfidence: { type: Number, default: null },
+    faceVerificationOverrideBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+    faceVerificationOverrideReason: { type: String, default: '' },
+    faceVerificationOverrideAt: { type: Date, default: null },
     /** True when picker has started break (from shifts/start-break) */
     onBreak: { type: Boolean, default: false },
     gpsLocation: {
@@ -67,6 +85,15 @@ const userSchema = new mongoose.Schema(
       longitude: { type: Number },
       timestamp: { type: Date },
     },
+    /** Single active session — rotated on each login; must match JWT `sid`. */
+    sessionToken: { type: String, default: null },
+    /** Manager OTP approved (device collection unlocked in app). */
+    managerOtpVerifiedAt: { type: Date, default: null },
+    /** Picker confirmed handheld collected (app footer). */
+    deviceCollectionCompletedAt: { type: Date, default: null },
+    /** GDPR/DPDP: soft-delete request timestamp (account not purged immediately). */
+    deletionRequestedAt: { type: Date, default: null },
+    deletionReason: { type: String, default: '' },
   },
   { timestamps: true, collection: 'picker_users' }
 );

@@ -74,6 +74,36 @@ async function reportIssue(req, res, next) {
         reportedAt: issue.reportedAt,
         storeId: issue.storeId,
       });
+      if (issueType === 'inventory_mismatch') {
+        try {
+          const PickerUser = require('../models/user.model');
+          const picker = await PickerUser.findById(pickerId).select('name').lean();
+          const pickerName = picker?.name || 'Picker';
+          const desc = String(description || '');
+          const line = (prefix) => {
+            const row = desc.split('\n').find((l) => l.startsWith(prefix));
+            return row ? row.slice(prefix.length).trim() : '';
+          };
+          const productName = line('Product:') || '—';
+          const expectedStr = line('Expected qty:');
+          const actualStr = line('Actual qty:');
+          const orderedQty = parseInt(expectedStr, 10);
+          const scannedQty = parseInt(actualStr, 10);
+          websocketService.broadcastToRole('darkstore', 'MISSING_ITEM_REPORTED', {
+            orderId: orderId || '—',
+            storeId: issue.storeId || '',
+            productName,
+            orderedQty: Number.isFinite(orderedQty) ? orderedQty : 0,
+            scannedQty: Number.isFinite(scannedQty) ? scannedQty : 0,
+            reason: line('Reason:') || '',
+            pickerName,
+            reportedAt: issue.reportedAt ? new Date(issue.reportedAt).toISOString() : new Date().toISOString(),
+            issueId: issue._id.toString(),
+          });
+        } catch (_) {
+          /* non-blocking */
+        }
+      }
     }
 
     res.status(201).json({

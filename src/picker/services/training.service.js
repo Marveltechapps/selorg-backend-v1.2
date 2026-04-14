@@ -279,6 +279,17 @@ const getProgress = async (userId) => {
 /**
  * Update progress - supports video1..video4 (legacy) and dynamic videoIds (dashboard-managed videos).
  */
+/**
+ * Final training assessment submission (score-based pass/fail).
+ */
+const submitAssessment = async (userId, body) => {
+  const passingScore =
+    body?.passingScore != null ? Math.min(100, Math.max(0, Number(body.passingScore))) : 70;
+  const score = Math.min(100, Math.max(0, Number(body?.score) || 0));
+  const passed = score >= passingScore;
+  return { passed, score, passingScore };
+};
+
 const updateProgress = async (userId, body) => {
   const update = {};
   const clamp = (v) => Math.min(100, Math.max(0, v));
@@ -309,5 +320,6 @@ module.exports = {
   completeVideo,
   getUserProgress,
   getProgress,
-  updateProgress
+  updateProgress,
+  submitAssessment,
 };

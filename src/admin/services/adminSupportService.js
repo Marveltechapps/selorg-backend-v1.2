@@ -8,8 +8,50 @@ const AdminSupportCannedResponse = require('../models/AdminSupportCannedResponse
 const AdminSupportFAQ = require('../models/AdminSupportFAQ');
 const AdminSupportFeedback = require('../models/AdminSupportFeedback');
 const User = require('../../vendor/models/User');
+const PickerSupportTicket = require('../../picker/models/supportTicket.model');
+const PickerUser = require('../../picker/models/user.model');
 
 let ticketCounter = 0;
+
+function mapPickerCategoryToAdmin(cat) {
+  const c = String(cat || '').toLowerCase();
+  if (c.includes('payment') || c.includes('salary')) return 'payment';
+  if (c.includes('shift')) return 'delivery';
+  if (c.includes('document')) return 'account';
+  if (c.includes('inventory') || c.includes('device') || c.includes('app')) return 'technical';
+  return 'feedback';
+}
+
+function mapPickerSupportTicketToAdmin(t, user) {
+  const status = t.status === 'resolved' ? 'resolved' : t.status === 'in_progress' ? 'in_progress' : 'open';
+  const category = mapPickerCategoryToAdmin(t.category);
+  return {
+    id: `picker-support-${t._id}`,
+    ticketNumber: `PCK-${String(t._id).slice(-8).toUpperCase()}`,
+    subject: t.subject || t.category || 'Picker support',
+    description: t.message || '',
+    category,
+    priority: 'medium',
+    status,
+    channel: 'in_app',
+    customerName: user?.name || 'Picker',
+    customerEmail: user?.phone ? `${String(user.phone).replace(/\s/g, '')}@picker.local` : 'picker@local',
+    customerPhone: user?.phone || '',
+    customerId: String(t.userId),
+    assignedTo: undefined,
+    assignedToName: undefined,
+    orderNumber: undefined,
+    tags: ['picker_app', t.category].filter(Boolean),
+    responseTime: undefined,
+    resolutionTime: undefined,
+    slaBreached: false,
+    rating: undefined,
+    resolvedAt: undefined,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    notes: [],
+  };
+}
 
 async function getNextTicketNumber() {
   const last = await AdminSupportTicket.findOne().sort({ createdAt: -1 }).select('ticketNumber').lean();
@@ -93,10 +135,50 @@ async function listTickets(filters = {}) {
     });
   }
 
-  return tickets.map((t) => mapTicketToResponse(t, notesByTicket[t._id.toString()] || []));
+  const adminMapped = tickets.map((t) => mapTicketToResponse(t, notesByTicket[t._id.toString()] || []));
+
+  let pickerMapped = [];
+  try {
+    const ptQuery = {};
+    if (filters.status && filters.status !== 'all' && ['open', 'in_progress', 'resolved'].includes(filters.status)) {
+      ptQuery.status = filters.status;
+    }
+    const pickerTickets = await PickerSupportTicket.find(ptQuery).sort({ createdAt: -1 }).limit(200).lean();
+    const uids = [...new Set(pickerTickets.map((x) => x.userId).filter(Boolean))];
+    const pickerUsers = await PickerUser.find({ _id: { $in: uids } }).select('name phone').lean();
+    const um = Object.fromEntries(pickerUsers.map((u) => [String(u._id), u]));
+    pickerMapped = pickerTickets.map((t) => mapPickerSupportTicketToAdmin(t, um[String(t.userId)]));
+    if (filters.category && filters.category !== 'all') {
+      pickerMapped = pickerMapped.filter((x) => x.category === filters.category);
+    }
+    if (filters.search && filters.search.trim()) {
+      const s = filters.search.trim().toLowerCase();
+      pickerMapped = pickerMapped.filter(
+        (x) =>
+          (x.subject && x.subject.toLowerCase().includes(s)) ||
+          (x.description && x.description.toLowerCase().includes(s)) ||
+          (x.customerName && x.customerName.toLowerCase().includes(s)) ||
+          (x.customerPhone && String(x.customerPhone).toLowerCase().includes(s))
+      );
+    }
+  } catch (e) {
+    console.warn('[adminSupport] merge picker support tickets:', e?.message);
+  }
+
+  const combined = [...pickerMapped, ...adminMapped];
+  combined.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  return combined;
 }
 
 async function getTicketById(id) {
+  if (id && String(id).startsWith('picker-support-')) {
+    const rawId = String(id).replace(/^picker-support-/, '');
+    if (!mongoose.Types.ObjectId.isValid(rawId)) return null;
+    const t = await PickerSupportTicket.findById(rawId).lean();
+    if (!t) return null;
+    const user = await PickerUser.findById(t.userId).select('name phone').lean();
+    return mapPickerSupportTicketToAdmin(t, user);
+  }
   const ticket = await AdminSupportTicket.findById(id).populate('assignedTo', 'name email').lean();
   if (!ticket) return null;
   const notes = await AdminSupportTicketNote.find({ ticketId: ticket._id }).sort({ createdAt: 1 }).lean();

@@ -190,6 +190,15 @@ const start = async (userId, body) => {
     );
 
     try {
+      await withTimeout(
+        User.findByIdAndUpdate(userId, { $set: { lastSeenAt: new Date() } }),
+        DB_TIMEOUT_MS
+      );
+    } catch (_) {
+      /* non-blocking: staff-load uses heartbeat window */
+    }
+
+    try {
       if (websocketService?.broadcast) {
         websocketService.broadcast('attendance:SHIFT_STARTED', {
           attendanceId: doc._id,

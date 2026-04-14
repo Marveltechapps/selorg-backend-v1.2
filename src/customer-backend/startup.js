@@ -40,7 +40,8 @@ function run() {
         });
         logger.info('Customer legal: seeded default login legal config');
       }
-      const termsCount = await LegalDocument.countDocuments({ type: 'terms' });
+      const customerLegalOr = { $or: [{ appTarget: 'customer' }, { appTarget: { $exists: false } }] };
+      const termsCount = await LegalDocument.countDocuments({ type: 'terms', ...customerLegalOr });
       if (termsCount === 0) {
         await LegalDocument.create({
           type: 'terms',
@@ -51,10 +52,11 @@ function run() {
           contentFormat: 'plain',
           content: 'Terms of Service content is managed by the backend. Please configure via admin or database.',
           isCurrent: true,
+          appTarget: 'customer',
         });
         logger.info('Customer legal: seeded default terms document');
       }
-      const privacyCount = await LegalDocument.countDocuments({ type: 'privacy' });
+      const privacyCount = await LegalDocument.countDocuments({ type: 'privacy', ...customerLegalOr });
       if (privacyCount === 0) {
         await LegalDocument.create({
           type: 'privacy',
@@ -65,6 +67,7 @@ function run() {
           contentFormat: 'plain',
           content: 'Privacy Policy content is managed by the backend. Please configure via admin or database.',
           isCurrent: true,
+          appTarget: 'customer',
         });
         logger.info('Customer legal: seeded default privacy document');
       }

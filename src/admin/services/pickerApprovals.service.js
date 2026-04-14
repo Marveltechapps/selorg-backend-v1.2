@@ -5,6 +5,9 @@
 const PickerUser = require('../../picker/models/user.model');
 const PickerDocument = require('../../picker/models/document.model');
 const BankAccount = require('../../picker/models/bankAccount.model');
+const PickerAttendance = require('../../picker/models/attendance.model');
+const PickerDevice = require('../../picker/models/device.model');
+const WorkLocation = require('../../picker/models/workLocation.model');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
 
 /**
@@ -14,6 +17,15 @@ function getDocsStatus(docCount) {
   // Ideally 4 docs: aadhar front+back, pan front+back
   if (!docCount || docCount === 0) return 'not_uploaded';
   if (docCount >= 4) return 'complete';
+  return 'partial';
+}
+
+function getDocsStatusFromDocs(docs = []) {
+  if (!docs.length) return 'not_uploaded';
+  const reviewed = docs.filter((doc) => doc.status === 'approved' || doc.status === 'rejected');
+  if (!reviewed.length) return 'partial';
+  const approvedCount = reviewed.filter((doc) => doc.status === 'approved').length;
+  if (approvedCount === reviewed.length && reviewed.length >= 4) return 'complete';
   return 'partial';
 }
 
@@ -44,13 +56,21 @@ function getOnboardingStage(picker, docCount) {
 /**
  * List pickers with filters and pagination
  */
-async function listPickers({ status, page = 1, limit = 20 }) {
+async function listPickers({ status, locationId, search, page = 1, limit = 20 }) {
   const skip = (Math.max(1, page) - 1) * Math.min(100, Math.max(1, limit));
   const perPage = Math.min(100, Math.max(1, limit));
 
   const query = {};
   if (status && status !== 'all') {
     query.status = status;
+  }
+  if (locationId && String(locationId).trim()) {
+    query.currentLocationId = String(locationId).trim();
+  }
+  const searchTrim = typeof search === 'string' ? search.trim() : '';
+  if (searchTrim) {
+    const rx = new RegExp(searchTrim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    query.$or = [{ name: rx }, { phone: rx }];
   }
 
   const [pickers, total] = await Promise.all([
@@ -59,6 +79,12 @@ async function listPickers({ status, page = 1, limit = 20 }) {
   ]);
 
   const pickerIds = pickers.map((p) => p._id);
+  const locIds = [...new Set(pickers.map((p) => p.currentLocationId).filter(Boolean))];
+  const locations = locIds.length
+    ? await WorkLocation.find({ locationId: { $in: locIds } }).select('locationId name').lean()
+    : [];
+  const locNameById = Object.fromEntries(locations.map((l) => [l.locationId, l.name]));
+
   const [docCounts, bankAccounts] = await Promise.all([
     PickerDocument.aggregate([
       { $match: { userId: { $in: pickerIds } } },
@@ -71,33 +97,49 @@ async function listPickers({ status, page = 1, limit = 20 }) {
     bankAccounts.map((b) => [b.userId.toString(), { verified: b.isVerified }])
   );
 
+  const now = Date.now();
+  const shiftMs = 4 * 60 * 1000;
+
   const items = pickers.map((p) => {
     const id = p._id.toString();
     const docCount = docMap[id] || 0;
+    const lastSeen = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
+    const shiftActive = lastSeen > 0 && now - lastSeen < shiftMs;
+    const locId = p.currentLocationId || '';
     return {
+      id,
       pickerId: id,
       name: p.name || '—',
       phone: p.phone || '—',
+      status: p.status,
+      currentLocationId: locId || null,
+      locationName: locId ? locNameById[locId] || locId : '—',
+      onboardingStep: getOnboardingStage(p, docCount),
+      createdAt: p.createdAt,
+      lastSeenAt: p.lastSeenAt || null,
+      shiftActive,
       site: p.currentLocationId || p.locationType || '—',
       docsStatus: getDocsStatus(docCount),
-      faceVerification: false, // No stored face verification result in DB; placeholder
+      faceVerification: false,
       trainingProgress: getTrainingProgressPercent(p.trainingProgress),
       trainingCompleted: p.trainingCompleted || false,
       onboardingStage: getOnboardingStage(p, docCount),
       appliedDate: p.createdAt,
-      status: p.status,
       rejectedReason: p.rejectedReason,
       rejectedAt: p.rejectedAt,
       approvedAt: p.approvedAt,
       approvedBy: p.approvedBy,
+      bankVerified: !!bankMap[id]?.verified,
     };
   });
 
+  const pages = Math.max(1, Math.ceil(total / perPage) || 1);
   return {
     data: items,
     total,
     page: Math.max(1, page),
     pageSize: perPage,
+    pages,
   };
 }
 
@@ -108,9 +150,24 @@ async function getPickerById(id) {
   const picker = await PickerUser.findById(id).lean();
   if (!picker) return null;
 
-  const [docs, bankAccounts] = await Promise.all([
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+  const [docs, bankAccounts, attendanceMonth, openShift, device, workLoc] = await Promise.all([
     PickerDocument.find({ userId: id }).lean(),
     BankAccount.find({ userId: id }).lean(),
+    PickerAttendance.find({
+      userId: picker._id,
+      punchIn: { $gte: monthStart, $lte: monthEnd },
+    })
+      .select('punchIn punchOut ordersCompleted totalWorkedMinutes status')
+      .lean(),
+    PickerAttendance.findOne({ userId: picker._id, punchOut: null }).sort({ punchIn: -1 }).lean(),
+    PickerDevice.findOne({ assignedPickerId: picker._id }).select('deviceId serial status assignedAt').lean(),
+    picker.currentLocationId
+      ? WorkLocation.findOne({ locationId: String(picker.currentLocationId) }).select('name').lean()
+      : Promise.resolve(null),
   ]);
   const docCount = docs.length;
   const documents = {
@@ -119,11 +176,27 @@ async function getPickerById(id) {
   };
   docs.forEach((d) => {
     if (documents[d.docType]) {
-      documents[d.docType][d.side] = d.url;
+      documents[d.docType][d.side] = {
+        url: d.url,
+        status: d.status || 'pending',
+        rejectionReason: d.rejectionReason || null,
+        reviewedAt: d.reviewedAt || null,
+      };
     }
   });
 
   const trainingPct = getTrainingProgressPercent(picker.trainingProgress);
+  const lastSeenMs = picker.lastSeenAt ? new Date(picker.lastSeenAt).getTime() : 0;
+  const shiftActive = !!openShift || (lastSeenMs > 0 && Date.now() - lastSeenMs < 4 * 60 * 1000);
+  const distinctDays = new Set(
+    attendanceMonth.map((a) => (a.punchIn ? new Date(a.punchIn).toISOString().slice(0, 10) : ''))
+  );
+  const attendanceSummary = {
+    daysWorkedThisMonth: [...distinctDays].filter(Boolean).length,
+    shiftsRecorded: attendanceMonth.length,
+    ordersCompletedThisMonth: attendanceMonth.reduce((s, a) => s + (a.ordersCompleted || 0), 0),
+  };
+
   return {
     pickerId: picker._id.toString(),
     name: picker.name,
@@ -134,6 +207,7 @@ async function getPickerById(id) {
     photoUri: picker.photoUri,
     locationType: picker.locationType,
     currentLocationId: picker.currentLocationId,
+    locationName: workLoc?.name || picker.currentLocationId || null,
     selectedShifts: picker.selectedShifts || [],
     trainingProgress: trainingPct,
     trainingProgressObj: picker.trainingProgress || {},
@@ -148,13 +222,28 @@ async function getPickerById(id) {
     upiName: picker.upiName,
     contractInfo: picker.contractInfo,
     employment: picker.employment,
+    lastSeenAt: picker.lastSeenAt || null,
+    shiftActive,
+    attendanceSummary,
+    device: device
+      ? {
+          deviceId: device.deviceId,
+          serial: device.serial || '',
+          status: device.status,
+          assignedAt: device.assignedAt ? device.assignedAt.toISOString() : null,
+        }
+      : null,
+    deletionRequestedAt: picker.deletionRequestedAt || null,
+    deletionReason: picker.deletionReason || '',
     createdAt: picker.createdAt,
     updatedAt: picker.updatedAt,
     appliedDate: picker.createdAt,
     documents,
-    docsStatus: getDocsStatus(docCount),
+    docsStatus: getDocsStatusFromDocs(docs),
     bankDetails: bankAccounts.map((b) => ({
+      id: b._id.toString(),
       accountHolder: b.accountHolder,
+      rawAccountNumber: b.accountNumber || null,
       accountNumber: b.accountNumber ? `${b.accountNumber.slice(0, 4)}****${b.accountNumber.slice(-4)}` : null,
       ifscCode: b.ifscCode,
       bankName: b.bankName,
@@ -162,7 +251,15 @@ async function getPickerById(id) {
       isVerified: b.isVerified,
       isDefault: b.isDefault,
     })),
-    faceVerification: false, // Placeholder
+    faceVerification: !!picker.faceVerificationVerifiedAt,
+    faceVerificationRecord: {
+      status: picker.faceVerificationStatus || 'pending',
+      verifiedAt: picker.faceVerificationVerifiedAt || null,
+      confidence: picker.faceVerificationConfidence ?? null,
+      overrideBy: picker.faceVerificationOverrideBy || null,
+      overrideReason: picker.faceVerificationOverrideReason || '',
+      overrideAt: picker.faceVerificationOverrideAt || null,
+    },
     onboardingStage: getOnboardingStage(picker, docCount),
     hhdUserId: picker.hhdUserId ? picker.hhdUserId.toString() : null,
   };
@@ -179,6 +276,8 @@ function getAuditActionForStatus(status) {
       return 'picker_rejected';
     case PICKER_STATUS.BLOCKED:
       return 'picker_blocked';
+    case PICKER_STATUS.SUSPENDED:
+      return 'picker_suspended';
     case PICKER_STATUS.PENDING:
       return 'picker_unblocked';
     default:
@@ -215,6 +314,9 @@ async function updatePickerStatus(id, { status, rejectedReason }, approvedBy, re
     picker.status = PICKER_STATUS.BLOCKED;
     picker.rejectedReason = rejectedReason || undefined;
     picker.rejectedAt = undefined;
+  } else if (status === PICKER_STATUS.SUSPENDED) {
+    picker.status = PICKER_STATUS.SUSPENDED;
+    picker.rejectedReason = rejectedReason || undefined;
   } else if (status === PICKER_STATUS.PENDING) {
     // Unblock or reset to pending
     picker.status = PICKER_STATUS.PENDING;
@@ -309,4 +411,5 @@ module.exports = {
   updatePickerStatus,
   linkHhd,
   unlinkHhd,
+  getDocsStatusFromDocs,
 };

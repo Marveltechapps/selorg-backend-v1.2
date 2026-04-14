@@ -15,6 +15,7 @@ router.get('/videos/:videoId', requireAuth, trainingController.getVideoById);
 // Progress tracking endpoints
 router.put('/watch-progress', requireAuth, trainingController.trackWatchProgress);
 router.post('/complete/:videoId', requireAuth, trainingController.completeVideo);
+router.post('/modules/:moduleId/complete', requireAuth, trainingController.completeModule);
 
 // User progress endpoint
 router.get('/user-progress', requireAuth, trainingController.getUserProgress);
@@ -22,5 +23,8 @@ router.get('/user-progress', requireAuth, trainingController.getUserProgress);
 // Legacy endpoints (backward compatibility)
 router.get('/progress', requireAuth, trainingController.getProgress);
 router.put('/progress', requireAuth, trainingController.updateProgress);
+
+// Final assessment
+router.post('/assessment', requireAuth, trainingController.submitAssessment);
 
 module.exports = router;

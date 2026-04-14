@@ -1,17 +1,17 @@
-const { LegalDocument } = require('../../models/LegalDocument');
-const { LegalConfig } = require('../../models/LegalConfig');
+const { LegalDocument } = require('../../../customer-backend/models/LegalDocument');
+const { LegalConfig } = require('../../../customer-backend/models/LegalConfig');
 
-const CUSTOMER_TARGET_OR = [{ appTarget: 'customer' }, { appTarget: { $exists: false } }];
+const CONFIG_KEY = 'picker_login_legal';
+const APP_TARGET = 'picker';
 
-function isCustomerLegalDoc(doc) {
-  if (!doc) return false;
-  return doc.appTarget == null || doc.appTarget === 'customer';
+function isPickerLegalDoc(doc) {
+  return doc && doc.appTarget === APP_TARGET;
 }
 
 exports.listDocuments = async (req, res) => {
   try {
     const { type } = req.query;
-    const filter = { $or: CUSTOMER_TARGET_OR };
+    const filter = { appTarget: APP_TARGET };
     if (type) filter.type = type;
     const items = await LegalDocument.find(filter).sort({ type: 1, createdAt: -1 }).lean();
     res.json({ success: true, data: items });
@@ -23,7 +23,7 @@ exports.listDocuments = async (req, res) => {
 exports.getDocument = async (req, res) => {
   try {
     const doc = await LegalDocument.findById(req.params.id).lean();
-    if (!doc || !isCustomerLegalDoc(doc)) return res.status(404).json({ success: false, error: 'Document not found' });
+    if (!doc || !isPickerLegalDoc(doc)) return res.status(404).json({ success: false, error: 'Document not found' });
     res.json({ success: true, data: doc });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -37,10 +37,7 @@ exports.createDocument = async (req, res) => {
       return res.status(400).json({ success: false, error: 'type, version, title, and content are required' });
     }
     if (isCurrent) {
-      await LegalDocument.updateMany(
-        { type, isCurrent: true, $or: CUSTOMER_TARGET_OR },
-        { isCurrent: false }
-      );
+      await LegalDocument.updateMany({ type, appTarget: APP_TARGET, isCurrent: true }, { isCurrent: false });
     }
     const doc = await LegalDocument.create({
       type,
@@ -51,7 +48,7 @@ exports.createDocument = async (req, res) => {
       contentFormat: contentFormat || 'plain',
       content,
       isCurrent: isCurrent !== false,
-      appTarget: 'customer',
+      appTarget: APP_TARGET,
     });
     res.status(201).json({ success: true, data: doc });
   } catch (err) {
@@ -65,7 +62,7 @@ exports.createDocument = async (req, res) => {
 exports.updateDocument = async (req, res) => {
   try {
     const existingCheck = await LegalDocument.findById(req.params.id).lean();
-    if (!existingCheck || !isCustomerLegalDoc(existingCheck)) {
+    if (!existingCheck || !isPickerLegalDoc(existingCheck)) {
       return res.status(404).json({ success: false, error: 'Document not found' });
     }
     const body = { ...req.body };
@@ -74,9 +71,9 @@ exports.updateDocument = async (req, res) => {
     body.lastUpdated = new Date().toISOString();
     if (body.isCurrent) {
       const existing = await LegalDocument.findById(req.params.id).lean();
-      if (existing && isCustomerLegalDoc(existing)) {
+      if (existing && isPickerLegalDoc(existing)) {
         await LegalDocument.updateMany(
-          { type: existing.type, isCurrent: true, _id: { $ne: req.params.id }, $or: CUSTOMER_TARGET_OR },
+          { type: existing.type, appTarget: APP_TARGET, isCurrent: true, _id: { $ne: req.params.id } },
           { isCurrent: false }
         );
       }
@@ -92,7 +89,7 @@ exports.updateDocument = async (req, res) => {
 exports.deleteDocument = async (req, res) => {
   try {
     const existing = await LegalDocument.findById(req.params.id);
-    if (!existing || !isCustomerLegalDoc(existing)) {
+    if (!existing || !isPickerLegalDoc(existing)) {
       return res.status(404).json({ success: false, error: 'Document not found' });
     }
     const deleted = await LegalDocument.findByIdAndDelete(req.params.id);
@@ -106,11 +103,8 @@ exports.deleteDocument = async (req, res) => {
 exports.setCurrentDocument = async (req, res) => {
   try {
     const doc = await LegalDocument.findById(req.params.id);
-    if (!doc || !isCustomerLegalDoc(doc)) return res.status(404).json({ success: false, error: 'Document not found' });
-    await LegalDocument.updateMany(
-      { type: doc.type, isCurrent: true, $or: CUSTOMER_TARGET_OR },
-      { isCurrent: false }
-    );
+    if (!doc || !isPickerLegalDoc(doc)) return res.status(404).json({ success: false, error: 'Document not found' });
+    await LegalDocument.updateMany({ type: doc.type, appTarget: APP_TARGET, isCurrent: true }, { isCurrent: false });
     doc.isCurrent = true;
     await doc.save();
     res.json({ success: true, data: doc.toObject() });
@@ -121,10 +115,18 @@ exports.setCurrentDocument = async (req, res) => {
 
 exports.getConfig = async (req, res) => {
   try {
-    let config = await LegalConfig.findOne({ key: 'default' }).lean();
+    let config = await LegalConfig.findOne({ key: CONFIG_KEY }).lean();
     if (!config) {
-      config = await LegalConfig.create({ key: 'default' });
-      config = config.toObject();
+      const created = await LegalConfig.create({
+        key: CONFIG_KEY,
+        loginLegal: {
+          preamble: 'By continuing, you agree to our ',
+          terms: { label: 'Terms & Conditions', type: 'in_app', url: null },
+          privacy: { label: 'Privacy Policy', type: 'in_app', url: null },
+          connector: ' and ',
+        },
+      });
+      config = created.toObject();
     }
     res.json({ success: true, data: config });
   } catch (err) {
@@ -138,7 +140,7 @@ exports.updateConfig = async (req, res) => {
     delete body._id;
     delete body.key;
     const config = await LegalConfig.findOneAndUpdate(
-      { key: 'default' },
+      { key: CONFIG_KEY },
       { $set: body },
       { new: true, upsert: true, runValidators: true }
     ).lean();

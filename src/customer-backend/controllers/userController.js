@@ -30,6 +30,24 @@ async function updateProfile(req, res) {
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
+    if (req.body.savedCheckoutContact !== undefined) {
+      const sc = req.body.savedCheckoutContact;
+      if (sc !== null && typeof sc === 'object') {
+        const existing = await CustomerUser.findById(req.user._id).select('savedCheckoutContact').lean();
+        const prev = (existing && existing.savedCheckoutContact) || {};
+        const next = { ...prev };
+        if (sc.fullName !== undefined) {
+          next.fullName = String(sc.fullName || '').trim().slice(0, 200) || undefined;
+        }
+        if (sc.email !== undefined) {
+          next.email = String(sc.email || '').trim().slice(0, 254) || undefined;
+        }
+        if (sc.phone !== undefined) {
+          next.phone = String(sc.phone || '').replace(/\s/g, '').slice(0, 20) || undefined;
+        }
+        updates.savedCheckoutContact = next;
+      }
+    }
     const user = await CustomerUser.findByIdAndUpdate(
       req.user._id,
       { $set: updates },

@@ -4,6 +4,11 @@ const { CustomerUser } = require('../models/CustomerUser');
 
 const CONFIG_KEY = 'login_legal';
 
+/** Documents created before appTarget existed are treated as customer. */
+const customerDocQuery = () => ({
+  $or: [{ appTarget: 'customer' }, { appTarget: { $exists: false } }],
+});
+
 function toLoginLegalDto(doc) {
   if (!doc || !doc.loginLegal) return getDefaultLoginLegal();
   const { preamble, terms, privacy, connector } = doc.loginLegal;
@@ -61,9 +66,9 @@ async function getTerms(req, res) {
     const version = req.query.version || req.query.v;
     let doc;
     if (version) {
-      doc = await LegalDocument.findOne({ type: 'terms', version }).lean();
+      doc = await LegalDocument.findOne({ type: 'terms', version, ...customerDocQuery() }).lean();
     } else {
-      doc = await LegalDocument.findOne({ type: 'terms', isCurrent: true }).lean();
+      doc = await LegalDocument.findOne({ type: 'terms', isCurrent: true, ...customerDocQuery() }).lean();
     }
     if (!doc) {
       res.status(404).json({ success: false, message: 'Terms of Service not found' });
@@ -81,9 +86,9 @@ async function getPrivacy(req, res) {
     const version = req.query.version || req.query.v;
     let doc;
     if (version) {
-      doc = await LegalDocument.findOne({ type: 'privacy', version }).lean();
+      doc = await LegalDocument.findOne({ type: 'privacy', version, ...customerDocQuery() }).lean();
     } else {
-      doc = await LegalDocument.findOne({ type: 'privacy', isCurrent: true }).lean();
+      doc = await LegalDocument.findOne({ type: 'privacy', isCurrent: true, ...customerDocQuery() }).lean();
     }
     if (!doc) {
       res.status(404).json({ success: false, message: 'Privacy Policy not found' });

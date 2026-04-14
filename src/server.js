@@ -41,6 +41,7 @@ const riderAuthRoutes = require('./rider/routes/authRoutes');
 const hhdApp = require('./hhd/app');
 const pickerApp = require('./picker/app');
 const customerApp = require('./customer-backend/app');
+const paymentApiRoutes = require('./routes/paymentApiRoutes');
 
 // Rider routing: prefer legacy when USE_LEGACY_RIDER=1 (dashboard needs /summary, /orders, /hr).
 // Otherwise use v2 modules when present, fall back to legacy.
@@ -109,6 +110,8 @@ if (process.env.NODE_ENV !== 'test') {
   try {
     validateEnvironment();
     validateJWTSecret();
+    const { verifyOptionalPaymentAesEnv } = require('./config/paymentCryptoEnv');
+    verifyOptionalPaymentAesEnv();
   } catch (error) {
     logger.error('Startup validation failed', { error: error.message });
     process.exit(1);
@@ -189,7 +192,8 @@ const customerCors = cors({
 
 app.use((req, res, next) => {
   const isCustomerPath = req.path.startsWith('/api/v1/customer');
-  if (isCustomerPath) return customerCors(req, res, next);
+  const isPaymentApiPath = req.path.startsWith('/api/payment');
+  if (isCustomerPath || isPaymentApiPath) return customerCors(req, res, next);
   return strictCors(req, res, next);
 });
 
@@ -308,6 +312,7 @@ app.use('/api/v1/staff', staffRoutes);
 app.use('/api/v1/hhd', hhdApp);
 app.use('/api/v1/picker', pickerApp);
 app.use('/api/v1/customer', customerApp); // Customer app: onboarding, auth, home, products, user
+app.use('/api/payment', paymentApiRoutes); // Standalone payment initiate / callback / status (React Native friendly CORS)
 
 // API Documentation (Swagger)
 if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true') {
@@ -341,8 +346,8 @@ app.use(errorHandler);
 // Export app for testing (after all routes are configured)
 module.exports = app;
 
-// Default 5001: macOS AirPlay uses port 5000 and returns 403 for API requests
-const PORT = process.env.PORT || 5001;
+// Default 5000; set PORT=5001 in .env if macOS AirPlay Receiver binds 5000 on your machine
+const PORT = process.env.PORT || 5000;
 
 // Create HTTP server
 const httpServer = createServer(app);

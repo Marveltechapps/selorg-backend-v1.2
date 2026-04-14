@@ -67,7 +67,14 @@ const setSelectedShifts = async (userId, selectedShifts) => {
 const setUpi = async (userId, upiId, upiName) => {
   const user = await User.findByIdAndUpdate(
     userId,
-    { $set: { upiId, upiName } },
+    {
+      $set: {
+        upiId,
+        upiName,
+        upiPayoutVerificationStatus: 'pending',
+        upiPayoutRejectionReason: '',
+      },
+    },
     { new: true }
   ).lean();
   return user || null;
@@ -97,6 +104,11 @@ const getProfile = async (userId) => {
     trainingProgress: user.trainingProgress || {},
     upiId: user.upiId,
     upiName: user.upiName,
+    upiPayoutVerificationStatus:
+      user.upiId && (!user.upiPayoutVerificationStatus || user.upiPayoutVerificationStatus === 'none')
+        ? 'pending'
+        : user.upiPayoutVerificationStatus || 'none',
+    upiPayoutRejectionReason: user.upiPayoutRejectionReason || '',
     status: user.status,
     rejectedReason: user.rejectedReason,
     rejectedAt: user.rejectedAt ? user.rejectedAt.toISOString() : null,

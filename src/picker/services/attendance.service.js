@@ -18,12 +18,33 @@ const getSummary = async (userId, month, year) => {
   })
     .lean()
     .sort({ punchIn: -1 });
+
+  let warehouseLabel = 'Warehouse';
+  try {
+    const locData = await locationService.getCurrentLocationForUser(userId);
+    if (locData?.hubName && String(locData.hubName).trim()) {
+      warehouseLabel = String(locData.hubName).trim();
+    } else {
+      const user = await User.findById(userId).select('locationType').lean();
+      const loc = user?.locationType;
+      warehouseLabel = loc === 'darkstore' ? 'Dark store' : 'Warehouse';
+    }
+  } catch {
+    try {
+      const user = await User.findById(userId).select('locationType').lean();
+      const loc = user?.locationType;
+      warehouseLabel = loc === 'darkstore' ? 'Dark store' : 'Warehouse';
+    } catch {
+      warehouseLabel = 'Warehouse';
+    }
+  }
+
   const details = list.map((a) => ({
     date: a.punchIn,
     punchIn: a.punchIn,
     punchOut: a.punchOut,
     totalHours: a.regularHours ?? 0,
-    warehouse: 'Warehouse',
+    warehouse: warehouseLabel,
     orders: a.ordersCompleted ?? 0,
     incentive: 0,
     overtime: a.overtimeHours ?? null,

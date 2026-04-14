@@ -87,11 +87,15 @@ const validateEnvironment = () => {
   // Worldline / Paynimo (Customer payments) - required only when enabled
   const worldlineEnabled = process.env.WORLDLINE_ENABLED === '1' || process.env.WORLDLINE_ENABLED === 'true';
   if (worldlineEnabled) {
-    const requiredWorldline = ['WORLDLINE_MERCHANT_ID', 'WORLDLINE_SCHEME_CODE', 'WORLDLINE_SALT', 'WORLDLINE_RETURN_URL'];
+    const hasMerchant = !!(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
+    if (!hasMerchant) {
+      errors.push('WORLDLINE_MERCHANT_ID or WORLDLINE_MERCHANT_CODE is required when WORLDLINE_ENABLED=true');
+    }
+    const requiredWorldline = ['WORLDLINE_SCHEME_CODE', 'WORLDLINE_SALT', 'WORLDLINE_RETURN_URL'];
     for (const key of requiredWorldline) {
       if (!process.env[key]) errors.push(`${key} is required when WORLDLINE_ENABLED=true`);
     }
-  } else if (process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_SALT) {
+  } else if (process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE || process.env.WORLDLINE_SALT) {
     warnings.push('WORLDLINE_* variables are set but WORLDLINE_ENABLED is false');
   }
 
@@ -115,7 +119,7 @@ const validateEnvironment = () => {
     hasCustomerJWTSecret: !!process.env.CUSTOMER_JWT_SECRET,
     hasAllowedOrigins: !!process.env.ALLOWED_ORIGINS,
     worldlineEnabled,
-    hasWorldlineMerchantId: !!process.env.WORLDLINE_MERCHANT_ID,
+    hasWorldlineMerchantId: !!(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE),
     hasWorldlineSalt: !!process.env.WORLDLINE_SALT,
   });
 };

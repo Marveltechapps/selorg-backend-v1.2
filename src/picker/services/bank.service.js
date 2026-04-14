@@ -23,8 +23,10 @@ const verify = async (body) => {
   return {
     success: true,
     verified: true,
+    isDemoMode: false,
     bankName: body.bankName || undefined,
     branch: body.branch || undefined,
+    message: 'Verified',
   };
 };
 
@@ -37,6 +39,8 @@ const listByUser = async (userId) => {
     ...doc,
     id: doc._id.toString(),
     accountNumber: maskAccountNumber(doc.accountNumber),
+    payoutVerificationStatus: doc.payoutVerificationStatus || (doc.isVerified ? 'verified' : 'pending'),
+    payoutRejectionReason: doc.payoutRejectionReason || '',
   }));
 };
 
@@ -71,6 +75,8 @@ const update = async (userId, accountId, body) => {
   const out = doc.toObject();
   out.id = out._id.toString();
   out.accountNumber = maskAccountNumber(out.accountNumber);
+  out.payoutVerificationStatus = out.payoutVerificationStatus || (out.isVerified ? 'verified' : 'pending');
+  out.payoutRejectionReason = out.payoutRejectionReason || '';
   return out;
 };
 
@@ -83,6 +89,8 @@ const setDefault = async (userId, accountId) => {
   if (!doc) return null;
   doc.id = doc._id.toString();
   doc.accountNumber = maskAccountNumber(doc.accountNumber);
+  doc.payoutVerificationStatus = doc.payoutVerificationStatus || (doc.isVerified ? 'verified' : 'pending');
+  doc.payoutRejectionReason = doc.payoutRejectionReason || '';
   return doc;
 };
 

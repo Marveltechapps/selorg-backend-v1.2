@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema(
     lastLogin: { type: Date, default: null },
     loginCount: { type: Number, default: 0 },
     status: { type: String, enum: ['active', 'inactive', 'blocked'], default: 'active' },
+    /** Optional billing / payment contact saved from checkout for reuse */
+    savedCheckoutContact: {
+      fullName: { type: String, default: undefined },
+      email: { type: String, default: undefined },
+      phone: { type: String, default: undefined },
+    },
   },
   { timestamps: true }
 );

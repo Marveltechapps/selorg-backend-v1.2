@@ -1,5 +1,8 @@
 const financeService = require('../services/financeService');
 const { asyncHandler } = require('../../core/middleware');
+const PickerUser = require('../../picker/models/user.model');
+const Transaction = require('../../picker/models/transaction.model');
+const walletService = require('../../picker/services/wallet.service');
 
 class FinanceController {
   getTaxRules = asyncHandler(async (req, res) => {
@@ -128,6 +131,81 @@ class FinanceController {
   updateFinancialYear = asyncHandler(async (req, res) => {
     const year = await financeService.updateFinancialYear(req.body);
     res.json({ success: true, message: 'Financial year updated', data: year });
+  });
+
+  getPickerEarningsBreakdown = asyncHandler(async (req, res) => {
+    const pickerId = req.params.pickerId;
+    const picker = await PickerUser.findById(pickerId).select('_id').lean();
+    if (!picker) {
+      res.status(404).json({ success: false, message: 'Picker not found' });
+      return;
+    }
+    const data = await walletService.getEarningsBreakdown(picker._id);
+    res.json({ success: true, data });
+  });
+
+  getPickerWalletBalance = asyncHandler(async (req, res) => {
+    const pickerId = req.params.pickerId;
+    const picker = await PickerUser.findById(pickerId).select('_id').lean();
+    if (!picker) {
+      res.status(404).json({ success: false, message: 'Picker not found' });
+      return;
+    }
+    const data = await walletService.getBalance(picker._id);
+    res.json({ success: true, data });
+  });
+
+  listAllPickerTransactions = asyncHandler(async (req, res) => {
+    const {
+      search = '',
+      startDate,
+      endDate,
+      type,
+      page = 1,
+      limit = 20,
+    } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const query = {};
+    if (type) query.type = type;
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    const pickerFilter = {};
+    if (String(search).trim()) {
+      const rx = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      pickerFilter.$or = [{ name: rx }, { phone: rx }];
+    }
+    const pickerUsers = await PickerUser.find(pickerFilter).select('_id name phone').lean();
+    query.userId = { $in: pickerUsers.map((picker) => picker._id) };
+
+    const [rows, total] = await Promise.all([
+      Transaction.find(query).sort({ createdAt: -1 }).skip((pageNum - 1) * limitNum).limit(limitNum).lean(),
+      Transaction.countDocuments(query),
+    ]);
+    const pickerById = Object.fromEntries(pickerUsers.map((picker) => [String(picker._id), picker]));
+    const data = rows.map((row) => ({
+      id: row._id.toString(),
+      pickerId: String(row.userId),
+      pickerName: pickerById[String(row.userId)]?.name || '—',
+      pickerPhone: pickerById[String(row.userId)]?.phone || '—',
+      type: row.type,
+      amount: row.amount,
+      description: row.description || '',
+      status: row.status,
+      createdAt: row.createdAt,
+    }));
+    res.json({
+      success: true,
+      data,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.max(1, Math.ceil(total / limitNum)),
+    });
   });
 }
 

@@ -63,7 +63,9 @@ const workLocationSchema = new mongoose.Schema({
   currentOccupancy: { 
     type: Number, 
     default: 0 
-  }
+  },
+  /** Supervisor/manager mobile (10 digits) — receives manager approval OTP for pickers at this hub. */
+  managerPhone: { type: String, default: null, trim: true },
 }, { 
   timestamps: true,
   collection: 'work_locations'

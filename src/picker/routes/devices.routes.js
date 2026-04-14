@@ -15,6 +15,7 @@ const multerUpload = multer({
 });
 
 router.get('/assigned', requireAuth, devicesController.getAssignedDevice);
+router.post('/collection-complete', requireAuth, devicesController.acknowledgeCollection);
 router.post('/upload-condition-photo', requireAuth, multerUpload.single('file'), devicesController.uploadConditionPhoto);
 router.post('/return', requireAuth, multerUpload.single('conditionPhoto'), devicesController.returnDevice);
 

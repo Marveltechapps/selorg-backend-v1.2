@@ -8,6 +8,12 @@
 const { asyncHandler } = require('../../core/middleware');
 const { Order } = require('../../customer-backend/models/Order');
 const { Product } = require('../../customer-backend/models/Product');
+const pickerAnalyticsService = require('../services/pickerAnalytics.service');
+const WatchHistory = require('../../picker/models/watchHistory.model');
+const TrainingVideo = require('../../picker/models/trainingVideo.model');
+const PickerIssue = require('../../picker/models/issue.model');
+const PickerAttendance = require('../../picker/models/attendance.model');
+const PickerUser = require('../../picker/models/user.model');
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'];
 
@@ -688,6 +694,97 @@ const exportReport = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
+/**
+ * GET /admin/analytics/pickers — picker workforce metrics
+ */
+const getPickerAnalytics = asyncHandler(async (req, res) => {
+  const { locationId, from, to, period } = req.query;
+  const data = await pickerAnalyticsService.getPickerAnalytics({
+    locationId: locationId || undefined,
+    from: from || undefined,
+    to: to || undefined,
+    period: period === 'month' ? 'month' : 'week',
+  });
+  res.json({ success: true, data });
+});
+
+/**
+ * GET /admin/analytics/picker-drilldown/:pickerId
+ */
+const getPickerDrilldown = asyncHandler(async (req, res) => {
+  const { pickerId } = req.params;
+  const { startDate, endDate } = req.query;
+  const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const end = endDate ? new Date(endDate) : new Date();
+
+  const picker = await PickerUser.findById(pickerId).select('_id name phone').lean();
+  if (!picker) {
+    res.status(404).json({ success: false, error: 'Picker not found' });
+    return;
+  }
+
+  const [performanceRows, watchRows, videos, issues, shifts] = await Promise.all([
+    PickerAttendance.find({ userId: picker._id, punchIn: { $gte: start, $lte: end } }).lean(),
+    WatchHistory.find({ userId: picker._id }).lean(),
+    TrainingVideo.find({ isActive: true }).sort({ order: 1 }).lean(),
+    PickerIssue.find({ pickerId: picker._id, reportedAt: { $gte: start, $lte: end } }).sort({ reportedAt: -1 }).lean(),
+    PickerAttendance.find({ userId: picker._id, punchIn: { $gte: start, $lte: end } }).sort({ punchIn: -1 }).lean(),
+  ]);
+
+  const ordersPicked = performanceRows.reduce((sum, row) => sum + (row.ordersCompleted || 0), 0);
+  const totalWorked = performanceRows.reduce((sum, row) => sum + (row.totalWorkedMinutes || 0), 0);
+  const avgPickTimeSec = ordersPicked > 0 ? Math.round((totalWorked * 60) / ordersPicked) : 0;
+  const missingRate = 0;
+  const slaBreachRate = 0;
+  const watchByVideo = Object.fromEntries(watchRows.map((row) => [row.videoId, row]));
+  const training = videos.map((video) => {
+    const row = watchByVideo[video.videoId];
+    const watchedSeconds = row?.watchedSeconds || 0;
+    const progress = video.duration > 0 ? Math.min(100, Math.round((watchedSeconds / video.duration) * 100)) : 0;
+    return {
+      videoId: video.videoId,
+      title: video.title,
+      watchedSeconds,
+      duration: video.duration,
+      progress,
+      completed: !!row?.completedAt,
+      completedAt: row?.completedAt || null,
+    };
+  });
+
+  res.json({
+    success: true,
+    data: {
+      picker: { id: picker._id.toString(), name: picker.name, phone: picker.phone },
+      performance: {
+        ordersPicked,
+        avgPickTimeSec,
+        missingRate,
+        slaBreachRate,
+      },
+      training,
+      issues: issues.map((issue) => ({
+        id: issue._id.toString(),
+        issueType: issue.issueType,
+        description: issue.description,
+        status: issue.status,
+        severity: issue.severity || 'medium',
+        reportedAt: issue.reportedAt,
+      })),
+      shifts: shifts.map((shift) => ({
+        id: shift._id.toString(),
+        punchIn: shift.punchIn,
+        punchOut: shift.punchOut,
+        status: shift.status,
+        totalWorkedMinutes: shift.totalWorkedMinutes || 0,
+        lateByMinutes: shift.lateByMinutes || 0,
+        overtimeMinutes: shift.overtimeMinutes || 0,
+        ordersCompleted: shift.ordersCompleted || 0,
+      })),
+    },
+  });
+});
+
 module.exports = {
   getRealtimeMetrics,
   getTimeSeriesData,
@@ -707,4 +804,6 @@ module.exports = {
   getFinancialSummary,
   createCustomReport,
   exportReport,
+  getPickerAnalytics,
+  getPickerDrilldown,
 };

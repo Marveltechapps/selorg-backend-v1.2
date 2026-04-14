@@ -13,6 +13,13 @@ const bankAccountSchema = new mongoose.Schema(
     bankName: { type: String },
     branch: { type: String },
     isVerified: { type: Boolean, default: false },
+    /** Finance approval for payouts (UI); does not replace isVerified from penny-drop style checks. */
+    payoutVerificationStatus: {
+      type: String,
+      enum: ['pending', 'verified', 'rejected'],
+      default: 'verified',
+    },
+    payoutRejectionReason: { type: String, default: '' },
     isDefault: { type: Boolean, default: false },
   },
   { timestamps: true }

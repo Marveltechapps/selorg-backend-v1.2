@@ -18,6 +18,11 @@ const worldlinePaymentSchema = new mongoose.Schema(
     amountInr: { type: Number, required: true },
     currency: { type: String, default: 'INR' },
 
+    /** Checkout without a row in `customer_orders` (e.g. /api/payment/initiate with string orderId). */
+    standaloneCheckout: { type: Boolean, default: false },
+    /** Client reference when standaloneCheckout (e.g. TEST_001). */
+    externalOrderRef: { type: String, default: '' },
+
     status: {
       type: String,
       enum: ['created', 'initiated', 'success', 'failed', 'cancelled', 'pending', 'unknown'],
@@ -49,7 +54,9 @@ const worldlinePaymentSchema = new mongoose.Schema(
 worldlinePaymentSchema.index({ userId: 1, orderId: 1, createdAt: -1 });
 worldlinePaymentSchema.index({ orderId: 1, attemptNo: 1 }, { unique: true });
 worldlinePaymentSchema.index({ txnId: 1 }, { unique: true });
+worldlinePaymentSchema.index({ txnId: 1, orderId: 1 });
 worldlinePaymentSchema.index({ idempotencyKey: 1 }); // no longer unique across attempts if we reuse same key structure
+worldlinePaymentSchema.index({ standaloneCheckout: 1, externalOrderRef: 1, platform: 1, attemptNo: 1 });
 
 const WorldlinePayment =
   mongoose.models.WorldlinePayment ||

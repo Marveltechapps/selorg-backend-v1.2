@@ -27,6 +27,8 @@ router.get('/payment-methods', cacheMiddleware(ttl), analyticsController.getPaym
 // Template reports
 router.get('/orders-by-hour', cacheMiddleware(ttl), analyticsController.getOrdersByHour);
 router.get('/rider-performance', cacheMiddleware(ttl), analyticsController.getRiderPerformance);
+router.get('/pickers', cacheMiddleware(ttl), analyticsController.getPickerAnalytics);
+router.get('/picker-drilldown/:pickerId', cacheMiddleware(ttl), analyticsController.getPickerDrilldown);
 router.get('/inventory-health', cacheMiddleware(ttl), analyticsController.getInventoryHealth);
 router.get('/financial-summary', cacheMiddleware(ttl), analyticsController.getFinancialSummary);
 

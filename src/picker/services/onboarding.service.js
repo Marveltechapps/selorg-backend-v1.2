@@ -34,6 +34,7 @@ async function getOnboardingState(userId) {
       hasCompletedTraining: false,
       hasCompletedSetup: false,
       hasCompletedManagerOTP: false,
+      hasCompletedDeviceCollection: false,
       status: null,
     };
   }
@@ -53,6 +54,7 @@ async function getOnboardingState(userId) {
       hasCompletedTraining: false,
       hasCompletedSetup: false,
       hasCompletedManagerOTP: false,
+      hasCompletedDeviceCollection: false,
       status: null,
     };
   }
@@ -63,7 +65,10 @@ async function getOnboardingState(userId) {
     picker.status === 'ACTIVE' || picker.status === 'REJECTED' || picker.status === 'BLOCKED' || picker.status === 'SUSPENDED';
   const hasCompletedTraining = !!picker.trainingCompleted;
   const hasCompletedSetup = Array.isArray(picker.selectedShifts) && picker.selectedShifts.length > 0;
-  const hasCompletedManagerOTP = !!deviceAssigned;
+  const managerOtpApproved = !!picker.managerOtpVerifiedAt;
+  const deviceCollectionDone = !!picker.deviceCollectionCompletedAt || !!deviceAssigned;
+  /** Manager approval step (OTP verified); app also needs deviceCollectionDone to finish onboarding. */
+  const hasCompletedManagerOTP = managerOtpApproved;
 
   let currentStep = 'profile';
   if (!hasCompletedProfile) currentStep = 'profile';
@@ -74,7 +79,7 @@ async function getOnboardingState(userId) {
   else if (!hasCompletedTraining) currentStep = 'training';
   else if (!picker.locationType || !picker.currentLocationId) currentStep = 'location';
   else if (!hasCompletedSetup) currentStep = 'shifts';
-  else if (!hasCompletedManagerOTP) currentStep = 'collect_device';
+  else if (!managerOtpApproved || !deviceCollectionDone) currentStep = 'collect_device';
   else currentStep = 'home';
 
   return {
@@ -85,6 +90,7 @@ async function getOnboardingState(userId) {
     hasCompletedTraining,
     hasCompletedSetup,
     hasCompletedManagerOTP,
+    hasCompletedDeviceCollection: deviceCollectionDone,
     status: picker.status,
   };
 }

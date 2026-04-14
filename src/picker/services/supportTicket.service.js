@@ -1,6 +1,5 @@
 /**
  * SupportTicket service – from backend-workflow.yaml (support_tickets_list, support_ticket_create).
- * REAL-TIME: default empty list if DB slow; create returns mock on failure.
  */
 const SupportTicket = require('../models/supportTicket.model');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
@@ -28,36 +27,24 @@ const list = async (userId) => {
 };
 
 const create = async (userId, body) => {
-  try {
-    const doc = await withTimeout(
-      SupportTicket.create({
-        userId,
-        category: body.category || '',
-        subject: body.subject || '',
-        message: body.message || '',
-        status: 'open',
-      }),
-      DB_TIMEOUT_MS
-    );
-    return {
-      id: doc._id.toString(),
-      category: doc.category,
-      subject: doc.subject,
-      message: doc.message,
-      status: doc.status,
-      createdAt: doc.createdAt,
-    };
-  } catch (err) {
-    console.warn('[support] create fallback:', err?.message);
-    return {
-      id: `mock-${Date.now()}`,
+  const doc = await withTimeout(
+    SupportTicket.create({
+      userId,
       category: body.category || '',
       subject: body.subject || '',
       message: body.message || '',
       status: 'open',
-      createdAt: new Date(),
-    };
-  }
+    }),
+    DB_TIMEOUT_MS
+  );
+  return {
+    id: doc._id.toString(),
+    category: doc.category,
+    subject: doc.subject,
+    message: doc.message,
+    status: doc.status,
+    createdAt: doc.createdAt,
+  };
 };
 
 module.exports = { list, create };

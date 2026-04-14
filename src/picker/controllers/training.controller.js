@@ -64,6 +64,17 @@ const completeVideo = async (req, res, next) => {
   }
 };
 
+/** POST /training/modules/:moduleId/complete — same as complete/:videoId (module = video). */
+const completeModule = async (req, res, next) => {
+  try {
+    const { moduleId } = req.params;
+    const data = await trainingService.completeVideo(req.userId, moduleId);
+    success(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
 /**
  * Get user's overall progress
  * GET /training/user-progress
@@ -103,12 +114,24 @@ const updateProgress = async (req, res, next) => {
   }
 };
 
+/** POST /training/assessment — final assessment result */
+const submitAssessment = async (req, res, next) => {
+  try {
+    const data = await trainingService.submitAssessment(req.userId, req.body);
+    success(res, data);
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getVideos,
   getVideoById,
   trackWatchProgress,
   completeVideo,
+  completeModule,
   getUserProgress,
   getProgress,
-  updateProgress
+  updateProgress,
+  submitAssessment,
 };

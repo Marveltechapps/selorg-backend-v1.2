@@ -4,7 +4,23 @@
  */
 const Order = require('../models/Order');
 const OperationalAlert = require('../models/OperationalAlert');
+const PickerIssue = require('../../picker/models/issue.model');
+const PickerUser = require('../../picker/models/user.model');
 const { ORDER_STATUS } = require('../../constants/pickerEnums');
+
+function parseInventoryMismatchDescription(desc) {
+  const d = String(desc || '');
+  const line = (prefix) => {
+    const row = d.split('\n').find((l) => l.startsWith(prefix));
+    return row ? row.slice(prefix.length).trim() : '';
+  };
+  return {
+    productName: line('Product:') || '—',
+    orderedQty: parseInt(line('Expected qty:'), 10),
+    scannedQty: parseInt(line('Actual qty:'), 10),
+    reason: line('Reason:') || '',
+  };
+}
 
 /**
  * GET /darkstore/operations/sla-monitor
@@ -99,7 +115,47 @@ async function getMissingItems(req, res) {
       }
     }
 
-    res.status(200).json({ success: true, data: items });
+    // Picker app "Inventory Mismatch" reports (picker_issues), same shape as Missing Item Tracker
+    try {
+      const issueQuery = { issueType: 'inventory_mismatch', status: { $ne: 'closed' } };
+      const issues = await PickerIssue.find(issueQuery)
+        .sort({ reportedAt: -1 })
+        .limit(300)
+        .lean();
+      const pickerIds = [...new Set(issues.map((i) => String(i.pickerId)).filter(Boolean))];
+      const pickers = await PickerUser.find({ _id: { $in: pickerIds } })
+        .select('name currentLocationId')
+        .lean();
+      const nameById = Object.fromEntries(pickers.map((p) => [String(p._id), p.name || 'Picker']));
+      const storeById = Object.fromEntries(pickers.map((p) => [String(p._id), p.currentLocationId || '']));
+      for (const issue of issues) {
+        const pid = String(issue.pickerId);
+        const parsed = parseInventoryMismatchDescription(issue.description);
+        items.push({
+          orderId: issue.orderId || '—',
+          storeId: storeById[pid] || '',
+          productName: parsed.productName,
+          orderedQty: Number.isFinite(parsed.orderedQty) ? parsed.orderedQty : 0,
+          scannedQty: Number.isFinite(parsed.scannedQty) ? parsed.scannedQty : 0,
+          reason: parsed.reason || issue.description?.slice(0, 200) || '',
+          pickerName: nameById[pid] || 'Picker',
+          reportedAt: issue.reportedAt || issue.createdAt,
+        });
+      }
+    } catch (e) {
+      // Non-blocking: order-based missing items still returned
+    }
+
+    let out = items;
+    if (storeId) {
+      out = out.filter((row) => !row.storeId || row.storeId === storeId);
+    }
+    if (orderId) {
+      out = out.filter((row) => String(row.orderId || '') === String(orderId));
+    }
+    out.sort((a, b) => new Date(b.reportedAt || 0) - new Date(a.reportedAt || 0));
+
+    res.status(200).json({ success: true, data: out });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message || 'Failed to fetch missing items' });
   }

@@ -421,6 +421,86 @@ const sendViaFast2SMS = (phone, otp) => {
   });
 };
 
+/** Twilio – plain transactional body (non-OTP). */
+const sendViaTwilioPlain = (phone, bodyText) => {
+  const { accountSid: sid, authToken: token, phoneNumber: from } = getTwilioConfig();
+  if (!sid || !token || !from) {
+    return Promise.resolve({ sent: false });
+  }
+  const to = toE164India(phone) || (String(phone).startsWith('+') ? phone : `+91${normalizeMobileForVendor(phone)}`);
+  if (!to || !to.startsWith('+')) {
+    setLastSmsError('Twilio', null, null, 'Invalid phone format');
+    return Promise.resolve({ sent: false, ...getLastSmsResult() });
+  }
+  const msg = String(bodyText || '').slice(0, 1400);
+  const body = new URLSearchParams({ To: to, From: from, Body: msg }).toString();
+  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'api.twilio.com',
+        path: `/2010-04-01/Accounts/${sid}/Messages.json`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${auth}`,
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          const ok = res.statusCode >= 200 && res.statusCode < 300;
+          if (ok) {
+            lastSmsResult = { sent: true };
+            lastSmsError = null;
+            resolve({ sent: true });
+          } else {
+            let errMessage = null;
+            try {
+              const j = JSON.parse(data);
+              errMessage = j?.message ?? j?.error_message ?? j?.more_info ?? null;
+            } catch (_) {}
+            setLastSmsError('Twilio', res.statusCode, data, errMessage || undefined);
+            resolve({ sent: false, ...getLastSmsResult() });
+          }
+        });
+      }
+    );
+    req.on('error', (err) => {
+      setLastSmsError('Twilio', null, null, err?.message);
+      resolve({ sent: false, ...getLastSmsResult() });
+    });
+    req.setTimeout(SMS_TIMEOUT_MS, () => {
+      req.destroy();
+      setLastSmsError('Twilio', null, null, 'Request timeout');
+      resolve({ sent: false, ...getLastSmsResult() });
+    });
+    req.write(body);
+    req.end();
+  });
+};
+
+/**
+ * Transactional SMS (e.g. account deletion confirmation). Uses Twilio when configured;
+ * otherwise logs in dev and returns sent:true so flows are not blocked.
+ */
+const sendPickerTransactionalSms = async (phone, text) => {
+  const trimmed = String(phone).replace(/\D/g, '');
+  if (!trimmed) {
+    return { sent: false, errorCode: 'SMS_INVALID_NUMBER', userMessage: 'Invalid phone number.' };
+  }
+  lastSmsError = null;
+  lastSmsResult = null;
+  const twilioCfg = getTwilioConfig();
+  if (twilioCfg.accountSid && twilioCfg.authToken && twilioCfg.phoneNumber) {
+    return sendViaTwilioPlain(trimmed, text);
+  }
+  console.log(`[SMS] Transactional (no Twilio): ${trimmed} — ${text}`);
+  return { sent: true, devLogged: true };
+};
+
 /** Twilio – global, works in India. Phone: 10-digit → +91XXXXXXXXXX via toE164India. Creds from config + env. */
 const sendViaTwilio = (phone, otp) => {
   const { accountSid: sid, authToken: token, phoneNumber: from } = getTwilioConfig();
@@ -599,4 +679,4 @@ const sendOtpSms = async (phone, otp, otpExpiryMinutes = 5) => {
   }
 };
 
-module.exports = { sendOtpSms, getLastSmsError, getLastSmsResult };
+module.exports = { sendOtpSms, sendPickerTransactionalSms, getLastSmsError, getLastSmsResult };

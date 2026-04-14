@@ -5,6 +5,7 @@
  * DEV MODE (config/OTP_DEV_MODE): no SMS, OTP in response. PRODUCTION: send via sms.service, store in picker_otps.
  */
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/user.model');
 const HHDUser = require('../../hhd/models/User.model');
 const { createOTP, verifyOTP } = require('./otp.service');
@@ -127,6 +128,7 @@ const verifyOtp = async (phone, otp) => {
   }
   const otpStr = String(otp).trim();
   if (!otpStr || !/^\d{4}$/.test(otpStr)) {
+    logPickerOtp('warn', `[Picker OTP] verifyOtp: Invalid OTP format received - otp="${otp}", trimmed="${otpStr}"`);
     return { success: false, message: 'OTP must be exactly 4 numeric digits', errorCode: OTP_ERROR_CODES.INCORRECT_OTP };
   }
 
@@ -135,16 +137,19 @@ const verifyOtp = async (phone, otp) => {
     return { success: false, message: 'Invalid phone number. Enter a valid 10-digit mobile number.', errorCode: OTP_ERROR_CODES.INVALID_PHONE };
   }
 
+  logPickerOtp('info', `[Picker OTP] verifyOtp: Attempting verification for phone="${phone}" (normalized="${trimmed}"), otp="${otpStr}"`);
+
   let isValid;
   try {
     isValid = await verifyOTP(trimmed, otpStr);
-    logPickerOtp('info', `[Picker OTP] verifyOtp: mobile=${trimmed}, otp=${otpStr}, isValid=${isValid}`);
+    logPickerOtp('info', `[Picker OTP] verifyOtp: verifyOTP returned isValid=${isValid} for mobile=${trimmed}, otp=${otpStr}`);
   } catch (err) {
     logPickerOtp('warn', `[Picker OTP] verifyOtp: error for ${trimmed} – ${err?.message}`);
     return { success: false, message: 'Verification failed. Please try again.' };
   }
 
   if (!isValid) {
+    logPickerOtp('warn', `[Picker OTP] verifyOtp: Verification failed - invalid or expired OTP for ${trimmed}`);
     return { success: false, message: 'Invalid or expired OTP. Please try again.', errorCode: OTP_ERROR_CODES.OTP_EXPIRED };
   }
 
@@ -153,12 +158,22 @@ const verifyOtp = async (phone, otp) => {
   if (!user) user = await User.create({ phone: trimmed });
   await ensureLinkedHhdUser(user, trimmed);
 
+  const sessionToken = crypto.randomUUID();
+  user.sessionToken = sessionToken;
+  await user.save();
+
   const token = jwt.sign(
-    { sub: user._id.toString(), userId: user._id.toString() },
+    {
+      sub: user._id.toString(),
+      userId: user._id.toString(),
+      id: user._id.toString(),
+      sid: sessionToken,
+    },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
 
+  logPickerOtp('info', `[Picker OTP] verifyOtp: Success - user authenticated, token generated for ${trimmed}`);
   return {
     success: true,
     message: 'OTP verified',

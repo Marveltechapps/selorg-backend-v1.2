@@ -14,6 +14,7 @@ const router = express.Router();
 const adminAuth = [authenticateToken, requireRole('admin', 'super_admin')];
 
 router.get('/', ...adminAuth, controller.listVideos);
+router.get('/picker-progress', ...adminAuth, controller.getPickerProgress);
 router.get('/:id', ...adminAuth, controller.getVideoById);
 router.post('/', ...adminAuth, controller.createVideo);
 router.put('/:id', ...adminAuth, controller.updateVideo);

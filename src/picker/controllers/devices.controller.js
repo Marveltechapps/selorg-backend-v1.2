@@ -67,4 +67,18 @@ async function getAssignedDevice(req, res) {
   }
 }
 
-module.exports = { returnDevice, getAssignedDevice, uploadConditionPhoto };
+async function acknowledgeCollection(req, res) {
+  try {
+    const pickerUserId = req.userId;
+    if (!pickerUserId) {
+      return error(res, 'Unauthorized', 401);
+    }
+    const result = await devicesService.acknowledgeDeviceCollection(pickerUserId);
+    return success(res, result, 200);
+  } catch (err) {
+    const status = err.statusCode || (err.message === 'User not found' ? 404 : 400);
+    return error(res, err.message, status);
+  }
+}
+
+module.exports = { returnDevice, getAssignedDevice, uploadConditionPhoto, acknowledgeCollection };
