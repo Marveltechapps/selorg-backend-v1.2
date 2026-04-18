@@ -134,11 +134,30 @@ const updateVehicle = asyncHandler(async (req, res, next) => {
 // @access  Private
 const listMaintenanceTasks = asyncHandler(async (req, res) => {
   const tasks = await MaintenanceTask.find({}).lean().sort({ scheduledDate: 1 });
+  const vehicleIds = [...new Set(tasks.map((t) => t.vehicleId).filter(Boolean))];
+  const vehicles = vehicleIds.length
+    ? await Vehicle.find({ $or: [{ id: { $in: vehicleIds } }, { vehicleId: { $in: vehicleIds } }] })
+        .select('id vehicleId type')
+        .lean()
+    : [];
+  const vehicleByAnyId = new Map();
+  vehicles.forEach((v) => {
+    vehicleByAnyId.set(v.id, v);
+    vehicleByAnyId.set(v.vehicleId, v);
+  });
+  const enriched = tasks.map((task) => {
+    const vehicle = vehicleByAnyId.get(task.vehicleId);
+    return {
+      ...task,
+      vehicleId: vehicle?.vehicleId || task.vehicleId,
+      vehicleType: vehicle?.type || null,
+    };
+  });
 
   res.status(200).json({
     success: true,
-    count: tasks.length,
-    data: tasks
+    count: enriched.length,
+    data: enriched
   });
 });
 
@@ -197,9 +216,17 @@ const createMaintenanceTask = asyncHandler(async (req, res) => {
 // @access  Private
 const updateMaintenanceTask = asyncHandler(async (req, res, next) => {
   const { id } = req.params;
+  const updates = { ...req.body };
+  if (updates.scheduledDate) {
+    const parsed = new Date(updates.scheduledDate);
+    if (Number.isNaN(parsed.getTime())) {
+      return next(new ErrorResponse('Invalid scheduledDate. Expected ISO date.', 400));
+    }
+    updates.scheduledDate = parsed;
+  }
   const task = await MaintenanceTask.findOneAndUpdate(
     { id },
-    req.body,
+    updates,
     { new: true, runValidators: true }
   ).lean();
 

@@ -1,6 +1,7 @@
 const Zone = require('../models/Zone');
 const ZoneAudit = require('../models/ZoneAudit');
 const Store = require('../models/Store');
+const City = require('../models/City');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 
 // Map legacy type/status to Admin Geofence format
@@ -121,6 +122,32 @@ function buildZoneFromBody(body, existing) {
   return { ...zone, ...updates };
 }
 
+const getCityCode = (name = '') => {
+  const normalized = String(name).replace(/[^a-zA-Z]/g, '').toUpperCase();
+  return (normalized.slice(0, 3) || 'CTY').padEnd(3, 'X');
+};
+
+const resolveCityId = async (body, existingZone = null) => {
+  if (body?.cityId) return body.cityId;
+  if (existingZone?.cityId) return existingZone.cityId;
+
+  const cityName = String(body?.city || '').trim();
+  if (!cityName) return null;
+
+  const existingCity = await City.findOne({
+    name: { $regex: `^${cityName}$`, $options: 'i' },
+  }).lean();
+  if (existingCity?._id) return existingCity._id;
+
+  const created = await City.create({
+    name: cityName,
+    code: getCityCode(cityName),
+    country: 'India',
+    isActive: true,
+  });
+  return created._id;
+};
+
 // @desc    Get all zones (Admin Geofence format)
 // @route   GET /api/v1/merch/geofence/zones
 const getZones = async (req, res, next) => {
@@ -151,7 +178,12 @@ const getZoneById = async (req, res, next) => {
 // @route   POST /api/v1/merch/geofence/zones
 const createZone = async (req, res, next) => {
   try {
+    const cityId = await resolveCityId(req.body, null);
+    if (!cityId) {
+      return next(new ErrorResponse('Unable to resolve cityId. Provide city or cityId in request.', 400));
+    }
     const body = buildZoneFromBody(req.body, null);
+    body.cityId = cityId;
     const zone = await Zone.create(body);
     const performedBy = req.user?.email || req.body?.createdBy || 'admin';
     await ZoneAudit.create({
@@ -176,7 +208,12 @@ const updateZone = async (req, res, next) => {
     if (!zone) {
       return next(new ErrorResponse(`Zone not found with id of ${req.params.id}`, 404));
     }
+    const cityId = await resolveCityId(req.body, zone);
+    if (!cityId) {
+      return next(new ErrorResponse('Unable to resolve cityId. Provide city or cityId in request.', 400));
+    }
     const body = buildZoneFromBody(req.body, zone);
+    body.cityId = cityId;
     const previousStatus = zone.status;
     Object.assign(zone, body);
     await zone.save();
@@ -305,6 +342,10 @@ const getStores = async (req, res, next) => {
 // @route   POST /api/v1/merch/geofence/seed
 const seedGeofenceData = async (req, res, next) => {
   try {
+    let city = await City.findOne({ name: { $regex: '^Mumbai$', $options: 'i' } });
+    if (!city) {
+      city = await City.create({ name: 'Mumbai', code: 'MUM', country: 'India', isActive: true });
+    }
     const mockZones = [
       {
         name: 'Downtown Core',
@@ -314,6 +355,7 @@ const seedGeofenceData = async (req, res, next) => {
         color: '#10B981',
         areaSqKm: 12.4,
         city: 'Mumbai',
+        cityId: city._id,
         region: 'West',
         polygon: [
           { lat: 19.076, lng: 72.8777 },
@@ -333,6 +375,7 @@ const seedGeofenceData = async (req, res, next) => {
         color: '#3B82F6',
         areaSqKm: 8.2,
         city: 'Mumbai',
+        cityId: city._id,
         region: 'West',
         polygon: [
           { lat: 19.05, lng: 72.84 },
@@ -352,6 +395,7 @@ const seedGeofenceData = async (req, res, next) => {
         color: '#EF4444',
         areaSqKm: 4.1,
         city: 'Mumbai',
+        cityId: city._id,
         region: 'West',
         polygon: [
           { lat: 19.09, lng: 72.86 },

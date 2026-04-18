@@ -102,6 +102,24 @@ async function getKPIs(req, res, next) {
   }
 }
 
+async function postBulkReorder(req, res, next) {
+  try {
+    const result = await inventoryService.bulkReorder(req.params.vendorId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function postAlertAllVendors(req, res, next) {
+  try {
+    const result = await inventoryService.alertAllVendors(req.params.vendorId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = { 
   getSummary, 
   listStock, 
@@ -112,4 +130,6 @@ module.exports = {
   getStockouts,
   getAgingInventory,
   getKPIs,
+  postBulkReorder,
+  postAlertAllVendors,
 };

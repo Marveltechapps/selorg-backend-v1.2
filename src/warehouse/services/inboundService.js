@@ -45,12 +45,32 @@ const inboundService = {
    * Create a new GRN
    */
   createGRN: async (warehouseKey, grnData) => {
+    const poNumber = String(grnData?.poNumber || '').trim();
+    const vendor = String(grnData?.vendor || '').trim();
+    const items = Number(grnData?.items ?? 0);
+
+    if (!poNumber) {
+      throw new ErrorResponse('poNumber is required to create GRN', 400);
+    }
+    if (!vendor) {
+      throw new ErrorResponse('vendor is required to create GRN', 400);
+    }
+    if (!Number.isFinite(items) || items < 0) {
+      throw new ErrorResponse('items must be a valid non-negative number', 400);
+    }
+
     // Generate a simple ID if not provided (e.g., GRN-123)
     if (!grnData.id) {
       const count = await GRN.countDocuments(warehouseKeyMatch(warehouseKey));
       grnData.id = `GRN-${(count + 1).toString().padStart(3, '0')}`;
     }
-    const grn = await GRN.create({ ...grnData, ...warehouseFieldsForCreate(warehouseKey) });
+    const grn = await GRN.create({
+      ...grnData,
+      poNumber,
+      vendor,
+      items,
+      ...warehouseFieldsForCreate(warehouseKey)
+    });
     warehouseNotificationService.notifyGrnCreated(warehouseKey, grn).catch(() => {});
     return grn;
   },

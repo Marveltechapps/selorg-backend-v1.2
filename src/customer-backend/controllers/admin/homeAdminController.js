@@ -104,6 +104,7 @@ exports.createCategory = async (req, res) => {
     body.slug = await ensureUniqueSlug(body.slug);
   }
   const created = await Category.create(body);
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.status(201).json({ success: true, data: created });
 };
 exports.updateCategory = async (req, res) => {
@@ -112,6 +113,7 @@ exports.updateCategory = async (req, res) => {
     body.parentId = null;
   }
   const updated = await Category.findByIdAndUpdate(req.params.id, body, { new: true }).lean();
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.json({ success: true, data: updated });
 };
 exports.deleteCategory = async (req, res) => {
@@ -137,6 +139,7 @@ exports.deleteCategory = async (req, res) => {
   }
   await Category.deleteMany({ parentId: id });
   await Category.findByIdAndDelete(id);
+  await cache.delByPattern('cache:*bootstrap*').catch(() => {});
   res.json({ success: true });
 };
 exports.reorderCategories = async (req, res) => {
@@ -175,6 +178,32 @@ function sanitizeBannerBody(body) {
   }
   if (b.isNavigable !== undefined && typeof b.isNavigable !== 'boolean') {
     b.isNavigable = Boolean(b.isNavigable);
+  }
+  if (b.aspectRatio !== undefined) {
+    const validAspects = ['auto', '16:9', '4:3', '1:1', '21:9', '3:2'];
+    const ratio = String(b.aspectRatio).trim();
+    b.aspectRatio = validAspects.includes(ratio) ? ratio : 'auto';
+  }
+  if (b.contentFit !== undefined) {
+    const validFits = ['cover', 'contain', 'fill', 'none'];
+    const fit = String(b.contentFit).trim().toLowerCase();
+    b.contentFit = validFits.includes(fit) ? fit : 'fill';
+  }
+  if (b.dimensions !== undefined) {
+    if (b.dimensions && typeof b.dimensions === 'object' && !Array.isArray(b.dimensions)) {
+      const maybeNumber = (value) => {
+        if (value === null || value === undefined || value === '') return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      };
+      b.dimensions = {
+        width: maybeNumber(b.dimensions.width),
+        height: maybeNumber(b.dimensions.height),
+        preferredHeight: maybeNumber(b.dimensions.preferredHeight),
+      };
+    } else {
+      delete b.dimensions;
+    }
   }
   if (Array.isArray(b.contentItems)) {
     b.contentItems = sanitizeBannerContentItems(b.contentItems);
@@ -221,9 +250,42 @@ function sanitizeBannerContentItems(items) {
   });
 }
 
+/** Flatten an input payload to key/value pairs for full-fidelity storage. */
+function toKeyValuePairs(input) {
+  const pairs = [];
+  const visit = (value, path) => {
+    if (value === undefined) return;
+    if (value === null || typeof value !== 'object' || value instanceof Date) {
+      if (path) pairs.push({ key: path, value });
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (!path) {
+        value.forEach((item, idx) => visit(item, `[${idx}]`));
+        return;
+      }
+      if (value.length === 0) {
+        pairs.push({ key: path, value: [] });
+        return;
+      }
+      value.forEach((item, idx) => visit(item, `${path}[${idx}]`));
+      return;
+    }
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      if (path) pairs.push({ key: path, value: {} });
+      return;
+    }
+    entries.forEach(([k, v]) => visit(v, path ? `${path}.${k}` : k));
+  };
+  visit(input, '');
+  return pairs;
+}
+
 exports.createBanner = async (req, res) => {
   try {
     const body = sanitizeBannerBody(req.body);
+    body.inputKeyValuePairs = toKeyValuePairs(req.body);
     const created = await Banner.create(body);
     res.status(201).json({ success: true, data: created });
   } catch (err) {
@@ -235,6 +297,7 @@ exports.createBanner = async (req, res) => {
 exports.updateBanner = async (req, res) => {
   try {
     const body = sanitizeBannerBody(req.body);
+    body.inputKeyValuePairs = toKeyValuePairs(req.body);
     const updated = await Banner.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true }).lean();
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Banner not found' });

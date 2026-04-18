@@ -14,6 +14,7 @@ router.delete('/templates/:id', authenticateToken, notificationsController.delet
 
 // Campaigns
 router.get('/campaigns', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.listCampaigns);
+router.get('/campaigns/:id', authenticateToken, notificationsController.getCampaignById);
 router.post('/campaigns', authenticateToken, notificationsController.createCampaign);
 router.put('/campaigns/:id', authenticateToken, notificationsController.updateCampaignStatus);
 

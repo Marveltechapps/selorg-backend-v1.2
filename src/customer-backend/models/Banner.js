@@ -61,6 +61,16 @@ const bannerSchema = new mongoose.Schema(
       default: null,
     },
     redirectValue: String,
+    /** Per-banner display ratio hint for customer app rendering. */
+    aspectRatio: { type: String, default: 'auto' },
+    /** How the banner image should fit inside its frame. */
+    contentFit: { type: String, enum: ['cover', 'contain', 'fill', 'none'], default: 'fill' },
+    /** Optional display dimension overrides for customer app. */
+    dimensions: {
+      width: { type: Number, default: null },
+      height: { type: Number, default: null },
+      preferredHeight: { type: Number, default: null },
+    },
     categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerCategory' },
     isActive: { type: Boolean, default: true },
     startDate: Date,
@@ -68,8 +78,13 @@ const bannerSchema = new mongoose.Schema(
     order: { type: Number, default: 0 },
     /** When redirectType is 'banner', tapping shows a landing page with these items (arrangeable) */
     contentItems: [contentItemSchema],
-    // Raw import payload from mastersheet rows (for full-fidelity storage/audit).
-    importRaw: { type: mongoose.Schema.Types.Mixed, default: null },
+    // Full admin-form payload stored as key/value pairs (flattened paths).
+    inputKeyValuePairs: [
+      {
+        key: { type: String, required: true },
+        value: { type: mongoose.Schema.Types.Mixed, default: null },
+      },
+    ],
   },
   { timestamps: true }
 );

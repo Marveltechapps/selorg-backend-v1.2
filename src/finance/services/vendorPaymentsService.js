@@ -271,7 +271,12 @@ class VendorPaymentsService {
 
   async getVendors() {
     try {
-      const vendors = await Vendor.find(mergeHubFilter({ isActive: true })).lean();
+      const vendors = await Vendor.find(
+        mergeHubFilter({
+          status: { $nin: ['inactive', 'archived', 'deleted'] },
+          'metadata.deleted': { $ne: true },
+        })
+      ).lean();
       return vendors.map((vendor) => ({
         id: vendor._id.toString(),
         ...vendor,

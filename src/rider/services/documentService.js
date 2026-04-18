@@ -329,11 +329,29 @@ const getDocumentHistory = async (documentId) => {
   }
 };
 
+const getDocumentDownloadInfo = async (documentId) => {
+  const details = await getDocumentDetails(documentId);
+  const fileUrl = details?.fileUrl;
+  if (!fileUrl || typeof fileUrl !== 'string') {
+    const error = new Error('Document file is unavailable for download');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    documentId: details.id,
+    riderId: details.riderId,
+    documentType: details.documentType,
+    fileUrl,
+  };
+};
+
 module.exports = {
   listDocuments,
   getDocumentDetails,
   reviewDocument,
   getDocumentRejectionReason,
   getDocumentHistory,
+  getDocumentDownloadInfo,
 };
 

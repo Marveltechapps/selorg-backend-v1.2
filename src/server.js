@@ -346,8 +346,9 @@ app.use(errorHandler);
 // Export app for testing (after all routes are configured)
 module.exports = app;
 
-// Default 5000; set PORT=5001 in .env if macOS AirPlay Receiver binds 5000 on your machine
-const PORT = process.env.PORT || 5000;
+// Default 3333:5000 often conflicts with macOS AirPlay; 5554–5585 with Android emulator ADB/console.
+// Override with PORT in .env.
+const PORT = process.env.PORT || 3333;
 
 // Create HTTP server
 const httpServer = createServer(app);

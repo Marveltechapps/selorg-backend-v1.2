@@ -925,19 +925,35 @@ const createManualOrder = async (payload) => {
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new Error('Order must have at least one item');
     }
-    if (!dropLocation || typeof dropLocation !== 'string' || dropLocation.trim() === '') {
+    const dropLocationText = typeof dropLocation === 'string'
+      ? dropLocation.trim()
+      : (dropLocation && typeof dropLocation === 'object'
+        ? String(dropLocation.address || dropLocation.label || '').trim()
+        : '');
+    if (!dropLocationText) {
       throw new Error('Customer address (drop location) is required');
     }
     if (!customerName || typeof customerName !== 'string' || customerName.trim() === '') {
       throw new Error('Customer name is required');
     }
 
-    const pickup = pickupLocation && pickupLocation.trim()
+    const pickupLocationText = typeof pickupLocation === 'string'
       ? pickupLocation.trim()
+      : (pickupLocation && typeof pickupLocation === 'object'
+        ? String(pickupLocation.address || pickupLocation.label || '').trim()
+        : '');
+    const pickup = pickupLocationText
+      ? pickupLocationText
       : 'Default Warehouse';
-    const drop = dropLocation.trim();
+    const drop = dropLocationText;
     const name = customerName.trim();
-    const itemList = items.map((i) => (typeof i === 'string' ? i : (i?.name || i?.id || String(i))));
+    const itemList = items
+      .map((i) => (typeof i === 'string' ? i : (i?.name || i?.id || i?.skuId || String(i))))
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+    if (itemList.length === 0) {
+      throw new Error('Order must have at least one item');
+    }
 
     // SLA: standard ~60 min, express ~30 min
     const slaMinutes = orderType === 'express' ? 30 : 60;

@@ -4,6 +4,8 @@
  */
 const WorkLocation = require('../models/workLocation.model');
 const User = require('../models/user.model');
+const Store = require('../../merch/models/Store');
+const mongoose = require('mongoose');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
 
 /**
@@ -30,6 +32,69 @@ function toRad(degrees) {
   return degrees * (Math.PI / 180);
 }
 
+function normalizePickerLocationFromWorkLocation(location) {
+  return {
+    ...location,
+    locationId: String(location.locationId),
+    type: location.type === 'darkstore' ? 'darkstore' : 'warehouse',
+    coordinates: {
+      latitude: Number(location.coordinates?.latitude),
+      longitude: Number(location.coordinates?.longitude),
+    },
+  };
+}
+
+function normalizePickerLocationFromStore(store) {
+  const latitude = Number(store.latitude ?? store.x);
+  const longitude = Number(store.longitude ?? store.y);
+  const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+
+  return {
+    _id: store._id,
+    locationId: String(store._id),
+    name: store.name || store.code || `Store ${store._id}`,
+    type: store.type === 'warehouse' ? 'warehouse' : 'darkstore',
+    address: store.address || '',
+    city: store.city || null,
+    state: store.state || null,
+    zipCode: store.pincode || null,
+    coordinates: hasCoordinates ? { latitude, longitude } : null,
+    geofence: { radius: 500, shape: 'circle' },
+    isActive: true,
+    _source: 'store',
+  };
+}
+
+async function loadActivePickerLocations() {
+  const stores = await withTimeout(
+    Store.find({
+      type: { $in: ['warehouse', 'dark_store', 'store'] },
+    })
+      .select(
+        '_id code name type address city state pincode latitude longitude x y status serviceStatus'
+      )
+      .sort({ name: 1 })
+      .lean(),
+    DB_TIMEOUT_MS,
+    []
+  );
+
+  const normalizedStores = (stores || []).map(normalizePickerLocationFromStore).filter(Boolean);
+  if (normalizedStores.length > 0) {
+    return normalizedStores;
+  }
+
+  const workLocations = await withTimeout(
+    WorkLocation.find({ isActive: true }).select('-__v').sort({ name: 1 }).lean(),
+    DB_TIMEOUT_MS,
+    []
+  );
+
+  return (workLocations || [])
+    .map(normalizePickerLocationFromWorkLocation)
+    .filter((location) => !!location);
+}
+
 /**
  * Estimate travel time based on distance
  * Assumes average speed of 30 km/h for city driving
@@ -49,13 +114,7 @@ function estimateTravelTime(distanceKm) {
  * Optionally filter by user coordinates and radius
  */
 const getAllLocations = async (latitude, longitude, radiusKm = 50) => {
-  const locations = await withTimeout(
-    WorkLocation.find({ isActive: true })
-      .select('-__v')
-      .sort({ name: 1 })
-      .lean(),
-    DB_TIMEOUT_MS
-  );
+  const locations = await loadActivePickerLocations();
 
   if (!locations) {
     throw new Error('Failed to fetch locations');
@@ -64,6 +123,15 @@ const getAllLocations = async (latitude, longitude, radiusKm = 50) => {
   // If coordinates provided, calculate distances and filter by radius
   if (latitude && longitude) {
     const locationsWithDistance = locations.map(location => {
+      if (!location.coordinates) {
+        return {
+          ...location,
+          distance: null,
+          travelTime: null,
+          distanceDisplay: null,
+          withinRadius: false,
+        };
+      }
       const distance = calculateDistance(
         latitude,
         longitude,
@@ -83,9 +151,12 @@ const getAllLocations = async (latitude, longitude, radiusKm = 50) => {
     });
 
     // Filter by radius and sort by distance
-    return locationsWithDistance
-      .filter(loc => loc.withinRadius)
+    const withCoordinates = locationsWithDistance
+      .filter((loc) => loc.withinRadius && Number.isFinite(loc.distance))
       .sort((a, b) => a.distance - b.distance);
+
+    // If no geo-match is available, still return master-data rows so picker can continue.
+    return withCoordinates.length > 0 ? withCoordinates : locationsWithDistance;
   }
 
   // Return all locations without distance info
@@ -105,12 +176,7 @@ const getNearestLocation = async (latitude, longitude) => {
     throw new Error('Latitude and longitude are required');
   }
 
-  const locations = await withTimeout(
-    WorkLocation.find({ isActive: true })
-      .select('-__v')
-      .lean(),
-    DB_TIMEOUT_MS
-  );
+  const locations = await loadActivePickerLocations();
 
   if (!locations || locations.length === 0) {
     throw new Error('No active locations found');
@@ -118,6 +184,14 @@ const getNearestLocation = async (latitude, longitude) => {
 
   // Calculate distances for all locations
   const locationsWithDistance = locations.map(location => {
+    if (!location.coordinates) {
+      return {
+        ...location,
+        distance: Number.MAX_SAFE_INTEGER,
+        travelTime: null,
+        distanceDisplay: null,
+      };
+    }
     const distance = calculateDistance(
       latitude,
       longitude,
@@ -145,12 +219,35 @@ const getNearestLocation = async (latitude, longitude) => {
  * Get location by ID
  */
 const getLocationById = async (locationId) => {
-  const location = await withTimeout(
-    WorkLocation.findOne({ locationId, isActive: true })
-      .select('-__v')
-      .lean(),
-    DB_TIMEOUT_MS
+  let location = await withTimeout(
+    WorkLocation.findOne({ locationId, isActive: true }).select('-__v').lean(),
+    DB_TIMEOUT_MS,
+    null
   );
+
+  if (location) {
+    return normalizePickerLocationFromWorkLocation(location);
+  }
+
+  const storeOr = [{ code: String(locationId || '').toUpperCase() }];
+  if (mongoose.Types.ObjectId.isValid(locationId)) {
+    storeOr.unshift({ _id: locationId });
+  }
+  const storeQuery = {
+    $or: storeOr,
+    type: { $in: ['warehouse', 'dark_store', 'store'] },
+  };
+  const store = await withTimeout(
+    Store.findOne(storeQuery)
+      .select('_id code name type address city state pincode latitude longitude x y')
+      .lean(),
+    DB_TIMEOUT_MS,
+    null
+  );
+
+  if (store) {
+    location = normalizePickerLocationFromStore(store);
+  }
 
   if (!location) {
     throw new Error('Location not found');
@@ -167,6 +264,9 @@ const validateLocation = async (locationId, userLatitude, userLongitude) => {
   
   if (!userLatitude || !userLongitude) {
     throw new Error('User coordinates are required');
+  }
+  if (!location.coordinates) {
+    throw new Error('Selected location has no coordinates configured');
   }
 
   const distance = calculateDistance(

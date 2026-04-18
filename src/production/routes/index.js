@@ -35,7 +35,11 @@ router.use('/auth', authRoutes);
 // All other routes require JWT and role: production, admin, super_admin; cache GET responses
 const protectedRouter = express.Router();
 protectedRouter.use(authenticateToken, requireRole('production', 'admin', 'super_admin'));
-protectedRouter.use(cacheMiddleware(appConfig.cache.production));
+protectedRouter.use(
+  cacheMiddleware(appConfig.cache.production, {
+    skipPaths: ['/overview', '/planning'],
+  })
+);
 protectedRouter.use('/overview', overviewRoutes);
 protectedRouter.use('/factories', factoriesRoutes);
 protectedRouter.use('/raw-materials', rawMaterialsGroupRoutes);

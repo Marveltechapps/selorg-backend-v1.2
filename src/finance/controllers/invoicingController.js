@@ -25,7 +25,8 @@ class InvoicingController {
   });
 
   createInvoice = asyncHandler(async (req, res) => {
-    const invoice = await invoicingService.createInvoice(req.body);
+    const { asDraft = false, ...payload } = req.body || {};
+    const invoice = await invoicingService.createInvoice(payload, Boolean(asDraft));
     await cacheInvalidation.invalidateFinance().catch(() => {});
     res.status(201).json({ success: true, data: invoice });
   });

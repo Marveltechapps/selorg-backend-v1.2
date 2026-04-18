@@ -17,6 +17,7 @@ router.get('/dashboard/summary', hrController.getHrDashboardSummary);
 router.get('/documents', documentController.listDocuments);
 router.get('/documents/:documentId', documentController.getDocumentDetails);
 router.put('/documents/:documentId', documentController.reviewDocument);
+router.get('/documents/:documentId/download', documentController.downloadDocument);
 router.get('/documents/:documentId/rejection-reason', documentController.getDocumentRejectionReason);
 router.get('/documents/:documentId/history', documentController.getDocumentHistory);
 

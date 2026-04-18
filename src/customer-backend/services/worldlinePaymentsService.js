@@ -75,6 +75,20 @@ function trimEnv(value) {
   return String(value).trim();
 }
 
+let worldlineMerchantEnvMismatchLogged = false;
+function warnWorldlineMerchantEnvMismatchOnce() {
+  if (worldlineMerchantEnvMismatchLogged) return;
+  const id = trimEnv(process.env.WORLDLINE_MERCHANT_ID);
+  const code = trimEnv(process.env.WORLDLINE_MERCHANT_CODE);
+  if (id && code && id !== code) {
+    worldlineMerchantEnvMismatchLogged = true;
+    logger.error(
+      `WORLDLINE merchant env mismatch: WORLDLINE_MERCHANT_ID=${id} vs WORLDLINE_MERCHANT_CODE=${code}. ` +
+        'Token/session use WORLDLINE_MERCHANT_ID when set (see createSession). Align both to the same live/test id.'
+    );
+  }
+}
+
 /** Stable synthetic ObjectId for standalone payments (no `customer_orders` row). Scoped per user + client ref. */
 function syntheticOrderObjectIdForExternalRef(externalOrderRef, userId) {
   const twelve = crypto
@@ -538,6 +552,7 @@ function verifyGatewayResponse({ payment, response, salt, logContext }) {
 
 async function createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
+  warnWorldlineMerchantEnvMismatchOnce();
 
   const normalizedPlatform = normalizePlatform(platform);
   if (!normalizedPlatform) return { error: 'platform must be android or ios' };
@@ -770,6 +785,7 @@ async function createStandalonePaymentSession({
   userId: userIdInput,
 }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
+  warnWorldlineMerchantEnvMismatchOnce();
   if (!standaloneInitiateEnabled()) {
     return {
       error:

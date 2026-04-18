@@ -43,11 +43,9 @@ var WebSocketServerManager = /*#__PURE__*/function () {
       server.on("upgrade", function (request, socket, head) {
         var pathname = new _nodeUrl.URL(request.url || "", "http://".concat(request.headers.host)).pathname;
 
-        // Only handle /ws endpoint
+        // Only handle /ws — do not destroy other upgrades (Socket.IO uses /hhd-socket.io, etc.)
         if (pathname === "/ws") {
           _this.handleUpgrade(request, socket, head);
-        } else {
-          socket.destroy();
         }
       });
 

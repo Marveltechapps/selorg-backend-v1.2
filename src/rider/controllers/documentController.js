@@ -74,10 +74,24 @@ const getDocumentHistory = async (req, res, next) => {
   }
 };
 
+const downloadDocument = async (req, res, next) => {
+  try {
+    const { documentId } = req.params;
+    const result = await documentService.getDocumentDownloadInfo(documentId);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({ error: 'Not Found', message: error.message });
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   listDocuments,
   getDocumentDetails,
   reviewDocument,
   getDocumentRejectionReason,
   getDocumentHistory,
+  downloadDocument,
 };

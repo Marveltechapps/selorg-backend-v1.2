@@ -11,6 +11,8 @@ router.post('/:vendorId/aging-alerts/:alertId/ack', inventoryController.ackAlert
 router.get('/:vendorId/stockouts', inventoryController.getStockouts);
 router.get('/:vendorId/aging-inventory', inventoryController.getAgingInventory);
 router.get('/:vendorId/kpis', inventoryController.getKPIs);
+router.post('/:vendorId/stockouts/bulk-reorder', inventoryController.postBulkReorder);
+router.post('/:vendorId/stockouts/alert-all', inventoryController.postAlertAllVendors);
 
 module.exports = router;
 

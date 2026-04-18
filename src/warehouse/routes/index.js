@@ -32,6 +32,7 @@ protectedRouter.use(authenticateToken, requireRole('warehouse', 'admin', 'super_
 protectedRouter.use('/notifications', notificationsRoutes);
 protectedRouter.use(
   cacheMiddleware(appConfig.cache.warehouse, {
+    skipPaths: ['/transfers'],
     cacheKeyExtra: (req) => (req.user?.warehouseKey ? `:${req.user.warehouseKey}` : ''),
   })
 );

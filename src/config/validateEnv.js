@@ -113,7 +113,7 @@ const validateEnvironment = () => {
 
   logger.info('Environment validation passed', {
     nodeEnv: process.env.NODE_ENV || 'development',
-    port: process.env.PORT || '5000',
+    port: process.env.PORT || '3333',
     hasMongoURI: !!mongoUri,
     hasJWTSecret: !!process.env.JWT_SECRET,
     hasCustomerJWTSecret: !!process.env.CUSTOMER_JWT_SECRET,

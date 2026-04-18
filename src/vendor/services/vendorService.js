@@ -259,10 +259,83 @@ async function performAction(vendorId, actionRequest) {
   }
   const previousStatus = vendor.status;
   const { action } = actionRequest;
-  if (action === 'approve') vendor.status = 'active';
-  else if (action === 'reject') vendor.status = 'rejected';
-  else if (action === 'reactivate') vendor.status = 'active';
-  else if (action === 'archive') vendor.status = 'archived';
+  if (action === 'approve') {
+    vendor.status = 'active';
+    vendor.stage = 'approved';
+  } else if (action === 'reject') {
+    vendor.status = 'rejected';
+    vendor.stage = 'rejected';
+  } else if (action === 'reactivate') {
+    vendor.status = 'active';
+  } else if (action === 'archive') {
+    vendor.status = 'archived';
+  } else if (action === 'nudge') {
+    const meta =
+      vendor.metadata && typeof vendor.metadata === 'object' && !Array.isArray(vendor.metadata)
+        ? { ...vendor.metadata }
+        : {};
+    const nudges = Array.isArray(meta.nudges) ? [...meta.nudges] : [];
+    nudges.push({
+      subject: String(actionRequest.subject || 'Reminder').trim(),
+      message: String(actionRequest.message || '').trim(),
+      sentAt: new Date().toISOString(),
+    });
+    meta.nudges = nudges;
+    meta.lastNudgedAt = new Date().toISOString();
+    vendor.metadata = meta;
+    vendor.markModified('metadata');
+  } else if (action === 're_request_docs') {
+    const meta =
+      vendor.metadata && typeof vendor.metadata === 'object' && !Array.isArray(vendor.metadata)
+        ? { ...vendor.metadata }
+        : {};
+    meta.reRequestedDocs = Array.isArray(actionRequest.documents)
+      ? actionRequest.documents.map((x) => String(x))
+      : [];
+    meta.reRequestMessage = String(actionRequest.message || '').trim();
+    meta.reRequestDeadline = actionRequest.deadline || null;
+    meta.reRequestedAt = new Date().toISOString();
+    vendor.metadata = meta;
+    vendor.stage = 'docs_verification';
+    vendor.markModified('metadata');
+  } else if (action === 'assign_tier') {
+    const tier = String(actionRequest.tier || '').trim();
+    if (!tier) {
+      const err = new Error('tier is required');
+      err.status = 400;
+      throw err;
+    }
+    const meta =
+      vendor.metadata && typeof vendor.metadata === 'object' && !Array.isArray(vendor.metadata)
+        ? { ...vendor.metadata }
+        : {};
+    meta.tier = tier;
+    meta.tierAssignedAt = new Date().toISOString();
+    if (actionRequest.notes) meta.tierNotes = String(actionRequest.notes);
+    vendor.metadata = meta;
+    vendor.stage = 'tier_assignment';
+    vendor.markModified('metadata');
+  } else if (action === 'create_po') {
+    const purchaseOrderService = require('./purchaseOrderService');
+    const po = await purchaseOrderService.createPurchaseOrder(
+      {
+        vendorId: String(vendor._id),
+        reference: actionRequest.reference || null,
+        currency: actionRequest.currency || 'INR',
+        expectedDeliveryDate: actionRequest.expectedDeliveryDate || null,
+        items: Array.isArray(actionRequest.items) ? actionRequest.items : [],
+        notes: actionRequest.notes || '',
+        initialStatus: 'pending_approval',
+      },
+      actionRequest.requestedBy || null
+    );
+    return {
+      vendorId,
+      action,
+      message: 'Purchase order created',
+      purchaseOrder: po,
+    };
+  }
   else if (action === 'send_message') {
     const subject = String(actionRequest.subject || '').trim();
     const message = String(actionRequest.message || '').trim();
@@ -326,6 +399,23 @@ async function performAction(vendorId, actionRequest) {
   };
 }
 
+async function hardDeleteVendor(vendorId, details = {}) {
+  const vendor = await Vendor.findOne(mergeHubFilter({ _id: vendorId }));
+  if (!vendor) {
+    const err = new Error('Vendor not found');
+    err.status = 404;
+    throw err;
+  }
+  await Vendor.deleteOne(mergeHubFilter({ _id: vendorId }));
+  await invalidateVendorCaches();
+  return {
+    vendorId: String(vendorId),
+    deleted: true,
+    vendorName: vendor.vendorName || vendor.name || '',
+    reason: details.reason || null,
+  };
+}
+
 async function createJobForVendor(type, meta) {
   const job = new Job({
     ...hubFieldsForCreate(),
@@ -345,6 +435,7 @@ module.exports = {
   updateVendor,
   patchVendor,
   performAction,
+  hardDeleteVendor,
   createJobForVendor,
   PAYMENT_TERMS,
 };

@@ -86,6 +86,24 @@ const listLiveChats = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
+const acceptLiveChat = asyncHandler(async (req, res) => {
+  const agentId = req.body?.agentId || req.user?.userId || req.user?.id;
+  const agentName = req.body?.agentName || req.user?.name || req.user?.email || 'Admin';
+  const data = await adminSupportService.acceptLiveChat(req.params.id, agentId, agentName);
+  if (!data) return res.status(404).json({ success: false, error: 'Chat not found' });
+  res.json({ success: true, data });
+});
+
+const sendLiveChatMessage = asyncHandler(async (req, res) => {
+  const sender = {
+    senderId: req.body?.senderId || req.user?.userId || req.user?.id,
+    senderName: req.body?.senderName || req.user?.name || req.user?.email || 'Admin',
+    senderType: req.body?.senderType || 'agent',
+  };
+  const data = await adminSupportService.sendLiveChatMessage(req.params.id, req.body?.message, sender);
+  res.status(201).json({ success: true, data });
+});
+
 const listFAQs = asyncHandler(async (req, res) => {
   const data = await adminSupportService.listFAQs();
   res.json({ success: true, data });
@@ -125,6 +143,8 @@ module.exports = {
   listCannedResponses,
   getSLAMetrics,
   listLiveChats,
+  acceptLiveChat,
+  sendLiveChatMessage,
   listFAQs,
   createFAQ,
   updateFAQ,

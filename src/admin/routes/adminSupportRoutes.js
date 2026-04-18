@@ -19,6 +19,8 @@ router.get('/categories', adminSupportController.listCategories);
 router.get('/canned-responses', adminSupportController.listCannedResponses);
 router.get('/sla-metrics', adminSupportController.getSLAMetrics);
 router.get('/live-chats', adminSupportController.listLiveChats);
+router.post('/live-chats/:id/accept', adminSupportController.acceptLiveChat);
+router.post('/live-chats/:id/messages', adminSupportController.sendLiveChatMessage);
 
 router.get('/faqs', adminSupportController.listFAQs);
 router.post('/faqs', adminSupportController.createFAQ);

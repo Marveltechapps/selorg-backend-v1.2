@@ -185,6 +185,7 @@ const createCoupon = async (req, res, next) => {
     body.minOrderAmount = body.minOrderValue ?? body.minOrderAmount ?? 0;
     body.maxDiscountAmount = body.maxDiscount ?? body.maxDiscountAmount ?? null;
     body.isActive = body.status === 'active' || body.status === undefined;
+    body.status = body.isActive ? 'active' : 'paused';
     body.applicableCategories = body.applicableCategories || [];
     body.applicableProducts = body.applicableProducts || [];
     body.userSegments = body.userSegments || [];
@@ -209,6 +210,8 @@ const updateCoupon = async (req, res, next) => {
     if (body.maxDiscount !== undefined) body.maxDiscountAmount = body.maxDiscount;
     if (body.status === 'active') body.isActive = true;
     if (body.status === 'paused') body.isActive = false;
+    if (body.isActive === true && body.status === undefined) body.status = 'active';
+    if (body.isActive === false && body.status === undefined) body.status = 'paused';
     if (body.discountType === 'percentage') body.discountType = 'percent';
     if (body.discountType === 'flat') body.discountType = 'fixed';
 

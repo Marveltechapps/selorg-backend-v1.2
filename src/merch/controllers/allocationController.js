@@ -4,6 +4,56 @@ const TransferOrder = require('../models/TransferOrder');
 const SKU = require('../models/SKU');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 
+const ensureSeedSkus = async () => {
+  const existing = await SKU.find().limit(3);
+  if (existing.length > 0) return { skus: existing, autoSeeded: false };
+
+  const now = Date.now();
+  const baseline = [
+    {
+      code: `SKU-${now}-A`,
+      name: 'Seeded Cola 500ml',
+      category: 'Beverages',
+      brand: 'Selorg',
+      cost: 22,
+      basePrice: 30,
+      sellingPrice: 34,
+      competitorAvg: 33,
+      margin: 35,
+      marginStatus: 'healthy',
+      stock: 1600,
+    },
+    {
+      code: `SKU-${now}-B`,
+      name: 'Seeded Orange Juice 1L',
+      category: 'Beverages',
+      brand: 'Selorg',
+      cost: 48,
+      basePrice: 66,
+      sellingPrice: 72,
+      competitorAvg: 70,
+      margin: 33,
+      marginStatus: 'healthy',
+      stock: 900,
+    },
+    {
+      code: `SKU-${now}-C`,
+      name: 'Seeded Trail Mix 200g',
+      category: 'Snacks',
+      brand: 'Selorg',
+      cost: 38,
+      basePrice: 56,
+      sellingPrice: 62,
+      competitorAvg: 61,
+      margin: 31,
+      marginStatus: 'healthy',
+      stock: 1100,
+    }
+  ];
+  const inserted = await SKU.insertMany(baseline);
+  return { skus: inserted, autoSeeded: true };
+};
+
 // @desc    Get all allocations
 // @route   GET /api/v1/allocation
 // @access  Public
@@ -103,11 +153,7 @@ const updateAlertStatus = async (req, res, next) => {
 const seedAllocationData = async (req, res, next) => {
   try {
     // This is a helper to quickly populate the DB with mock data for testing
-    const skus = await SKU.find().limit(3);
-    
-    if (skus.length === 0) {
-      return next(new ErrorResponse('Please seed SKUs first', 400));
-    }
+    const { skus, autoSeeded } = await ensureSeedSkus();
 
     const locations = [
       { id: 'l1', name: 'Downtown Hub' },
@@ -162,9 +208,18 @@ const seedAllocationData = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Allocation data seeded successfully',
+      message: autoSeeded
+        ? 'Allocation data seeded successfully (including baseline SKUs)'
+        : 'Allocation data seeded successfully',
       allocationsCount: allocations.length,
-      alertsCount: alerts.length
+      alertsCount: alerts.length,
+      autoSeededSkus: autoSeeded,
+      prerequisite: autoSeeded
+        ? null
+        : {
+            type: 'none',
+            message: 'SKUs already existed; seeded allocation and alert records.',
+          },
     });
   } catch (err) {
     next(err);

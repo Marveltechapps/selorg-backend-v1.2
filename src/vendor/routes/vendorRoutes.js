@@ -11,6 +11,7 @@ router.get('/summary', vendorController.getVendorSummary); // reuse list for sum
 router.get('/:vendorId', vendorController.getVendor);
 router.put('/:vendorId', vendorController.putVendor);
 router.patch('/:vendorId', vendorController.patchVendor);
+router.delete('/:vendorId', requireAuth, vendorController.deleteVendor);
 router.post('/:vendorId/actions', requireAuth, vendorController.postAction);
 // vendor-scoped nested endpoints from OpenAPI
 router.get('/:vendorId/purchase-orders', vendorController.listVendorPurchaseOrders);

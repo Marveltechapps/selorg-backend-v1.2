@@ -23,6 +23,7 @@ router.put('/leave-requests/:id/status', workforceController.updateLeaveStatus);
 
 // Training sessions
 router.get('/training', workforceController.getTrainings);
+router.post('/training', workforceController.createTraining);
 router.get('/training/:id', workforceController.getTrainingDetails);
 router.get('/training/:id/details', workforceController.getTrainingDetails);
 router.post('/training/:id/enroll', workforceController.enrollStaff);

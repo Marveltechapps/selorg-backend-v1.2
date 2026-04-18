@@ -103,7 +103,9 @@ async function listShifts(filters = {}, options = {}) {
     items,
     total,
     page,
+    limit,
     pageSize: limit,
+    totalPages: Math.ceil(total / limit),
   };
 }
 

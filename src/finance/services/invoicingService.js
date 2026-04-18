@@ -73,7 +73,30 @@ class InvoicingService {
 
   async createInvoice(payload, asDraft = false) {
     try {
-      const amount = payload.items.reduce(
+      if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
+        throw new Error('At least one invoice item is required');
+      }
+      if (!payload.customerName || !payload.customerEmail) {
+        throw new Error('Customer name and email are required');
+      }
+      if (!payload.issueDate || !payload.dueDate) {
+        throw new Error('Issue date and due date are required');
+      }
+
+      const normalizedItems = payload.items
+        .map((item) => ({
+          description: String(item.description || '').trim(),
+          quantity: Number(item.quantity ?? 0),
+          unitPrice: Number(item.unitPrice ?? 0),
+          taxPercent: Number(item.taxPercent ?? 0),
+        }))
+        .filter((item) => item.description && item.quantity > 0 && item.unitPrice >= 0);
+
+      if (normalizedItems.length === 0) {
+        throw new Error('Invoice items must include description, quantity, and unit price');
+      }
+
+      const amount = normalizedItems.reduce(
         (sum, item) => sum + item.quantity * item.unitPrice * (1 + item.taxPercent / 100),
         0
       );
@@ -90,7 +113,7 @@ class InvoicingService {
         amount,
         currency: payload.currency || 'INR',
         status: asDraft ? 'draft' : 'sent',
-        items: payload.items.map(item => ({ 
+        items: normalizedItems.map(item => ({ 
           id: uuidv4(),
           description: item.description,
           quantity: item.quantity,

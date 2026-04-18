@@ -2,7 +2,60 @@ const Campaign = require('../models/Campaign');
 const StockConflict = require('../models/StockConflict');
 const PromoUplift = require('../models/PromoUplift');
 const PriceChange = require('../models/PriceChange');
+const SKU = require('../models/SKU');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
+
+const normalizeCampaignSkuObjects = async (inputSkus = []) => {
+  if (!Array.isArray(inputSkus) || inputSkus.length === 0) return [];
+
+  const skuIds = inputSkus
+    .filter((s) => typeof s === 'string' || typeof s === 'number')
+    .map((s) => String(s))
+    .filter(Boolean);
+
+  let skuById = new Map();
+  if (skuIds.length > 0) {
+    const docs = await SKU.find({ _id: { $in: skuIds } }).lean();
+    skuById = new Map(docs.map((d) => [String(d._id), d]));
+  }
+
+  return inputSkus
+    .map((sku) => {
+      if (typeof sku === 'string' || typeof sku === 'number') {
+        const id = String(sku);
+        const doc = skuById.get(id);
+        return {
+          sku: doc?.code || id,
+          name: doc?.name || id,
+          category: doc?.category || 'General',
+          basePrice: Number(doc?.basePrice ?? 0),
+          promoPrice: Number(doc?.sellingPrice ?? doc?.basePrice ?? 0),
+        };
+      }
+      if (!sku || typeof sku !== 'object') return null;
+      return {
+        sku: String(sku.sku || sku.code || sku.id || sku._id || ''),
+        name: String(sku.name || sku.sku || sku.code || 'Unknown SKU'),
+        category: String(sku.category || 'General'),
+        basePrice: Number(sku.basePrice ?? sku.base ?? 0),
+        promoPrice: Number(sku.promoPrice ?? sku.sell ?? sku.sellingPrice ?? sku.basePrice ?? 0),
+      };
+    })
+    .filter((s) => s && s.sku);
+};
+
+const normalizeCampaignPayload = async (body) => {
+  const payload = { ...body };
+  payload.name = payload.name || 'Untitled Campaign';
+  payload.tagline = payload.tagline || payload.description || 'Campaign';
+  payload.period = payload.period || 'TBD';
+  payload.target = payload.target || 'Selected SKUs';
+  payload.scope = payload.scope || payload.region || 'Global';
+  payload.type = payload.type || 'Discount';
+  payload.owner = payload.owner || { name: 'System', initial: 'S' };
+  payload.skus = await normalizeCampaignSkuObjects(payload.skus || []);
+  return payload;
+};
 
 // @desc    Create Stock Conflict
 // @route   POST /api/v1/merch/overview/conflicts
@@ -195,7 +248,8 @@ const getCampaign = async (req, res, next) => {
 // @access  Private
 const createCampaign = async (req, res, next) => {
   try {
-    const campaign = await Campaign.create(req.body);
+    const payload = await normalizeCampaignPayload(req.body || {});
+    const campaign = await Campaign.create(payload);
 
     res.status(201).json({
       success: true,
@@ -211,7 +265,8 @@ const createCampaign = async (req, res, next) => {
 // @access  Private
 const updateCampaign = async (req, res, next) => {
   try {
-    const campaign = await Campaign.findByIdAndUpdate(req.params.id, req.body, {
+    const payload = await normalizeCampaignPayload(req.body || {});
+    const campaign = await Campaign.findByIdAndUpdate(req.params.id, payload, {
       new: true,
       runValidators: true
     });

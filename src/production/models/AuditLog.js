@@ -6,6 +6,10 @@ const auditLogSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+      default: () =>
+        `AUD-${Date.now()}${Math.floor(Math.random() * 1000000)
+          .toString()
+          .padStart(6, '0')}`,
     },
     timestamp: {
       type: String,
@@ -73,6 +77,23 @@ auditLogSchema.index({ store_id: 1, createdAt: -1 });
 auditLogSchema.index({ action_type: 1 });
 auditLogSchema.index({ user: 1 });
 auditLogSchema.index({ sku: 1 });
+
+auditLogSchema.pre('validate', function normalizeAuditId(next) {
+  // Guard against callers accidentally passing string IDs into `_id`,
+  // which is an ObjectId field in Mongo and causes BSON cast failures.
+  if (typeof this._id === 'string' && this._id.trim()) {
+    if (!this.id) {
+      this.id = this._id;
+    }
+    this._id = undefined;
+  }
+  if (!this.id) {
+    this.id = `AUD-${Date.now()}${Math.floor(Math.random() * 1000000)
+      .toString()
+      .padStart(6, '0')}`;
+  }
+  next();
+});
 
 module.exports = mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);
 

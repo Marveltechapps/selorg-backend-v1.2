@@ -85,6 +85,23 @@ const notificationsController = {
     res.json({ success: true, data });
   }),
 
+  getCampaignById: asyncHandler(async (req, res) => {
+    const campaign = await NotificationCampaign.findById(req.params.id)
+      .populate('templateId', 'name')
+      .lean();
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+    const data = {
+      ...campaign,
+      id: campaign._id.toString(),
+      _id: undefined,
+      templateId: campaign.templateId?._id?.toString() || campaign.templateId?.toString() || campaign.templateId,
+      templateName: campaign.templateName || campaign.templateId?.name || 'N/A',
+    };
+    res.json({ success: true, data });
+  }),
+
   createCampaign: asyncHandler(async (req, res) => {
     const { name, templateId, templateName, segment, channels, scheduleType, scheduledAt } = req.body;
     const template = await NotificationTemplate.findById(templateId);
@@ -170,6 +187,15 @@ const notificationsController = {
 
   createAutomation: asyncHandler(async (req, res) => {
     const { name, trigger, templateId, delay, channels, conditions, status } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Rule name is required' });
+    }
+    if (!templateId) {
+      return res.status(400).json({ success: false, message: 'templateId is required' });
+    }
+    if (!Array.isArray(channels) || channels.length === 0) {
+      return res.status(400).json({ success: false, message: 'At least one channel is required' });
+    }
     const template = await NotificationTemplate.findById(templateId);
     if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
     const rule = await NotificationAutomation.create({

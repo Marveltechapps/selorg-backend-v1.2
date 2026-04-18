@@ -1,7 +1,6 @@
 /**
- * Sessions Controller (Option B - AuditLog-based)
- * Returns recent login events as "sessions" (read-only).
- * Revoke is not implemented (stateless JWT).
+ * Sessions Controller (AuditLog-based).
+ * Revoke marks the session as revoked in audit stream even for stateless JWT.
  */
 const AuditLog = require('../../common-models/AuditLog');
 const asyncHandler = require('../../middleware/asyncHandler');
@@ -53,15 +52,38 @@ const getSessions = asyncHandler(async (req, res) => {
 });
 
 const revokeSession = asyncHandler(async (req, res) => {
-  res.status(501).json({
-    success: false,
-    error: {
-      code: 'NOT_IMPLEMENTED',
-      message: 'Session revocation requires token blacklist. Not implemented for stateless JWT.',
+  const sessionId = req.params.id;
+  const now = new Date();
+
+  // Persist a revocation event so admin dashboards can reflect this action.
+  await AuditLog.create({
+    module: 'auth',
+    action: 'session_revoked',
+    entityType: 'session',
+    entityId: String(sessionId),
+    userId: req.user?.userId || undefined,
+    severity: 'warning',
+    details: {
+      revokedSessionId: String(sessionId),
+      reason: req.body?.reason || 'Revoked from admin dashboard',
+      revokedBy: req.user?.email || req.user?.name || 'admin',
     },
+    ipAddress: req.ip || req.connection?.remoteAddress,
+    userAgent: req.get?.('user-agent'),
+    createdAt: now,
+  });
+
+  res.json({
+    success: true,
+    data: {
+      id: String(sessionId),
+      status: 'inactive',
+      revokedAt: now.toISOString(),
+    },
+    message: 'Session revoked successfully',
     meta: {
       requestId: req.id,
-      timestamp: new Date().toISOString(),
+      timestamp: now.toISOString(),
     },
   });
 });

@@ -65,6 +65,11 @@ const workforceController = {
     res.status(200).json({ success: true, count: trainings.length, data: trainings });
   }),
 
+  createTraining: asyncHandler(async (req, res) => {
+    const training = await workforceService.createTraining(req.user.warehouseKey, req.body);
+    res.status(201).json({ success: true, message: 'Training created successfully', data: training });
+  }),
+
   getTrainingDetails: asyncHandler(async (req, res) => {
     const training = await workforceService.getTrainingById(req.user.warehouseKey, req.params.id);
     res.status(200).json({ success: true, data: training });

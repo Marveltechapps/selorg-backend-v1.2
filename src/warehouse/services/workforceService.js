@@ -282,6 +282,57 @@ const workforceService = {
     };
   },
 
+  createTraining: async (warehouseKey, data) => {
+    const title = String(data?.title || '').trim();
+    const date = data?.date ? new Date(data.date) : null;
+    if (!title) {
+      throw new ErrorResponse('Training title is required', 400);
+    }
+    if (!date || Number.isNaN(date.getTime())) {
+      throw new ErrorResponse('Valid training date is required', 400);
+    }
+
+    const count = await WarehouseTraining.countDocuments(warehouseKeyMatch(warehouseKey));
+    const id = data?.id || `TRN-${(count + 1).toString().padStart(3, '0')}`;
+    const trainingId = data?.trainingId || id;
+
+    const mapUiStatusToDbStatus = (status) => {
+      if (status === 'scheduled') return 'upcoming';
+      if (status === 'in-progress') return 'ongoing';
+      return status || 'upcoming';
+    };
+
+    const payload = {
+      id,
+      trainingId,
+      title,
+      type: data?.type || 'Mandatory',
+      date,
+      duration: data?.duration || '1h',
+      instructor: data?.instructor || 'TBD',
+      capacity: Number.isFinite(Number(data?.capacity)) ? Number(data.capacity) : 20,
+      status: mapUiStatusToDbStatus(data?.status),
+      enrolled: 0,
+      enrolledStaff: [],
+      description: data?.description || '',
+    };
+
+    const created = await WarehouseTraining.create({ ...payload, ...warehouseFieldsForCreate(warehouseKey) });
+
+    return {
+      id: created.id,
+      trainingId: created.trainingId,
+      title: created.title,
+      type: created.type,
+      date: created.date ? new Date(created.date).toISOString().split('T')[0] : '',
+      duration: created.duration || 'N/A',
+      instructor: created.instructor || 'Unassigned',
+      enrolled: created.enrolled || 0,
+      capacity: created.capacity || 20,
+      status: created.status === 'upcoming' ? 'scheduled' : (created.status === 'ongoing' ? 'in-progress' : created.status)
+    };
+  },
+
   listTrainings: async (warehouseKey) => {
     const trainings = await WarehouseTraining.find(warehouseKeyMatch(warehouseKey)).sort({ date: 1 }).lean();
     return trainings.map(t => ({

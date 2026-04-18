@@ -70,6 +70,15 @@ async function patchVendor(req, res, next) {
   }
 }
 
+async function deleteVendor(req, res, next) {
+  try {
+    const result = await vendorService.hardDeleteVendor(req.params.vendorId, req.body || {});
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function postAction(req, res, next) {
   try {
     const result = await vendorService.performAction(req.params.vendorId, req.body);
@@ -558,6 +567,7 @@ module.exports = {
   getVendor,
   putVendor,
   patchVendor,
+  deleteVendor,
   postAction,
   listVendorPurchaseOrders,
   listVendorQCChecks,

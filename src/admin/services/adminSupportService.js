@@ -360,7 +360,86 @@ async function getSLAMetrics() {
 }
 
 async function listLiveChats() {
-  return [];
+  const tickets = await AdminSupportTicket.find({
+    channel: 'chat',
+    status: { $in: ['open', 'in_progress'] },
+  })
+    .sort({ updatedAt: -1 })
+    .limit(100)
+    .lean();
+
+  if (!tickets.length) return [];
+
+  const ticketIds = tickets.map((t) => t._id);
+  const notes = await AdminSupportTicketNote.find({ ticketId: { $in: ticketIds } })
+    .sort({ createdAt: 1 })
+    .lean();
+  const notesByTicket = {};
+  notes.forEach((n) => {
+    const key = String(n.ticketId);
+    if (!notesByTicket[key]) notesByTicket[key] = [];
+    notesByTicket[key].push(n);
+  });
+
+  return tickets.map((ticket) => {
+    const ticketNotes = notesByTicket[String(ticket._id)] || [];
+    const startedAt = ticket.createdAt || new Date().toISOString();
+    return {
+      id: String(ticket._id),
+      customerId: ticket.customerId || '',
+      customerName: ticket.customerName || 'Customer',
+      agentId: ticket.assignedTo ? String(ticket.assignedTo) : undefined,
+      agentName: ticket.assignedToName || undefined,
+      status: ticket.status === 'in_progress' ? 'active' : 'waiting',
+      startedAt,
+      endedAt: ticket.status === 'closed' ? ticket.updatedAt : undefined,
+      waitTime: Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)),
+      messages: ticketNotes.map((n) => ({
+        id: String(n._id),
+        chatId: String(ticket._id),
+        senderId: n.authorId || '',
+        senderName: n.authorName || 'Unknown',
+        senderType: n.type === 'customer_reply' ? 'customer' : 'agent',
+        message: n.content || '',
+        timestamp: n.createdAt,
+        isRead: true,
+      })),
+    };
+  });
+}
+
+async function acceptLiveChat(ticketId, agentId, agentName) {
+  const updated = await assignTicket(ticketId, agentId, agentName);
+  if (!updated) return null;
+  return updated;
+}
+
+async function sendLiveChatMessage(ticketId, message, sender = {}) {
+  const msg = String(message || '').trim();
+  if (!msg) {
+    const err = new Error('message is required');
+    err.status = 400;
+    throw err;
+  }
+  const authorId = String(sender.senderId || sender.authorId || 'agent');
+  const authorName = String(sender.senderName || sender.authorName || 'Agent');
+  const senderType = String(sender.senderType || 'agent');
+  const type = senderType === 'customer' ? 'customer_reply' : 'agent_reply';
+
+  const note = await addTicketNote(ticketId, {
+    authorId,
+    authorName,
+    type,
+    content: msg,
+    isInternal: false,
+  });
+  await AdminSupportTicket.findByIdAndUpdate(ticketId, {
+    $set: {
+      status: 'in_progress',
+      updatedAt: new Date(),
+    },
+  });
+  return note;
 }
 
 async function listFAQs() {
@@ -419,6 +498,8 @@ module.exports = {
   listCannedResponses,
   getSLAMetrics,
   listLiveChats,
+  acceptLiveChat,
+  sendLiveChatMessage,
   listFAQs,
   createFAQ,
   updateFAQ,

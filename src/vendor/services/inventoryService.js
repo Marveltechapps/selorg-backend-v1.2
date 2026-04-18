@@ -240,6 +240,47 @@ async function getKPIs(vendorId, query) {
   };
 }
 
+async function bulkReorder(vendorId, payload = {}) {
+  const ids = Array.isArray(payload.stockoutIds) ? payload.stockoutIds : [];
+  const targets = ids.length
+    ? await InventoryItem.find(mergeHubFilter({ vendorId, _id: { $in: ids } })).lean()
+    : await InventoryItem.find(
+        mergeHubFilter({ vendorId, $or: [{ available: { $lte: 0 } }, { quantity: { $lte: 0 } }] })
+      ).lean();
+  return {
+    vendorId,
+    action: 'bulk_reorder',
+    total: targets.length,
+    reorderedIds: targets.map((x) => String(x._id)),
+    triggeredAt: new Date().toISOString(),
+  };
+}
+
+async function alertAllVendors(vendorId, payload = {}) {
+  const stockouts = await listStockouts(vendorId, {});
+  const Alert = require('../models/Alert');
+  const created = [];
+  for (const item of stockouts.items || []) {
+    const alert = await Alert.create({
+      ...hubFieldsForCreate(),
+      vendorId,
+      title: `Stockout alert: ${item.product}`,
+      message: String(payload.message || 'Stockout detected, please replenish inventory immediately.'),
+      severity: 'high',
+      status: 'open',
+      alertId: `ALT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    });
+    created.push(String(alert._id));
+  }
+  return {
+    vendorId,
+    action: 'alert_all_vendors',
+    totalAlertsCreated: created.length,
+    alertIds: created,
+    triggeredAt: new Date().toISOString(),
+  };
+}
+
 module.exports = { 
   getInventorySummary, 
   listStock, 
@@ -249,5 +290,7 @@ module.exports = {
   listStockouts,
   listAgingInventory,
   getKPIs,
+  bulkReorder,
+  alertAllVendors,
 };
 

@@ -19,6 +19,17 @@ const upload = multer({
   },
 });
 
+function estimateCsvRows(buffer) {
+  try {
+    const text = buffer.toString('utf8');
+    const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+    if (lines.length <= 1) return 0;
+    return lines.length - 1;
+  } catch (_) {
+    return 0;
+  }
+}
+
 // ---- Upload History ----
 const bulkUpload = async (req, res) => {
   try {
@@ -29,9 +40,10 @@ const bulkUpload = async (req, res) => {
 
     const uploadId = generateId('UPL');
     const now = new Date().toISOString();
-    const totalRows = Math.floor(Math.random() * 100) + 10;
-    const processedRows = totalRows - (Math.random() > 0.8 ? 1 : 0);
-    const failedRows = totalRows - processedRows;
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const totalRows = ext === '.csv' ? estimateCsvRows(req.file.buffer) : 0;
+    const processedRows = totalRows;
+    const failedRows = 0;
 
     await BulkUpload.create({
       upload_id: uploadId,

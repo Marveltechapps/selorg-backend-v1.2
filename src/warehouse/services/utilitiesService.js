@@ -1,6 +1,8 @@
 const AccessLog = require('../models/AccessLog');
 const InventoryItem = require('../models/InventoryItem');
 const StorageLocation = require('../models/StorageLocation');
+const Picklist = require('../models/Picklist');
+const WarehouseEquipment = require('../models/WarehouseEquipment');
 const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
 /**
@@ -75,7 +77,25 @@ const utilitiesService = {
 
   getZones: async (warehouseKey) => {
     const zones = await StorageLocation.distinct('zone', warehouseKeyMatch(warehouseKey));
-    return (zones || []).filter(z => z != null && String(z).trim()).sort();
+    const normalizedPrimaryZones = (zones || [])
+      .filter(z => z != null && String(z).trim())
+      .map(z => String(z).trim());
+
+    if (normalizedPrimaryZones.length > 0) {
+      return [...new Set(normalizedPrimaryZones)].sort();
+    }
+
+    // Fallback for warehouses that do not yet have storage locations seeded.
+    const [picklistZones, equipmentZones] = await Promise.all([
+      Picklist.distinct('zone', warehouseKeyMatch(warehouseKey)),
+      WarehouseEquipment.distinct('zone', warehouseKeyMatch(warehouseKey)),
+    ]);
+
+    const fallbackZones = [...(picklistZones || []), ...(equipmentZones || [])]
+      .filter(z => z != null && String(z).trim())
+      .map(z => String(z).trim());
+
+    return [...new Set(fallbackZones)].sort();
   },
 
   getAccessLogs: async (warehouseKey, filters = {}) => {

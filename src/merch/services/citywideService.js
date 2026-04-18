@@ -450,9 +450,24 @@ async function getDispatchConfig(cityId = DEFAULT_CITY_ID) {
  * Update dispatch config (pause/resume)
  */
 async function updateDispatchConfig(cityId, update, userId) {
+  const current = await OpsDispatchConfig.findOne({ cityId }).lean();
+  const mergedConfig = {
+    ...(current?.config || {}),
+    ...(update?.config || {}),
+  };
+  const nextStatus = update?.status || current?.status || 'running';
+  const setUpdate = {
+    ...(current || {}),
+    ...update,
+    config: mergedConfig,
+    status: nextStatus,
+    updatedBy: userId,
+    updatedAt: new Date(),
+    lastRestart: nextStatus === 'running' ? new Date() : current?.lastRestart,
+  };
   await OpsDispatchConfig.findOneAndUpdate(
     { cityId },
-    { ...update, updatedBy: userId, updatedAt: new Date(), lastRestart: update.status === 'running' ? new Date() : undefined },
+    { $set: setUpdate },
     { new: true, upsert: true }
   );
   return getDispatchConfig(cityId);

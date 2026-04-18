@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { Order } = require('../models/Order');
+const { WorldlinePayment } = require('../models/WorldlinePayment');
 const { CustomerAddress } = require('../models/CustomerAddress');
 const { Cart } = require('../models/Cart');
 const { Product } = require('../models/Product');
@@ -93,10 +94,12 @@ async function listOrders(userId, page = 1, limit = 20, status) {
   const q = { userId: new mongoose.Types.ObjectId(userId) };
   if (status) q.status = status;
   const skip = (Math.max(1, page) - 1) * limit;
-  const [orders, total] = await Promise.all([
+  const [ordersSnapshot, total] = await Promise.all([
     Order.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Order.countDocuments(q),
   ]);
+  await reconcileWorldlinePaymentsForOrderList(userId, ordersSnapshot);
+  const orders = await Order.find(q).sort({ createdAt: -1 }).skip(skip).limit(limit).lean();
   return {
     data: orders.map((o) => formatOrderForApp({ ...o, _id: o._id })),
     pagination: {
@@ -109,7 +112,10 @@ async function listOrders(userId, page = 1, limit = 20, status) {
 }
 
 async function getOrderById(userId, orderId) {
-  const order = await Order.findOne({ _id: orderId, userId }).lean();
+  let order = await Order.findOne({ _id: orderId, userId }).lean();
+  if (!order) return null;
+  await reconcileOrderWithLatestWorldlinePayment(userId, order);
+  order = await Order.findOne({ _id: orderId, userId }).lean();
   return order ? formatOrderForApp({ ...order, _id: order._id }) : null;
 }
 
@@ -440,6 +446,71 @@ async function voidUnpaidOnlineOrder(userId, orderId, reason = '') {
   return { ok: true };
 }
 
+/**
+ * Align `customer_orders` with verified state from `worldline_payments` (latest attempt).
+ * Mirrors success/failure handling in worldlinePaymentsService.completePayment so list/detail/active views stay consistent.
+ */
+async function reconcileOrderWithLatestWorldlinePayment(userId, orderLean) {
+  if (!orderLean?._id) return;
+  const methodType = orderLean.paymentMethod?.methodType;
+  if (!isGatewayPrepayment(methodType)) return;
+
+  const orderId = String(orderLean._id);
+  const latest = await WorldlinePayment.findOne({
+    orderId: new mongoose.Types.ObjectId(orderId),
+    standaloneCheckout: { $ne: true },
+  })
+    .sort({ attemptNo: -1 })
+    .lean();
+
+  if (!latest) return;
+
+  const order = await Order.findOne({
+    _id: orderId,
+    userId: new mongoose.Types.ObjectId(userId),
+  });
+  if (!order) return;
+
+  if (!isGatewayPrepayment(order.paymentMethod?.methodType)) return;
+
+  const verified = latest.verificationError === 'none';
+
+  if (latest.status === 'success' && verified) {
+    if (order.paymentStatus !== 'paid') {
+      order.paymentStatus = 'paid';
+      await order.save();
+    }
+    try {
+      await releaseOrderFulfillment(orderId);
+    } catch (e) {
+      console.warn('[order-service] releaseOrderFulfillment reconcile failed', { orderId, message: e?.message });
+    }
+    return;
+  }
+
+  if ((latest.status === 'failed' || latest.status === 'cancelled') && verified) {
+    if (order.fulfillmentReleased !== true) {
+      try {
+        await voidUnpaidOnlineOrder(userId, orderId, latest.statusMessage || 'Payment failed');
+      } catch (e) {
+        console.warn('[order-service] voidUnpaidOnlineOrder reconcile failed', { orderId, message: e?.message });
+      }
+    }
+  }
+}
+
+async function reconcileWorldlinePaymentsForOrderList(userId, ordersLean) {
+  if (!ordersLean?.length) return;
+  for (const o of ordersLean) {
+    if (!isGatewayPrepayment(o.paymentMethod?.methodType)) continue;
+    try {
+      await reconcileOrderWithLatestWorldlinePayment(userId, o);
+    } catch (err) {
+      console.warn('[order-service] worldline reconcile failed', { orderId: String(o._id), message: err?.message });
+    }
+  }
+}
+
 async function createOrder(userId, body) {
   const { items, addressId, paymentMethodId, paymentMethodType, couponCode, deliveryTip } = body || {};
   if (!items || !Array.isArray(items) || items.length === 0) {
@@ -750,6 +821,10 @@ async function getActiveOrder(userId) {
       .lean();
   }
 
+  if (!order) return null;
+
+  await reconcileOrderWithLatestWorldlinePayment(userId, order);
+  order = await Order.findOne({ _id: order._id, userId: new mongoose.Types.ObjectId(userId) }).lean();
   if (!order) return null;
 
   const formatted = formatOrderForApp({ ...order, _id: order._id });

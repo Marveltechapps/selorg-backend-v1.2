@@ -11,6 +11,16 @@ const SampleTest = require('../models/SampleTest');
 const ChecklistItem = require('../models/ChecklistItem');
 const { generateId } = require('../../utils/helpers');
 
+const safeCreateAuditLog = async (payload) => {
+  try {
+    await AuditLog.create(payload);
+  } catch (error) {
+    // Do not fail user actions if audit logging has schema/casting issues.
+    // eslint-disable-next-line no-console
+    console.warn('QC audit log write failed:', error.message);
+  }
+};
+
 const getQCSummary = async (req, res) => {
   try {
     const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'PROD-001';
@@ -150,7 +160,7 @@ const createQCInspection = async (req, res) => {
     }
 
     // Log Action History
-    await AuditLog.create({
+    await safeCreateAuditLog({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'create',
@@ -207,7 +217,7 @@ const createTemperatureLog = async (req, res) => {
     await log.save();
 
     // Log Action History
-    await AuditLog.create({
+    await safeCreateAuditLog({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'create',
@@ -253,7 +263,7 @@ const toggleComplianceCheck = async (req, res) => {
     if (!check) return res.status(404).json({ success: false, error: 'Check not found' });
 
     // Log Action History
-    await AuditLog.create({
+    await safeCreateAuditLog({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'update',

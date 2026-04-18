@@ -37,6 +37,16 @@ const upload = multer({
   },
 });
 
+const safeCreateAuditLog = async (payload) => {
+  try {
+    await AuditLog.create(payload);
+  } catch (error) {
+    // Avoid breaking bulk upload success flow when audit write fails.
+    // eslint-disable-next-line no-console
+    console.warn('Production bulk-upload audit log write failed:', error.message);
+  }
+};
+
 // Alerts
 router.get('/alerts', getProductionAlerts);
 router.put('/alerts/:alertId/status', updateProductionAlertStatus);
@@ -91,7 +101,7 @@ router.post('/utilities/bulk-upload', upload.single('file'), async (req, res) =>
       completed_at: now,
     });
 
-    await AuditLog.create({
+    await safeCreateAuditLog({
       id: generateId('AUD'),
       timestamp: now,
       action_type: 'update',

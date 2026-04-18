@@ -342,12 +342,18 @@ const getProductionReports = async (req, res) => {
     // Materials: use current inventory + safetyStock as a deterministic "allocated" proxy.
     const materials = await RawMaterial.find({ store_id: factoryId }).lean();
     const topMaterials = materials.slice(0, 5);
-    const materialData = topMaterials.map((m) => ({
-      material: m.name,
-      allocated: Number(m.safetyStock) || 0,
-      consumed: Number(m.currentStock) || 0,
-      waste: Math.max(0, (Number(m.safetyStock) || 0) - (Number(m.currentStock) || 0)),
-    }));
+    const materialData = topMaterials.map((m) => {
+      const safetyStock = Number(m.safetyStock) || 0;
+      const currentStock = Number(m.currentStock) || 0;
+      const allocated = Math.max(safetyStock, currentStock, 1);
+      const consumed = Math.min(currentStock, allocated);
+      return {
+        material: m.name,
+        allocated,
+        consumed,
+        waste: Math.max(0, allocated - consumed),
+      };
+    });
 
     // QC Quality by day
     const labelDateIsos = labels.map((l) => l.dateIso);
@@ -427,14 +433,14 @@ const getProductionReports = async (req, res) => {
     // Defect type distribution: failures grouped by check/product name, normalized to 0-100.
     const qcFailures = await QCInspection.find({
       store_id: factoryId,
-      status: 'failed',
       date: { $gte: startStr, $lte: endStr },
+      defects_found: { $gt: 0 },
     }).lean();
 
     const defectsByType = new Map();
     let totalDefectsAll = 0;
     for (const f of qcFailures) {
-      const typeName = String(f.check_type || f.product_name || 'Unknown');
+      const typeName = String(f.check_type || f.product_name || 'Uncategorized');
       const d = Number(f.defects_found) || 0;
       totalDefectsAll += d;
       defectsByType.set(typeName, (defectsByType.get(typeName) || 0) + d);

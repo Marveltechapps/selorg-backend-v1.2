@@ -78,15 +78,20 @@ const warehouseService = {
       .sort({ createdAt: -1 })
       .limit(20)
       .lean();
-    // Map to match frontend PicklistFlow interface
+    // Normalize mixed legacy records to a stable frontend contract.
     return picklists.map(p => ({
-      id: p.id,
-      orderId: p.orderId,
-      customer: p.customer,
-      items: p.items,
-      priority: p.priority === 'high' ? 'urgent' : p.priority === 'medium' ? 'high' : 'standard',
-      status: p.status === 'queued' ? 'pending' : p.status,
-      zone: p.zone,
+      id: p.id || p.orderId || p.order_id || String(p._id || ''),
+      orderId: p.orderId || p.order_id || p.id || String(p._id || 'N/A'),
+      customer: p.customer || p.customerName || p.customer_name || 'Unknown destination',
+      items: Number.isFinite(Number(p.items)) ? Number(p.items) : (Array.isArray(p.items) ? p.items.length : 0),
+      priority:
+        p.priority === 'high' || p.priority === 'urgent'
+          ? 'urgent'
+          : p.priority === 'medium'
+            ? 'high'
+            : 'standard',
+      status: p.status === 'queued' ? 'pending' : (p.status || 'pending'),
+      zone: p.zone || p.locationZone || 'General',
       updatedAt: p.updatedAt
     }));
   },
