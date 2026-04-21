@@ -11,6 +11,20 @@ const { getTransactionStatusPostTxn } = require('../customer-backend/controllers
 const router = express.Router();
 
 /**
+ * `processGatewayReturn` returns `{ data }` without `error` even when the gateway declined/cancelled.
+ * Only a captured transaction (internal status success + verified) should yield API `success: true`.
+ */
+function isStandaloneCaptureSuccess(data) {
+  if (!data || typeof data !== 'object') return false;
+  const status = String(data.status || '').toLowerCase().trim();
+  if (status !== 'success') return false;
+  if (data.hashOk === false) return false;
+  const verr = data.verificationError;
+  if (typeof verr === 'string' && verr !== '' && verr !== 'none') return false;
+  return true;
+}
+
+/**
  * POST /api/payment/initiate
  * Auth: Bearer JWT (same as customer app — `customer-backend/middleware/auth.js`, secret CUSTOMER_JWT_SECRET or JWT_SECRET).
  * Body: { orderId, amount, customerName?, customerEmail, customerPhone, platform?, algo?, paymentMode? }
@@ -125,6 +139,18 @@ router.post('/callback', auth, async (req, res) => {
         success: false,
         message: result.error,
         ...(result.data ? { data: result.data } : {}),
+      });
+    }
+    if (!isStandaloneCaptureSuccess(result.data)) {
+      const data = result.data;
+      const msg =
+        data && typeof data.statusMessage === 'string' && String(data.statusMessage).trim()
+          ? String(data.statusMessage).trim()
+          : 'Payment was not completed';
+      return res.status(400).json({
+        success: false,
+        message: msg,
+        ...(data ? { data } : {}),
       });
     }
     return res.status(200).json({ success: true, data: result.data });
