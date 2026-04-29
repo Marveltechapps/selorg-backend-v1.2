@@ -50,6 +50,14 @@ const userSchema = new mongoose.Schema(
     upiPayoutRejectionReason: { type: String, default: '' },
     /** When using shared DB: HHD User _id (users collection) for orders-to-order-complete flow. No ref – other app’s collection. */
     hhdUserId: { type: mongoose.Schema.Types.ObjectId, default: null },
+
+    /**
+     * Admin assignments (Picker Operations)
+     * These fields are used by the admin dashboard picker management flows.
+     */
+    agencyId: { type: mongoose.Schema.Types.ObjectId, ref: 'PickerAgency', default: null, index: true },
+    storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', default: null, index: true },
+    shiftSlotId: { type: mongoose.Schema.Types.ObjectId, ref: 'PickerShiftSlot', default: null, index: true },
     contractInfo: {
       legalName: { type: String },
       contractStartDate: { type: Date },

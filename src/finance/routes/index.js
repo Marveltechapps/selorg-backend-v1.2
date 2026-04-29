@@ -125,6 +125,7 @@ router.patch('/picker-withdrawals/:id', ...financeAuth, pickerWithdrawalsControl
 router.get('/picker-withdrawals/:pickerId/earnings-breakdown', ...financeAuth, financeController.getPickerEarningsBreakdown);
 router.get('/picker-withdrawals/:pickerId/wallet-balance', ...financeAuth, financeController.getPickerWalletBalance);
 router.get('/picker-transactions', ...financeAuth, financeController.listAllPickerTransactions);
+router.get('/picker-attendance', ...financeAuth, financeController.getPickerAttendance);
 
 // Refunds routes
 router.get('/refunds/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), refundsController.getRefundsSummary);

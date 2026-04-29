@@ -96,7 +96,7 @@ async function createSession(pickerId) {
   }
 
   const webhookBaseUrl = (process.env.DIDIT_WEBHOOK_BASE_URL || '').replace(/\/$/, '');
-  const callbackUrl = `${webhookBaseUrl}/didit/webhook`;
+  const callbackUrl = `${webhookBaseUrl}/api/v1/picker/didit/webhook`;
 
   const token = await getAccessToken();
   const res = await fetch(`${DIDIT_BASE_URL}/v1/session/`, {

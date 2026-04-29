@@ -3,6 +3,7 @@ const { asyncHandler } = require('../../core/middleware');
 const PickerUser = require('../../picker/models/user.model');
 const Transaction = require('../../picker/models/transaction.model');
 const walletService = require('../../picker/services/wallet.service');
+const pickerOpsService = require('../../admin/services/pickerOps.service');
 
 class FinanceController {
   getTaxRules = asyncHandler(async (req, res) => {
@@ -206,6 +207,19 @@ class FinanceController {
       limit: limitNum,
       totalPages: Math.max(1, Math.ceil(total / limitNum)),
     });
+  });
+
+  /**
+   * GET /finance/picker-attendance?month=YYYY-MM&agency=<agencyId>
+   * Read-only finance view for attendance summary and CSV export.
+   */
+  getPickerAttendance = asyncHandler(async (req, res) => {
+    const { month, agency } = req.query;
+    const rows = await pickerOpsService.getAttendanceByMonth({
+      month: String(month || ''),
+      agencyId: agency && String(agency).trim() ? String(agency).trim() : null,
+    });
+    res.json({ success: true, data: rows });
   });
 }
 
