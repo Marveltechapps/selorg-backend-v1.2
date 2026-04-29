@@ -1,9 +1,18 @@
 // Load env vars FIRST before any other requires
 const path = require('path');
+const fs = require('fs');
 const dotenv = require('dotenv');
 
-// Load .env from Backend root so it works when run from Backend/ or Backend/src/
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+// Load dotenv from Backend root so it works when run from Backend/ or Backend/src/.
+// In production, prefer `.env.production` if present (or use DOTENV_PATH to override).
+const rootDir = path.resolve(__dirname, '..');
+const defaultEnvPath = path.resolve(rootDir, '.env');
+const prodEnvPath = path.resolve(rootDir, '.env.production');
+const overrideEnvPath = process.env.DOTENV_PATH ? path.resolve(process.env.DOTENV_PATH) : null;
+const isProd = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+const selectedEnvPath =
+  overrideEnvPath || (isProd && fs.existsSync(prodEnvPath) ? prodEnvPath : defaultEnvPath);
+dotenv.config({ path: selectedEnvPath });
 
 const express = require('express');
 const cors = require('cors');

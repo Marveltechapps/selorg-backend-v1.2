@@ -39,6 +39,7 @@ const configRoutes = require('./routes/config.routes');
 const legalRoutes = require('./routes/legalRoutes');
 const adminLegalRoutes = require('./routes/admin/legalAdminRoutes');
 const accountRoutes = require('./routes/account.routes');
+const diditRoutes = require('./routes/didit.routes');
 
 const app = express();
 
@@ -113,6 +114,7 @@ app.use('/issues', issueRoutes);
 app.use('/config', configRoutes);
 app.use('/legal', legalRoutes);
 app.use('/admin/legal', adminLegalRoutes);
+app.use('/didit', diditRoutes);
 
 app.use(errorHandler);
 
