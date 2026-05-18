@@ -40,39 +40,55 @@ function getAllowedOrigins() {
 function isLocalOrigin(origin) {
   return (
     typeof origin === 'string' &&
-    /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(origin.trim())
+    /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?\/?$/i.test(origin.trim())
   );
 }
 
 function isLanOrigin(origin) {
   return (
     typeof origin === 'string' &&
-    /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/i.test(
+    /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?\/?$/i.test(
       origin.trim()
     )
   );
 }
 
 function isExpoOrMobileOrigin(origin) {
-  return typeof origin === 'string' && origin.trim().startsWith('exp://');
+  return typeof origin === 'string' && (origin.trim().startsWith('exp://') || origin.trim().startsWith('http://localhost'));
 }
 
 /** Production dashboard/API hosts on selorg.com (https only). */
 function isSelorgHttpsOrigin(origin) {
   if (typeof origin !== 'string') return false;
   const o = origin.trim();
-  return /^https:\/\/([a-z0-9-]+\.)*selorg\.com$/i.test(o);
+  // Allow optional port (e.g. :443) and optional trailing slash
+  return /^https:\/\/([a-z0-9-]+\.)*selorg\.com(:\d+)?\/?$/i.test(o);
 }
 
 function isAllowedOrigin(origin) {
+  // Allow requests with no origin (like mobile apps or curl)
   if (!origin || origin === 'null' || origin === '') return true;
-  const normalized = origin.trim();
+  
+  const normalized = origin.trim().toLowerCase();
+  
+  // 1. Check local/LAN origins
   if (isLocalOrigin(normalized) || isLanOrigin(normalized) || isExpoOrMobileOrigin(normalized)) {
     return true;
   }
-  if (isSelorgHttpsOrigin(normalized)) return true;
-  if (process.env.NODE_ENV !== 'production') return true;
-  return getAllowedOrigins().includes(normalized);
+  
+  // 2. Check production selorg.com domains (including subdomains and optional ports)
+  if (isSelorgHttpsOrigin(normalized)) {
+    return true;
+  }
+  
+  // 3. In non-production, be more permissive
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+  
+  // 4. Check against explicitly allowed origins from env or defaults
+  const allowed = getAllowedOrigins().map(o => o.trim().toLowerCase());
+  return allowed.includes(normalized);
 }
 
 function createCorsOriginHandler(onBlocked) {

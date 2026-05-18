@@ -41,6 +41,20 @@ function isCustomerApiPath(req) {
 }
 
 function applyCors(app) {
+  // 1. Manual header fallback (runs for all requests including those that might skip or fail in the cors middleware)
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && isAllowedOrigin(origin)) {
+      // Set these immediately; the cors() middleware below will also try to set them.
+      // res.setHeader is smart enough to not duplicate if we check or if it's the same value.
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Vary', 'Origin');
+    }
+    next();
+  });
+
+  // 2. Standard CORS middleware for Express routes
   app.use((req, res, next) => {
     if (isCustomerApiPath(req)) {
       return customerCors(req, res, next);
