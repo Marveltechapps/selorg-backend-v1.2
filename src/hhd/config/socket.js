@@ -2,7 +2,6 @@ const { Server: SocketIOServer } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const pubsub = require('../../utils/pubsub');
 const logger = require('../../core/utils/logger');
-const { createCorsOriginHandler } = require('../../config/corsOrigins');
 
 let io;
 let unsubscribe = null;
@@ -20,9 +19,15 @@ function initSocketIO(httpServer) {
   io = new SocketIOServer(httpServer, {
     path: '/hhd-socket.io',
     cors: {
-      origin: createCorsOriginHandler((origin, allowedOrigins) => {
-        logger.warn('Socket.IO CORS blocked origin', { origin, allowedOrigins });
-      }),
+      origin: (origin, callback) => {
+        const { isAllowedOrigin, getAllowedOrigins } = require('../../config/corsOrigins');
+        if (isAllowedOrigin(origin)) {
+          callback(null, origin || true);
+        } else {
+          logger.warn('Socket.IO CORS blocked origin', { origin, allowedOrigins: getAllowedOrigins() });
+          callback(null, false);
+        }
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },
