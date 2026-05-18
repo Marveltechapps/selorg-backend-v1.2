@@ -7,41 +7,53 @@
 
 const Redis = require('ioredis');
 const { logger } = require('../utils/logger');
+const {
+  isRedisConfigured,
+  getRedisUrl,
+  getRedisHostOptions,
+  createIoRedisOptions,
+  attachRedisEventHandlers,
+} = require('../../utils/redisConnection');
 
-let pub;
+let pub = null;
 
 function getPublisher() {
-  if (!pub) {
-    const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-    pub = new Redis(redisUrl);
-    pub.on('error', (err) => {
-      logger.error(`HHD socket Redis publisher error: ${err.message}`);
-    });
-  }
+  if (!isRedisConfigured()) return null;
+  if (pub) return pub;
+
+  const url = getRedisUrl();
+  const opts = createIoRedisOptions();
+  pub = url
+    ? new Redis(url, opts)
+    : new Redis({ ...getRedisHostOptions(), ...opts });
+  attachRedisEventHandlers(pub, 'hhd-socket-redis');
   return pub;
 }
 
-function emitOrderUpdate(orderId, data) {
-  getPublisher().publish(
+function publishOrSkip(roomType, target, event, data) {
+  const publisher = getPublisher();
+  if (!publisher) {
+    logger.debug(`HHD socket publish skipped (Redis not configured): ${event}`);
+    return;
+  }
+  publisher.publish(
     'ws:hhd',
-    JSON.stringify({ roomType: 'order', target: orderId, event: 'order:updated', data })
+    JSON.stringify({ roomType, target, event, data }),
   );
+}
+
+function emitOrderUpdate(orderId, data) {
+  publishOrSkip('order', orderId, 'order:updated', data);
   logger.debug(`Order update published for order: ${orderId}`);
 }
 
 function emitUserNotification(userId, data) {
-  getPublisher().publish(
-    'ws:hhd',
-    JSON.stringify({ roomType: 'user', target: userId, event: 'notification', data })
-  );
+  publishOrSkip('user', userId, 'notification', data);
   logger.debug(`Notification published for user: ${userId}`);
 }
 
 function emitNewOrder(userId, orderData) {
-  getPublisher().publish(
-    'ws:hhd',
-    JSON.stringify({ roomType: 'user', target: userId, event: 'order:received', data: orderData })
-  );
+  publishOrSkip('user', userId, 'order:received', orderData);
   logger.debug(`New order notification published for user: ${userId}`);
 }
 

@@ -4,45 +4,49 @@
  *
  * CRITICAL FIX P0.2: Prevents duplicate payment processing
  * - Requires Idempotency-Key header for payment operations
- * - Caches responses for 24 hours using Redis
+ * - Caches responses for 24 hours using Redis when configured
  * - Returns 400 if header missing
  * - Enables safe request retries
  */
 
 const Redis = require('ioredis');
 const logger = require('../core/utils/logger');
+const {
+  isRedisConfigured,
+  getRedisUrl,
+  getRedisHostOptions,
+  createIoRedisOptions,
+  attachRedisEventHandlers,
+} = require('../utils/redisConnection');
 
-// Initialize Redis client (optional, fallback to in-memory)
 let redisClient = null;
+let redisInitAttempted = false;
 const inMemoryCache = new Map();
 
-try {
-  redisClient = new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
-    retryStrategy: (times) => {
-      const delay = Math.min(times * 50, 2000);
-      return delay;
-    }
-  });
+function getIdempotencyRedisClient() {
+  if (!isRedisConfigured()) return null;
+  if (redisClient) return redisClient;
+  if (redisInitAttempted) return null;
+  redisInitAttempted = true;
 
-  redisClient.on('error', (err) => logger.error('Redis error:', err));
-  redisClient.on('connect', () => logger.info('Redis connected for idempotency'));
-} catch (error) {
-  logger.warn('Redis unavailable, falling back to in-memory cache:', error.message);
+  try {
+    const url = getRedisUrl();
+    const opts = createIoRedisOptions();
+    redisClient = url
+      ? new Redis(url, opts)
+      : new Redis({ ...getRedisHostOptions(), ...opts });
+    attachRedisEventHandlers(redisClient, 'idempotency-redis');
+  } catch (error) {
+    logger.warn('Redis unavailable for idempotency, using in-memory cache:', error.message);
+    redisClient = null;
+  }
+  return redisClient;
 }
 
 /**
  * Idempotency Middleware
- * ✅ FIX P0.2: Prevents duplicate payment processing
- * - Checks for Idempotency-Key header
- * - Prevents duplicate payment processing
- * - Caches responses for 24 hours
- * - Returns 400 if header missing
  */
 const idempotencyMiddleware = async (req, res, next) => {
-  // Only apply to payment/refund endpoints
   const isPaymentEndpoint = req.path.includes('/payment') || req.path.includes('/refund') || req.path.includes('/checkout');
 
   if (!isPaymentEndpoint) {
@@ -51,83 +55,67 @@ const idempotencyMiddleware = async (req, res, next) => {
 
   const idempotencyKey = req.headers['idempotency-key'];
 
-  // ✅ FIX: Require idempotency key for all payment operations
   if (!idempotencyKey) {
     logger.warn(`[Idempotency] Missing header for endpoint: ${req.path}`);
     return res.status(400).json({
       error: 'Idempotency-Key header is required for payment operations',
       code: 'MISSING_IDEMPOTENCY_KEY',
-      documentation: 'Include header: Idempotency-Key: <unique-uuid>'
+      documentation: 'Include header: Idempotency-Key: <unique-uuid>',
     });
   }
 
-  // Validate idempotency key format (UUID-like, at least 20 chars)
   if (!/^[\w-]{20,}$/.test(idempotencyKey)) {
     return res.status(400).json({
       error: 'Invalid Idempotency-Key format. Must be at least 20 alphanumeric characters.',
-      code: 'INVALID_KEY_FORMAT'
+      code: 'INVALID_KEY_FORMAT',
     });
   }
 
-  // Create cache key: idempotency:key:userId:endpoint
   const userId = req.user?.userId || req.user?._id || 'anonymous';
   const cacheKey = `idempotency:${idempotencyKey}:${userId}:${req.path}`;
+  const redis = getIdempotencyRedisClient();
 
   try {
-    // Check if request was already processed
     let cachedResponse = null;
 
-    if (redisClient) {
-      // Try Redis first
+    if (redis) {
       try {
-        cachedResponse = await redisClient.get(cacheKey);
+        cachedResponse = await redis.get(cacheKey);
       } catch (err) {
-        logger.error('[Idempotency] Redis get error:', err);
+        logger.warn('[Idempotency] Redis get error:', err.message);
         cachedResponse = inMemoryCache.get(cacheKey);
       }
     } else {
-      // Fallback to in-memory cache
       cachedResponse = inMemoryCache.get(cacheKey);
     }
 
     if (cachedResponse) {
       const response = typeof cachedResponse === 'string' ? JSON.parse(cachedResponse) : cachedResponse;
       logger.info(`[Idempotency] Returning cached response for key: ${idempotencyKey}`);
-
-      // Add header to indicate this is cached
       res.setHeader('X-Idempotency-Cache', 'hit');
       return res.status(response.statusCode).json(response.body);
     }
 
-    // Store original res.json to intercept response
     const originalJson = res.json.bind(res);
 
-    res.json = function(data) {
-      // Only cache successful responses (2xx)
+    res.json = function (data) {
       if (res.statusCode >= 200 && res.statusCode < 300) {
         const cacheData = {
           statusCode: res.statusCode,
-          body: data
+          body: data,
         };
-
         const cacheDataStr = JSON.stringify(cacheData);
 
-        if (redisClient) {
-          // Cache in Redis for 24 hours
-          redisClient.setex(cacheKey, 86400, cacheDataStr).catch((err) => {
-            logger.error(`[Idempotency] Failed to cache response:`, err);
-          }).then(() => {
-            logger.info(`[Idempotency] Cached response for key: ${idempotencyKey}`);
+        if (redis) {
+          redis.setex(cacheKey, 86400, cacheDataStr).catch((err) => {
+            logger.warn('[Idempotency] Failed to cache response:', err.message);
           });
         } else {
-          // Fallback to in-memory cache
           inMemoryCache.set(cacheKey, cacheData);
-          // Clean up after 24 hours
           setTimeout(() => inMemoryCache.delete(cacheKey), 86400000);
         }
       }
 
-      // Add header to indicate this is first occurrence
       res.setHeader('X-Idempotency-Cache', 'miss');
       return originalJson(data);
     };
@@ -135,21 +123,17 @@ const idempotencyMiddleware = async (req, res, next) => {
     next();
   } catch (error) {
     logger.error('[Idempotency] Middleware error:', error);
-    // Don't block payment if cache fails, but log it
     logger.warn('[Idempotency] Cache check failed, proceeding without protection');
     next();
   }
 };
 
-/**
- * Check if payment already exists (database-level idempotency)
- */
 const checkPaymentIdempotency = async (orderId, idempotencyKey, PaymentModel) => {
   try {
     const existingPayment = await PaymentModel.findOne({
       order_id: orderId,
       idempotency_key: idempotencyKey,
-      status: { $in: ['success', 'pending'] }
+      status: { $in: ['success', 'pending'] },
     });
 
     if (existingPayment) {
@@ -157,7 +141,7 @@ const checkPaymentIdempotency = async (orderId, idempotencyKey, PaymentModel) =>
       return {
         exists: true,
         paymentId: existingPayment._id,
-        status: existingPayment.status
+        status: existingPayment.status,
       };
     }
 
@@ -168,15 +152,10 @@ const checkPaymentIdempotency = async (orderId, idempotencyKey, PaymentModel) =>
   }
 };
 
-/**
- * Verify Idempotency Key Format
- */
-const verifyIdempotencyKey = (key) => {
-  return /^[\w-]{20,}$/.test(key);
-};
+const verifyIdempotencyKey = (key) => /^[\w-]{20,}$/.test(key);
 
 module.exports = {
   idempotencyMiddleware,
   checkPaymentIdempotency,
-  verifyIdempotencyKey
+  verifyIdempotencyKey,
 };

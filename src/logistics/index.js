@@ -9,6 +9,7 @@ require('./models/logisticsProviderConfig.model');
 require('./models/logisticsMetric.model');
 
 const { getConfig } = require('./config/env');
+const { isRedisConfigured } = require('../utils/redisConnection');
 const rabbitmq = require('./config/rabbitmq');
 const redis = require('./config/redis');
 const logger = require('./utils/logger');
@@ -32,8 +33,9 @@ async function bootstrap() {
     logger.warn('RABBITMQ_URL not set; event-driven flows are disabled until configured');
   }
 
-  // Lazy-connect Redis client (no failure if Redis is down at boot)
-  redis.getClient();
+  if (isRedisConfigured()) {
+    redis.getClient();
+  }
 
   logger.info('module bootstrap complete');
 }

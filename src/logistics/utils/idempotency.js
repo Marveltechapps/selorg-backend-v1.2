@@ -13,6 +13,7 @@ async function claimEventOnce(eventId, ttlSec = DEFAULT_TTL_SEC) {
   if (!eventId) return true;
   try {
     const client = redis.getClient();
+    if (!client) return true;
     if (client.status === 'wait' || client.status === 'end') {
       await client.connect().catch(() => {});
     }

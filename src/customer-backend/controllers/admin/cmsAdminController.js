@@ -519,7 +519,7 @@ module.exports = {
           durationMs: Date.now() - startedAt,
           counts: counts || {},
           warnings: Array.isArray(warnings) ? warnings : [],
-          errors: Array.isArray(errors) ? errors : [],
+          importErrors: Array.isArray(errors) ? errors : [],
         });
       } catch (e) {
         console.error('ContentHubImportRun.create failed', e);
@@ -545,7 +545,7 @@ module.exports = {
           durationMs: Date.now() - startedAt,
           counts: {},
           warnings: [],
-          errors: [{ message: err.message }],
+          importErrors: [{ message: err.message }],
         });
       } catch (e) {
         console.error('ContentHubImportRun.create failed', e);
@@ -565,7 +565,11 @@ module.exports = {
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean();
-      return res.status(200).json({ success: true, data: items });
+      const data = items.map((item) => ({
+        ...item,
+        errors: item.importErrors || [],
+      }));
+      return res.status(200).json({ success: true, data });
     } catch (err) {
       console.error('listContentHubImportRuns error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error' });

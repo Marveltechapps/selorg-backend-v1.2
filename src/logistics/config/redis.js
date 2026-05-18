@@ -3,14 +3,22 @@
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
 const { getConfig } = require('./env');
+const {
+  isRedisConfigured,
+  getRedisUrl,
+  createIoRedisOptions,
+  attachRedisEventHandlers,
+  logRedisSkippedOnce,
+} = require('../../utils/redisConnection');
 
 let client = null;
 
 function buildClient() {
   const cfg = getConfig();
-  const baseOpts = { lazyConnect: true, maxRetriesPerRequest: 3, enableOfflineQueue: false };
-  if (cfg.REDIS_URL) {
-    return new Redis(cfg.REDIS_URL, baseOpts);
+  const baseOpts = createIoRedisOptions();
+  const url = cfg.REDIS_URL || getRedisUrl();
+  if (url) {
+    return new Redis(url, baseOpts);
   }
   return new Redis({
     host: cfg.REDIS_HOST,
@@ -21,24 +29,27 @@ function buildClient() {
 }
 
 function getClient() {
+  if (!isRedisConfigured()) {
+    logRedisSkippedOnce();
+    return null;
+  }
   if (client) return client;
   client = buildClient();
-  client.on('error', (err) => logger.error('redis error', { error: err.message }));
-  client.on('connect', () => logger.info('redis connected'));
-  client.on('close', () => logger.warn('redis connection closed'));
+  attachRedisEventHandlers(client, 'logistics-redis');
   return client;
 }
 
 async function ping() {
   try {
     const c = getClient();
+    if (!c) return false;
     if (c.status === 'wait' || c.status === 'end') {
       await c.connect();
     }
     const reply = await c.ping();
     return reply === 'PONG';
   } catch (err) {
-    logger.error('redis ping failed', { error: err.message });
+    logger.warn('redis ping failed', { error: err.message });
     return false;
   }
 }

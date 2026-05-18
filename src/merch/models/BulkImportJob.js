@@ -25,12 +25,12 @@ const BulkImportJobSchema = new Schema({
     failedRows: { type: Number, default: 0 },
     percentage: { type: Number, default: 0 }
   },
-  errors: [{
+  rowErrors: [{
     rowNumber: { type: Number },
     field: { type: String },
     value: Schema.Types.Mixed,
     errorMessage: { type: String },
-    severity: { type: String, enum: ['error', 'warning'] } // error: blocks import, warning: logged but continues
+    severity: { type: String, enum: ['error', 'warning'] },
   }],
   mappingConfig: {
     columnMapping: Schema.Types.Mixed, // Maps CSV columns to model fields
@@ -66,7 +66,13 @@ const BulkImportJobSchema = new Schema({
   }
 }, {
   timestamps: true,
-  collection: 'bulk_import_jobs'
+  collection: 'bulk_import_jobs',
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
+});
+
+BulkImportJobSchema.virtual('errors').get(function errorsAlias() {
+  return this.rowErrors;
 });
 
 // Indexes
@@ -93,7 +99,7 @@ BulkImportJobSchema.methods.updateProgress = function(processedRows, successRows
 };
 
 BulkImportJobSchema.methods.addError = function(rowNumber, field, value, errorMessage, severity = 'error') {
-  this.errors.push({
+  this.rowErrors.push({
     rowNumber,
     field,
     value,

@@ -26,7 +26,7 @@ const contentHubImportRunSchema = new mongoose.Schema(
 
     counts: { type: mongoose.Schema.Types.Mixed, default: {} },
     warnings: { type: [sheetIssueSchema], default: [] },
-    errors: { type: [sheetIssueSchema], default: [] },
+    importErrors: { type: [sheetIssueSchema], default: [] },
   },
   { timestamps: true }
 );

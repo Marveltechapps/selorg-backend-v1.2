@@ -444,7 +444,7 @@ class CatalogService {
         success: true,
         status: job.status,
         progress: job.progress,
-        errorCount: job.errors.length,
+        errorCount: job.rowErrors.length,
         job
       };
     } catch (error) {
