@@ -9,6 +9,7 @@
  */
 
 const ResponseFormatter = require('../utils/ResponseFormatter');
+const { applyCorsHeadersIfAllowed } = require('../../middleware/cors.middleware');
 
 class AppError extends Error {
   constructor(message, statusCode = 500, details = null) {
@@ -19,6 +20,7 @@ class AppError extends Error {
 }
 
 const errorHandlerMiddleware = (err, req, res, next) => {
+  applyCorsHeadersIfAllowed(req, res);
   const isDevelopment = process.env.NODE_ENV === 'development';
 
   // Default error

@@ -18,7 +18,6 @@ dotenv.config({ path: selectedEnvPath });
 require('./instrument');
 
 const express = require('express');
-const cors = require('cors');
 const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
 const hpp = require('hpp');
@@ -36,7 +35,7 @@ const {
 const { requestLoggerMiddleware } = require('./core/middleware/requestLogger.middleware');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const validateEnvironment = require('./config/validateEnv');
-const { createCorsOriginHandler } = require('./config/corsOrigins');
+const { applyCors } = require('./middleware/cors.middleware');
 const logger = require('./core/utils/logger');
 const { registerEventListeners } = require('./events/registerListeners');
 const { apiEnvelopeMiddleware } = require('./core/middleware/apiEnvelope.middleware');
@@ -145,6 +144,10 @@ if (process.env.NODE_ENV !== 'test') {
 
 const app = express();
 
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 if (process.env.NODE_ENV !== 'test') {
   try {
     registerEventListeners();
@@ -171,6 +174,9 @@ app.get('/health', healthCheck);
 app.get('/healthz', healthCheck); // Alias for rider/k8s compatibility
 app.get('/health/ready', readinessCheck);
 app.get('/health/db', databaseHealthCheck);
+
+// CORS before helmet/body parsers so OPTIONS preflight succeeds
+applyCors(app);
 
 // Security middleware - Helmet (sets various HTTP headers)
 // CSP disabled for API server - API responses are JSON, not HTML; mobile apps don't apply CSP
@@ -210,33 +216,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Phase A: normalize legacy JSON responses to standard envelope (skips `success` already set)
 app.use(apiEnvelopeMiddleware);
-
-const strictCors = cors({
-  origin: createCorsOriginHandler((origin, allowedOrigins) => {
-    logger.warn('CORS blocked origin', { origin, allowedOrigins });
-  }),
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
-  exposedHeaders: ['X-Request-ID'],
-  optionsSuccessStatus: 204,
-  preflightContinue: false,
-});
-
-// Customer app: allow all origins (mobile apps often send no Origin or LAN IP)
-const customerCors = cors({
-  origin: true, // Reflect request origin or allow no-origin
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Site-Id'],
-});
-
-app.use((req, res, next) => {
-  const isCustomerPath = req.path.startsWith('/api/v1/customer');
-  const isPaymentApiPath = req.path.startsWith('/api/payment');
-  if (isCustomerPath || isPaymentApiPath) return customerCors(req, res, next);
-  return strictCors(req, res, next);
-});
 
 // General API rate limit (per IP) for all /api/v1 routes
 app.use('/api/v1', apiLimiter);

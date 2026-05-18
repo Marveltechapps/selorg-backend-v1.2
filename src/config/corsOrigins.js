@@ -1,3 +1,5 @@
+const logger = require('../core/utils/logger');
+
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:5000',
@@ -14,6 +16,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:8081',
   'http://127.0.0.1:19006',
   'https://dashboard.selorg.com',
+  'https://www.dashboard.selorg.com',
 ];
 
 function parseOrigins(value) {
@@ -54,17 +57,29 @@ function isExpoOrMobileOrigin(origin) {
   return typeof origin === 'string' && origin.trim().startsWith('exp://');
 }
 
+/** Production dashboard/API hosts on selorg.com (https only). */
+function isSelorgHttpsOrigin(origin) {
+  if (typeof origin !== 'string') return false;
+  const o = origin.trim();
+  return /^https:\/\/([a-z0-9-]+\.)*selorg\.com$/i.test(o);
+}
+
 function isAllowedOrigin(origin) {
   if (!origin || origin === 'null' || origin === '') return true;
-  if (isLocalOrigin(origin) || isLanOrigin(origin) || isExpoOrMobileOrigin(origin)) return true;
+  const normalized = origin.trim();
+  if (isLocalOrigin(normalized) || isLanOrigin(normalized) || isExpoOrMobileOrigin(normalized)) {
+    return true;
+  }
+  if (isSelorgHttpsOrigin(normalized)) return true;
   if (process.env.NODE_ENV !== 'production') return true;
-  return getAllowedOrigins().includes(origin);
+  return getAllowedOrigins().includes(normalized);
 }
 
 function createCorsOriginHandler(onBlocked) {
   return (origin, callback) => {
     if (isAllowedOrigin(origin)) {
-      callback(null, true);
+      // Reflect exact origin (required when credentials: true)
+      callback(null, origin || true);
       return;
     }
 
@@ -72,7 +87,11 @@ function createCorsOriginHandler(onBlocked) {
       onBlocked(origin, getAllowedOrigins());
     }
 
-    callback(new Error('Not allowed by CORS'));
+    logger.warn('CORS origin rejected', {
+      origin,
+      nodeEnv: process.env.NODE_ENV || 'development',
+    });
+    callback(null, false);
   };
 }
 
@@ -80,5 +99,6 @@ module.exports = {
   DEFAULT_ALLOWED_ORIGINS,
   getAllowedOrigins,
   isAllowedOrigin,
+  isSelorgHttpsOrigin,
   createCorsOriginHandler,
 };
