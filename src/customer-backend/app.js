@@ -37,6 +37,9 @@ const notificationsRoutes = require('./routes/notificationsRoutes');
 const refundsRoutes = require('./routes/refundsRoutes');
 const walletRoutes = require('./routes/walletRoutes');
 const supportRoutes = require('./routes/supportRoutes');
+const storeRoutes = require('./routes/storeRoutes');
+const deliveryRoutes = require('./routes/deliveryRoutes');
+const adminMerchRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
@@ -68,6 +71,7 @@ app.use('/admin/legal', adminLegalRoutes);
 app.use('/admin/cancellation-policies', adminCancellationPolicyRoutes);
 app.use('/admin/notifications', adminNotificationRoutes);
 app.use('/admin/faq', adminFaqRoutes);
+app.use('/admin/merch', adminMerchRoutes);
 app.use('/user', userRoutes);
 app.use('/legal', legalRoutes);
 app.use('/faq', faqRoutes);
@@ -80,6 +84,8 @@ app.use('/notifications', notificationsRoutes);
 app.use('/refunds', refundsRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/support', supportRoutes);
+app.use('/store', storeRoutes);
+app.use('/delivery', deliveryRoutes);
 
 const { getPublicConfig } = require('./controllers/admin/appConfigAdminController');
 app.get('/app-config', getPublicConfig);

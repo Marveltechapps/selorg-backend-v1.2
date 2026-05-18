@@ -5,6 +5,7 @@ const {
   cancelOrder,
   getActiveOrder,
   updateCustomerOrderStatus,
+  reorderItems,
 } = require('../services/orderService');
 
 async function list(req, res) {
@@ -55,6 +56,18 @@ async function create(req, res) {
     if (order.error) {
       res.status(400).json({ success: false, message: order.error });
       return;
+    }
+    try {
+      const { eventBus } = require('../../events/eventBus');
+      const { EVENT_TYPES } = require('../../events/eventTypes');
+      const orderId = order?._id?.toString?.() || order?.id || String(order?._id || '');
+      eventBus.emit(EVENT_TYPES.ORDER_CREATED, {
+        orderId,
+        userId: userId?.toString?.() || String(userId),
+        status: order?.status,
+      });
+    } catch (emitErr) {
+      console.error('order.created emit skipped:', emitErr?.message);
     }
     res.status(201).json({ success: true, data: order });
   } catch (err) {
@@ -235,4 +248,18 @@ async function updateStatus(req, res) {
   }
 }
 
-module.exports = { list, getDetail, create, cancel, status, rate, verifyOtp, canCancel, active, updateStatus };
+async function reorder(req, res) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    const { orderId } = req.params;
+    const result = await reorderItems(userId, orderId);
+    if (result.error) return res.status(400).json({ success: false, message: result.error });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    console.error('reorder error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
+module.exports = { list, getDetail, create, cancel, status, rate, verifyOtp, canCancel, active, updateStatus, reorder };

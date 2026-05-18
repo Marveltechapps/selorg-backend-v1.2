@@ -1,5 +1,6 @@
 const { Product } = require('../models/Product');
 const { HomeConfig } = require('../models/HomeConfig');
+const { StoreInventory } = require('../models/StoreInventory');
 const {
   mapEmbeddedVariants,
   enrichProductsWithVariants,
@@ -160,6 +161,7 @@ async function searchProducts(req, res) {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const category = String(req.query.category || '').trim();
+    const storeId = String(req.query.storeId || '').trim();
     if (query.length < 2) {
       return res.status(400).json({ success: false, message: 'q must be at least 2 characters' });
     }
@@ -172,6 +174,15 @@ async function searchProducts(req, res) {
       classification: 'Style',
     };
     if (category) searchFilter.categoryId = category;
+
+    if (storeId) {
+      const availableItems = await StoreInventory.find(
+        { storeId, isAvailable: true, quantity: { $gt: 0 } }
+      ).select('productId').lean();
+      const availableIds = availableItems.map((i) => i.productId);
+      searchFilter._id = { $in: availableIds };
+    }
+
     const [rawProducts, total] = await Promise.all([
       Product.find(searchFilter, { score: { $meta: 'textScore' } })
         .sort({ score: { $meta: 'textScore' }, sortOrder: 1, order: 1 })

@@ -38,6 +38,7 @@ const contentItemSchema = new mongoose.Schema(
 const bannerSchema = new mongoose.Schema(
   {
     siteId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerSite', default: null },
+    bannerId: { type: String, default: '' },
     /** Banner type (placement + semantics). Drives hero vs in-feed lane without changing app layout sizes. */
     slot: {
       type: String,
@@ -49,7 +50,9 @@ const bannerSchema = new mongoose.Schema(
     /** When false, home feed banner is display-only (no tap / detail). */
     isNavigable: { type: Boolean, default: true },
     title: String,
-    imageUrl: { type: String, required: true },
+    imageUrl: { type: String, default: '' },
+    bannerType: { type: String, default: '' },
+    sectionCode: { type: String, default: '' },
     /** Optional wide/display URL (customer app prefers over imageUrl for hero/mid banners). */
     bannerImageUrl: { type: String, default: '' },
     thumbnailUrl: { type: String, default: '' },
@@ -90,6 +93,7 @@ const bannerSchema = new mongoose.Schema(
 );
 bannerSchema.index({ slot: 1, isActive: 1, order: 1 });
 bannerSchema.index({ slot: 1, categoryId: 1, isActive: 1, order: 1 });
+bannerSchema.index({ bannerId: 1 }, { sparse: true });
 
 bannerSchema.pre('validate', function validateBannerDates(next) {
   if (this.startDate && this.endDate && this.endDate <= this.startDate) {

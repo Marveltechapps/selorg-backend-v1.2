@@ -22,6 +22,7 @@ const scheduleSchema = new mongoose.Schema(
 const collectionSchema = new mongoose.Schema(
   {
     siteId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerSite', default: null },
+    collectionId: { type: String, default: '' },
     name: { type: String, required: true },
     slug: { type: String, required: true },
     type: { type: String, enum: ['manual', 'rule-based'], default: 'manual' },
@@ -36,6 +37,7 @@ const collectionSchema = new mongoose.Schema(
 );
 
 collectionSchema.index({ siteId: 1, slug: 1 }, { unique: true });
+collectionSchema.index({ collectionId: 1 }, { sparse: true });
 collectionSchema.index({ isActive: 1 });
 collectionSchema.index({ type: 1 });
 

@@ -359,5 +359,7 @@ module.exports = {
   getWorldlineStatus,
   worldlineReturn,
   getTransactionStatusPostTxn,
+  getPaymentRetryStatus: require('./paymentRetryController').getPaymentRetryStatus,
+  retryPayment: require('./paymentRetryController').retryPayment,
 };
 

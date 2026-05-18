@@ -3,11 +3,27 @@ const { Collection } = require('../../models/Collection');
 const { Media } = require('../../models/Media');
 const { Banner } = require('../../models/Banner');
 const { Product } = require('../../models/Product');
+const { HomeSection } = require('../../models/HomeSection');
+const { Button } = require('../../models/Button');
 const mongoose = require('mongoose');
 const { ContentHubImportRun } = require('../../models/ContentHubImportRun');
 const { importSkuMaster } = require('../../services/import/skuMasterImport.service');
 const { importCmsPages } = require('../../services/import/cmsPagesImport.service');
 const { importContentHubMaster } = require('../../services/import/contentHubMasterImport.service');
+const cacheService = require('../../../core/services/cache.service');
+
+/**
+ * Invalidate customer-facing response caches after a mastersheet write so the
+ * customer app reflects the new layout/categories/banners immediately instead
+ * of waiting up to 60s for the TTL to expire.
+ */
+async function invalidateCustomerCachesSafely() {
+  try {
+    await cacheService.delPattern('cache:*');
+  } catch (err) {
+    console.error('cache invalidation after upload failed', err);
+  }
+}
 
 async function listPages(req, res) {
   try {
@@ -214,6 +230,214 @@ async function getOverview(req, res) {
   }
 }
 
+// --- Banner CRUD ---
+// NOTE: Banner model uses `title` field; frontend sends `name`.
+// We map `name` ↔ `title` for compatibility.
+
+function bannerToResponse(banner) {
+  if (!banner) return banner;
+  const obj = typeof banner.toObject === 'function' ? banner.toObject() : banner;
+  return { ...obj, name: obj.title || obj.name || '' };
+}
+
+async function listBanners(req, res) {
+  try {
+    const banners = await Banner.find().sort({ order: 1, updatedAt: -1 }).lean();
+    res.json(banners.map(bannerToResponse));
+  } catch (err) {
+    console.error('listBanners error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function createBanner(req, res) {
+  try {
+    const { name, title, bannerId, imageUrl, bannerType, sectionCode, isActive, order } = req.body;
+    const bannerTitle = (title || name || '').trim();
+    if (!bannerTitle) return res.status(400).json({ message: 'Banner name is required' });
+    const banner = await Banner.create({
+      title: bannerTitle,
+      bannerId: bannerId?.trim() || '',
+      imageUrl: imageUrl?.trim() || '',
+      bannerType: bannerType?.trim() || '',
+      sectionCode: sectionCode?.trim() || '',
+      isActive: isActive ?? true,
+      order: order ?? 0,
+    });
+    res.status(201).json(bannerToResponse(banner.toObject()));
+  } catch (err) {
+    console.error('createBanner error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function updateBanner(req, res) {
+  try {
+    const updates = { ...req.body };
+    delete updates._id;
+    // Map `name` → `title` if provided
+    if (updates.name !== undefined) {
+      if (!updates.name?.trim()) {
+        return res.status(400).json({ message: 'Banner name cannot be empty' });
+      }
+      updates.title = updates.name.trim();
+      delete updates.name;
+    }
+    const banner = await Banner.findByIdAndUpdate(req.params.id, updates, { new: true }).lean();
+    if (!banner) return res.status(404).json({ message: 'Banner not found' });
+    res.json(bannerToResponse(banner));
+  } catch (err) {
+    console.error('updateBanner error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function deleteBanner(req, res) {
+  try {
+    const banner = await Banner.findByIdAndDelete(req.params.id);
+    if (!banner) return res.status(404).json({ message: 'Banner not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('deleteBanner error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+// --- HomeSection CRUD ---
+// NOTE: HomeSection model uses `title` field; frontend sends `label`.
+// We map `label` ↔ `title` for compatibility.
+
+function homeSectionToResponse(section) {
+  if (!section) return section;
+  const obj = typeof section.toObject === 'function' ? section.toObject() : section;
+  return { ...obj, label: obj.title || obj.label || '' };
+}
+
+async function listHomeSections(req, res) {
+  try {
+    const sections = await HomeSection.find().sort({ order: 1, updatedAt: -1 }).lean();
+    res.json(sections.map(homeSectionToResponse));
+  } catch (err) {
+    console.error('listHomeSections error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function createHomeSection(req, res) {
+  try {
+    const { sectionKey, sectionType, label, title, bannerIds, categoryIds, videoUrl, order, isActive } = req.body;
+    if (!sectionKey?.trim()) return res.status(400).json({ message: 'Section key is required' });
+    const section = await HomeSection.create({
+      sectionKey: sectionKey.trim(),
+      sectionType: sectionType || 'products',
+      title: (title || label || '').trim(),
+      bannerIds: bannerIds || [],
+      categoryIds: categoryIds || [],
+      videoUrl: videoUrl?.trim() || '',
+      order: order ?? 0,
+      isActive: isActive ?? true,
+    });
+    res.status(201).json(homeSectionToResponse(section.toObject()));
+  } catch (err) {
+    console.error('createHomeSection error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function updateHomeSection(req, res) {
+  try {
+    const updates = { ...req.body };
+    delete updates._id;
+    if (updates.sectionKey !== undefined && !updates.sectionKey?.trim()) {
+      return res.status(400).json({ message: 'Section key cannot be empty' });
+    }
+    // Map `label` → `title` if provided
+    if (updates.label !== undefined) {
+      updates.title = (updates.label || '').trim();
+      delete updates.label;
+    }
+    const section = await HomeSection.findByIdAndUpdate(req.params.id, updates, { new: true }).lean();
+    if (!section) return res.status(404).json({ message: 'HomeSection not found' });
+    res.json(homeSectionToResponse(section));
+  } catch (err) {
+    console.error('updateHomeSection error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function deleteHomeSection(req, res) {
+  try {
+    const section = await HomeSection.findByIdAndDelete(req.params.id);
+    if (!section) return res.status(404).json({ message: 'HomeSection not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('deleteHomeSection error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+// --- Button CRUD ---
+
+async function listButtons(req, res) {
+  try {
+    const buttons = await Button.find().sort({ order: 1, updatedAt: -1 }).lean();
+    res.json(buttons);
+  } catch (err) {
+    console.error('listButtons error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function createButton(req, res) {
+  try {
+    const { name, buttonId, label, type, action, icon, imageUrl, sectionCode, isActive, order } = req.body;
+    if (!name?.trim()) return res.status(400).json({ message: 'Button name is required' });
+    const button = await Button.create({
+      name: name.trim(),
+      buttonId: buttonId?.trim() || '',
+      label: label?.trim() || '',
+      type: type || 'action',
+      action: action?.trim() || '',
+      icon: icon?.trim() || '',
+      imageUrl: imageUrl?.trim() || '',
+      sectionCode: sectionCode?.trim() || '',
+      isActive: isActive ?? true,
+      order: order ?? 0,
+    });
+    res.status(201).json(button);
+  } catch (err) {
+    console.error('createButton error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function updateButton(req, res) {
+  try {
+    const updates = { ...req.body };
+    delete updates._id;
+    if (updates.name !== undefined && !updates.name?.trim()) {
+      return res.status(400).json({ message: 'Button name cannot be empty' });
+    }
+    const button = await Button.findByIdAndUpdate(req.params.id, updates, { new: true }).lean();
+    if (!button) return res.status(404).json({ message: 'Button not found' });
+    res.json(button);
+  } catch (err) {
+    console.error('updateButton error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
+async function deleteButton(req, res) {
+  try {
+    const button = await Button.findByIdAndDelete(req.params.id);
+    if (!button) return res.status(404).json({ message: 'Button not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('deleteButton error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+}
+
 module.exports = {
   getOverview,
   listPages,
@@ -228,6 +452,18 @@ module.exports = {
   listMedia,
   createMedia,
   deleteMedia,
+  listBanners,
+  createBanner,
+  updateBanner,
+  deleteBanner,
+  listHomeSections,
+  createHomeSection,
+  updateHomeSection,
+  deleteHomeSection,
+  listButtons,
+  createButton,
+  updateButton,
+  deleteButton,
   /**
    * Excel upload handlers are mounted with multer middleware in routes.
    * These functions should never throw 500 for sheet-level parse errors.
@@ -240,6 +476,7 @@ module.exports = {
     const overwrite = overwriteRaw === undefined ? false : String(overwriteRaw) === 'true';
     try {
       const { counts, errors, warnings, success } = await importSkuMaster(req.file.buffer, { overwrite });
+      if (success) await invalidateCustomerCachesSafely();
       return res.status(200).json({
         success,
         counts,
@@ -267,6 +504,7 @@ module.exports = {
       : null;
     try {
       const { counts, errors, warnings, success } = await importContentHubMaster(req.file.buffer, { overwrite });
+      if (success) await invalidateCustomerCachesSafely();
       try {
         await ContentHubImportRun.create({
           source: 'content-hub',

@@ -2,6 +2,10 @@ const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 const { ErrorResponse } = require('../utils/ErrorResponse');
 const tokenBlocklist = require('../services/tokenBlocklist');
+const {
+  getDefaultPermissionsForRole,
+  userHasAllPermissions,
+} = require('../../config/permissions');
 
 /**
  * Validates JWT secret on startup
@@ -98,13 +102,19 @@ const authenticateToken = (req, res, next) => {
         (assignedStores[0] && String(assignedStores[0]).trim()) ||
         '';
 
+      let permissions = Array.isArray(decoded.permissions) ? [...decoded.permissions] : [];
+      const roleForDefaults = decoded.role || decoded.roleId;
+      if (permissions.length === 0) {
+        permissions = getDefaultPermissionsForRole(roleForDefaults);
+      }
+
       req.user = {
         userId: decoded.userId || decoded.id || '',
         email: decoded.email,
         roleId: decoded.roleId || decoded.role,
         role: decoded.role,
         name: decoded.name || '',
-        permissions: decoded.permissions || [],
+        permissions,
         assignedStores,
         primaryStoreId,
         warehouseKey,
@@ -232,9 +242,7 @@ const requirePermission = (...requiredPermissions) => {
     }
 
     const userPermissions = req.user.permissions || [];
-    const hasPermission = requiredPermissions.every(perm => 
-      userPermissions.includes(perm) || userPermissions.includes('*')
-    );
+    const hasPermission = userHasAllPermissions(userPermissions, requiredPermissions);
 
     if (!hasPermission) {
       logger.warn('Permission denied', {

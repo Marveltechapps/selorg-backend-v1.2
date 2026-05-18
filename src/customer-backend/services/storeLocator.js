@@ -1,4 +1,5 @@
 const Store = require('../../merch/models/Store');
+const { getDeliveryRuntimeConfig } = require('../../platform/config/deliveryRuntimeConfig');
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -22,6 +23,8 @@ async function findNearestDarkstore(latitude, longitude) {
     return null;
   }
 
+  const { defaultRadiusKm } = await getDeliveryRuntimeConfig();
+
   const darkstores = await Store.find(
     { type: 'dark_store', status: 'active' },
     { code: 1, latitude: 1, longitude: 1, deliveryRadius: 1 }
@@ -41,7 +44,7 @@ async function findNearestDarkstore(latitude, longitude) {
       absoluteNearest = ds.code;
     }
 
-    const radius = ds.deliveryRadius || 5;
+    const radius = ds.deliveryRadius != null ? ds.deliveryRadius : defaultRadiusKm;
     if (dist <= radius && dist < bestInRadiusDist) {
       bestInRadiusDist = dist;
       bestInRadius = ds.code;

@@ -13,7 +13,7 @@ const { getPricingStats } = require('../services/pricingStatsService');
 
 let Category;
 try {
-  Category = require('../../customer-backend/models/Category');
+  ({ Category } = require('../../customer-backend/models/Category'));
 } catch (e) {
   Category = null;
 }

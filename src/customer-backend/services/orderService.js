@@ -395,13 +395,6 @@ async function releaseOrderFulfillment(orderId) {
 
   await runPostOrderIntegrations(userId, response, 'paid', methodType, order.totalBill);
 
-  try {
-    const { sendOrderStatusNotification } = require('./notificationService');
-    await sendOrderStatusNotification(order, 'pending');
-  } catch (err) {
-    console.warn('Order placed notification failed (non-blocking):', err.message);
-  }
-
   await Order.updateOne({ _id: order._id, fulfillmentReleased: false }, { $set: { fulfillmentReleased: true } });
 
   return { ok: true };
@@ -704,13 +697,6 @@ async function createOrder(userId, body) {
 
   if (!deferFulfillment) {
     try {
-      const { sendOrderStatusNotification } = require('./notificationService');
-      await sendOrderStatusNotification(order, 'pending');
-    } catch (err) {
-      console.warn('Order placed notification failed (non-blocking):', err.message);
-    }
-
-    try {
       await runPostOrderIntegrations(userId, response, paymentStatus, resolvedMethodType, totalBill);
     } catch (err) {
       console.warn('Post-order integrations failed (non-blocking):', err.message);
@@ -899,6 +885,42 @@ async function getActiveOrder(userId) {
   return formatted;
 }
 
+async function reorderItems(userId, orderId) {
+  const order = await Order.findOne({ _id: orderId, userId }).lean();
+  if (!order) return { error: 'Order not found' };
+  if (!order.items || order.items.length === 0) return { error: 'No items to reorder' };
+
+  const { Cart } = require('../models/Cart');
+  let cart = await Cart.findOne({ userId });
+  if (!cart) {
+    cart = new Cart({ userId, items: [] });
+  }
+
+  for (const item of order.items) {
+    const existing = cart.items.find(
+      (ci) => String(ci.productId) === String(item.productId) && ci.variantId === (item.variantId || '')
+    );
+    if (existing) {
+      existing.quantity += item.quantity;
+    } else {
+      cart.items.push({
+        productId: item.productId,
+        variantId: item.variantId || '',
+        variantSize: item.variantSize || '',
+        quantity: item.quantity,
+        price: item.price,
+        originalPrice: item.originalPrice || item.price,
+        gstRate: item.gstRate || 0,
+        productName: item.productName || '',
+        image: item.image || '',
+      });
+    }
+  }
+
+  await cart.save();
+  return { success: true, itemsAdded: order.items.length };
+}
+
 module.exports = {
   listOrders,
   getOrderById,
@@ -908,4 +930,5 @@ module.exports = {
   updateCustomerOrderStatus,
   releaseOrderFulfillment,
   voidUnpaidOnlineOrder,
+  reorderItems,
 };

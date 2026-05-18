@@ -11,6 +11,7 @@ const {
   canCancel,
   active,
   updateStatus,
+  reorder,
 } = require('../controllers/ordersController');
 const { invoice } = require('../controllers/invoiceController');
 const { authenticateToken } = require('../../core/middleware');
@@ -27,5 +28,6 @@ router.get('/:id/status', auth, status);
 router.post('/:id/rate', auth, rate);
 router.post('/:id/verify-otp', auth, verifyOtp);
 router.put('/:id/update-status', authenticateToken, updateStatus);
+router.post('/:id/reorder', auth, reorder);
 
 module.exports = router;

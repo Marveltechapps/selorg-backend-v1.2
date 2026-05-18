@@ -505,16 +505,21 @@ const sendCreateUserOtp = async (req, res, next) => {
         requestId: req.id,
       });
 
-      // Avoid leaving stale OTP rows when SMTP delivery fails.
-      await UserEmailVerification.deleteOne({ _id: verification._id }).catch(() => {});
+      if (process.env.NODE_ENV === 'production') {
+        await UserEmailVerification.deleteOne({ _id: verification._id }).catch(() => {});
+        return res.status(502).json({
+          success: false,
+          error: {
+            code: 'EMAIL_DELIVERY_FAILED',
+            message: 'Unable to send OTP email. Please verify SMTP settings and try again.',
+          },
+          meta: { requestId: req.id, timestamp: new Date().toISOString() },
+        });
+      }
 
-      return res.status(502).json({
-        success: false,
-        error: {
-          code: 'EMAIL_DELIVERY_FAILED',
-          message: 'Unable to send OTP email. Please verify SMTP settings and try again.',
-        },
-        meta: { requestId: req.id, timestamp: new Date().toISOString() },
+      logger.warn('SMTP unavailable in non-production; OTP verification kept for devOtp flow', {
+        email: normalizedEmail,
+        requestId: req.id,
       });
     }
 
@@ -522,12 +527,17 @@ const sendCreateUserOtp = async (req, res, next) => {
       email: normalizedEmail,
     });
 
+    const payload = {
+      verificationRequestId: verification._id.toString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    if (process.env.NODE_ENV !== 'production') {
+      payload.devOtp = otp;
+    }
+
     return res.status(200).json({
       success: true,
-      data: {
-        verificationRequestId: verification._id.toString(),
-        expiresAt: expiresAt.toISOString(),
-      },
+      data: payload,
       meta: { requestId: req.id, timestamp: new Date().toISOString() },
     });
   } catch (error) {

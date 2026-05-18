@@ -1,10 +1,15 @@
 const ExcelJS = require('exceljs');
-const mongoose = require('mongoose');
 
 const { Category } = require('../../models/Category');
 const { Product } = require('../../models/Product');
-const { Banner } = require('../../models/Banner');
 const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
+const { applyBannerDetails } = require('./bannerDetailsImport.service');
+const { applyHomePageContent } = require('./homePageContentImport.service');
+
+/** Apply Mongo session when present; when null/undefined, run without session (non-transactional). */
+function bindSession(query, sess) {
+  return sess == null ? query : query.session(sess);
+}
 
 function slugify(str) {
   if (!str || typeof str !== 'string') return 'category';
@@ -26,14 +31,6 @@ function normalizeHeaderKey(raw) {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .replace(/[()]/g, '');
-}
-
-function parseBoolean(raw, fallback = false) {
-  const t = String(raw ?? '').trim().toUpperCase();
-  if (!t) return fallback;
-  if (t === 'TRUE' || t === 'T' || t === 'Y' || t === 'YES' || t === '1') return true;
-  if (t === 'FALSE' || t === 'F' || t === 'N' || t === 'NO' || t === '0') return false;
-  return fallback;
 }
 
 function parsePrice(val) {
@@ -102,7 +99,7 @@ async function ensureUniqueCategorySlug(baseSlug, excludeId = null, session = nu
     const q = { slug: candidate };
     if (excludeId) q._id = { $ne: excludeId };
     // eslint-disable-next-line no-await-in-loop
-    const exists = await Category.findOne(q).session(session).lean();
+    const exists = await bindSession(Category.findOne(q), session).lean();
     if (!exists) return candidate;
     candidate = `${base}-${++n}`;
   }
@@ -153,19 +150,6 @@ function splitDescription(val) {
   return out;
 }
 
-function parseDateCell(cellValue) {
-  if (!cellValue) return undefined;
-  if (cellValue instanceof Date) return cellValue;
-  // ExcelJS often returns string YYYY-MM-DD for text cells
-  const s = String(cellValue).trim();
-  if (!s) return undefined;
-  // Try YYYY-MM-DD first
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? undefined : d;
-}
-
 function parseHierarchyCode(code) {
   const raw = String(code || '').trim();
   const m = /^([A-Za-z])(\d+)$/.exec(raw);
@@ -203,6 +187,66 @@ function normalizeForMatch(str) {
   return s.trim().replace(/([a-z])\1+/g, '$1');
 }
 
+// ─── Top-level category name → token set (used by Display Image name fallback) ───
+// Handles plural/singular ("Millet" vs "Millets"), filler words like "category",
+// and well-known typos ("Diary" vs "Dairy") that appear between the sheet tabs.
+const CATEGORY_NAME_ALIASES = new Map([['diary', 'dairy']]);
+const CATEGORY_NAME_STOPWORDS = new Set(['category', 'categories', 'the', 'a', 'an']);
+
+function stemCategoryToken(t) {
+  if (!t) return '';
+  if (CATEGORY_NAME_ALIASES.has(t)) return CATEGORY_NAME_ALIASES.get(t);
+  if (t.length > 4 && t.endsWith('ies')) return `${t.slice(0, -3)}y`;
+  if (t.length > 4 && t.endsWith('es')) return t.slice(0, -2);
+  if (t.length > 3 && t.endsWith('s')) return t.slice(0, -1);
+  return t;
+}
+
+function categoryTokenSet(s) {
+  return new Set(
+    normalizeForMatch(s)
+      .split(/\s+/)
+      .filter((t) => t && !CATEGORY_NAME_STOPWORDS.has(t))
+      .map(stemCategoryToken)
+      .filter(Boolean)
+  );
+}
+
+/**
+ * Update imageUrl for every top-level category whose token set is a superset of
+ * the sheet name's token set. Returns the number of categories updated.
+ * Only writes when the new imageUrl is non-empty and the existing one is empty
+ * OR the names share an exact normalized match (to avoid clobbering manual edits).
+ */
+async function applyMainCategoryImageByName(sheetName, imageUrl, txnSession) {
+  const url = String(imageUrl || '').trim();
+  if (!url || !sheetName) return 0;
+  const sheetTokens = categoryTokenSet(sheetName);
+  if (sheetTokens.size === 0) return 0;
+
+  const tops = await bindSession(
+    Category.find({ parentId: null, isActive: true, level: 1 }).select('_id name imageUrl'),
+    txnSession
+  ).lean();
+
+  let updated = 0;
+  for (const cat of tops) {
+    const dbTokens = categoryTokenSet(cat.name);
+    const isSuperset = [...sheetTokens].every((t) => dbTokens.has(t));
+    if (!isSuperset) continue;
+    // Skip overwriting if the existing imageUrl is already this exact URL.
+    if (String(cat.imageUrl || '').trim() === url) continue;
+    // eslint-disable-next-line no-await-in-loop
+    await Category.updateOne(
+      { _id: cat._id },
+      { $set: { imageUrl: url } },
+      { session: txnSession || undefined }
+    );
+    updated += 1;
+  }
+  return updated;
+}
+
 function getSkuBaseName(skuName) {
   const raw = String(skuName || '').trim();
   if (!raw) return '';
@@ -232,17 +276,6 @@ function expandCodeRange(codeRef) {
   return out;
 }
 
-function mapBannerContentType(raw) {
-  const t = String(raw || '').trim();
-  if (!t) return null;
-  const allowed = new Set(['banner', 'video', 'image', 'text', 'products']);
-  if (allowed.has(t)) return t;
-  // aliases sometimes used by templates
-  if (t === 'productCarousel') return 'products';
-  if (t === 'bannerImage' || t === 'promoImage') return 'image';
-  return t;
-}
-
 async function importContentHubMaster(buffer, { overwrite = true } = {}) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
@@ -252,13 +285,13 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
     products: { created: 0, updated: 0, skipped: 0, unmatched: 0 },
     banners: { upserted: 0 },
     images: { updated: 0 },
+    homeSections: { replaced: 0, skipped: 0 },
   };
 
   const errors = [];
   const warnings = [];
 
-  const session = await mongoose.startSession();
-  const run = async () => {
+  const executeImport = async (txnSession) => {
       // -------------------------
       // 1) Categories hierarchy
       // -------------------------
@@ -319,18 +352,25 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             const internalKey = codeTrim || stableSheetHierarchyCode(level, carryMain, carrySub, name, rowNum);
             let existing = null;
             if (codeTrim) {
-              existing = await Category.findOne({ hierarchyCodes: codeTrim }).session(session).lean();
+              existing = await Category.findOne({ hierarchyCodes: codeTrim }).session(txnSession).lean();
             }
             if (!existing && parentId != null) {
-              existing = await Category.findOne({ parentId, level, name }).session(session).lean();
+              existing = await Category.findOne({ parentId, level, name }).session(txnSession).lean();
             }
             if (!existing && level === 1) {
-              existing = await Category.findOne({ level: 1, name, parentId: null }).session(session).lean();
+              // Case-insensitive match prevents the mastersheet's "RICE Mandi" / "Rice Mandi" rows
+              // from creating two separate top-level categories that show up as duplicate home tiles.
+              const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              existing = await Category.findOne({
+                level: 1,
+                parentId: null,
+                name: { $regex: `^${escaped}$`, $options: 'i' },
+              }).session(txnSession).lean();
             }
             const desiredSlug = slugify(name);
             const slug = existing
               ? existing.slug
-              : await ensureUniqueCategorySlug(desiredSlug, null, session);
+              : await ensureUniqueCategorySlug(desiredSlug, null, txnSession);
             const codesToSet = codeTrim
               ? Array.from(new Set([...(Array.isArray(existing?.hierarchyCodes) ? existing.hierarchyCodes : []), codeTrim]))
               : [internalKey];
@@ -349,7 +389,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                     hierarchyCodes: codesToSet,
                   },
                 },
-                { session }
+                { session: txnSession }
               );
               counts.categories.updated += 1;
               return String(existing._id);
@@ -369,7 +409,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   importRaw: rawRow,
                 },
               ],
-              { session }
+              { session: txnSession }
             );
             counts.categories.created += 1;
             return String(created[0]._id);
@@ -560,17 +600,17 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   const hc = parseHierarchyCode(String(doc.hierarchyCode || '').trim());
                   if (hc) {
                     // eslint-disable-next-line no-await-in-loop
-                    const leaf = await Category.findOne({ hierarchyCodes: hc.productCode || hc.fullCode, level: 3 }).session(session).lean();
+                    const leaf = await Category.findOne({ hierarchyCodes: hc.productCode || hc.fullCode, level: 3 }).session(txnSession).lean();
                     if (leaf?.parentId) {
                       // eslint-disable-next-line no-await-in-loop
-                      const subDoc = await Category.findById(leaf.parentId).session(session).lean();
+                      const subDoc = await Category.findById(leaf.parentId).session(txnSession).lean();
                       if (subDoc?.parentId) {
                         matched = { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
                       }
                     }
                     if (!matched && hc.subCode) {
                       // eslint-disable-next-line no-await-in-loop
-                      const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode, level: 2 }).session(session).lean();
+                      const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode, level: 2 }).session(txnSession).lean();
                       if (subDoc?._id && subDoc.parentId) {
                         matched = { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
                       }
@@ -586,7 +626,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 // Reuse existing media when SKU row omits image columns.
                 // This prevents unnecessary skips for maintenance-only sheet updates.
                 // eslint-disable-next-line no-await-in-loop
-                const existing = await Product.findOne({ sku: doc.sku }).session(session).lean();
+                const existing = await Product.findOne({ sku: doc.sku }).session(txnSession).lean();
                 const rawSalePrice = salePriceCol ? getCellText(row, salePriceCol) : '';
                 const rawMrp = mrpCol ? getCellText(row, mrpCol) : '';
                 const rawBaseCost = baseCostCol ? getCellText(row, baseCostCol) : '';
@@ -614,7 +654,8 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 }
 
                 if (!doc.imageUrl) {
-                  errors.push({ sheet: 'SKU Master', row: r, sku, message: 'Missing imageUrl' });
+                  // Data-quality skip, not a system failure: log as warning and continue with the rest of the sheet.
+                  warnings.push({ sheet: 'SKU Master', row: r, sku, message: 'Skipped: missing Image URL (row was not imported)' });
                   counts.products.skipped += 1;
                   continue;
                 }
@@ -637,7 +678,14 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 }
 
                 if (!existing && !hasSalePrice) {
-                  errors.push({ sheet: 'SKU Master', row: r, sku, message: 'Missing Sale Price for new SKU' });
+                  // Cannot create a brand-new product with no price. This is a data-quality skip
+                  // (not a run-level failure) — report as warning so the import still succeeds overall.
+                  warnings.push({
+                    sheet: 'SKU Master',
+                    row: r,
+                    sku,
+                    message: 'Skipped new SKU: Sale Price is empty. Add Sale Price in the sheet to create this product.',
+                  });
                   counts.products.skipped += 1;
                   continue;
                 }
@@ -668,11 +716,11 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                       $set: updateDoc,
                       $unset: { importRaw: 1, mastersheetFields: 1 },
                     },
-                    { session }
+                    { session: txnSession }
                   );
                   counts.products.updated += 1;
                 } else {
-                  await Product.create([doc], { session });
+                  await Product.create([doc], { session: txnSession });
                   counts.products.created += 1;
                 }
               }
@@ -685,22 +733,22 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             hierarchyCode: { $exists: true, $ne: '' },
           })
             .select('_id hierarchyCode')
-            .session(session)
+            .session(txnSession)
             .lean();
 
           for (const p of productsForRelink) {
             const hcRaw = String(p.hierarchyCode || '').trim();
             if (!hcRaw) continue;
             // eslint-disable-next-line no-await-in-loop
-            const leaf = await Category.findOne({ hierarchyCodes: hcRaw, level: 3 }).session(session).lean();
+            const leaf = await Category.findOne({ hierarchyCodes: hcRaw, level: 3 }).session(txnSession).lean();
             if (leaf?.parentId) {
               // eslint-disable-next-line no-await-in-loop
-              const subDoc = await Category.findById(leaf.parentId).session(session).lean();
+              const subDoc = await Category.findById(leaf.parentId).session(txnSession).lean();
               if (subDoc?.parentId) {
                 await Product.updateOne(
                   { _id: p._id },
                   { $set: { categoryId: subDoc.parentId, subcategoryId: subDoc._id } },
-                  { session }
+                  { session: txnSession }
                 );
                 continue;
               }
@@ -708,222 +756,22 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             const hc = parseHierarchyCode(hcRaw);
             if (!hc) continue;
             // eslint-disable-next-line no-await-in-loop
-            const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode }).session(session).lean();
+            const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode }).session(txnSession).lean();
             if (!subDoc?._id || !subDoc.parentId) continue;
             await Product.updateOne(
               { _id: p._id },
               { $set: { categoryId: subDoc.parentId, subcategoryId: subDoc._id } },
-              { session }
+              { session: txnSession }
             );
           }
 
-          // -------------------------
-          // 6) Backfill category imageUrl from linked product image (when sheet has no display-image rows)
-          // -------------------------
-          const categoriesMissingImage = await Category.find({
-            isActive: true,
-            level: { $in: [1, 2] },
-            $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }, { imageUrl: null }],
-          })
-            .select('_id level')
-            .session(session)
-            .lean();
-
-          for (const cat of categoriesMissingImage) {
-            const productFilter =
-              Number(cat.level) === 1
-                ? { categoryId: cat._id, imageUrl: { $exists: true, $ne: '' } }
-                : {
-                    $or: [{ subcategoryId: cat._id }, { categoryId: cat._id }],
-                    imageUrl: { $exists: true, $ne: '' },
-                  };
-
-            // eslint-disable-next-line no-await-in-loop
-            const sampleProduct = await Product.findOne(productFilter).select('imageUrl').session(session).lean();
-            if (!sampleProduct?.imageUrl) continue;
-
-            // eslint-disable-next-line no-await-in-loop
-            await Category.updateOne(
-              { _id: cat._id, $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }, { imageUrl: null }] },
-              { $set: { imageUrl: String(sampleProduct.imageUrl) } },
-              { session }
-            );
-          }
             }
           }
 
           // -------------------------
-          // 3) Banners from Banner sheet
+          // 3) Banners from Banner Details sheet (auto-detects legacy vs Selorg_Final_Template format)
           // -------------------------
-          const bannerWs = wb.getWorksheet('Banner');
-          if (!bannerWs) {
-            errors.push({ sheet: 'Banner', message: 'Sheet "Banner" not found' });
-          } else {
-            const headerMap = makeHeaderIndexMap(bannerWs, 1);
-
-            const slotCol = findHeaderCol(headerMap, ['slot', 'Slot']) ?? 1;
-            const presModeCol = findHeaderCol(headerMap, ['presentationMode', 'Presentation Mode']) ?? 2;
-            const isNavigableCol = findHeaderCol(headerMap, ['isNavigable', 'Is Navigable']) ?? 3;
-            const titleCol = findHeaderCol(headerMap, ['title', 'Title']) ?? 4;
-            const imageUrlCol =
-              findHeaderCol(headerMap, [
-                'imageUrl',
-                'Image URL',
-                'ImageUrl',
-                'Banner Image URL',
-                'Banner URL',
-                'Image',
-              ]) ?? 5;
-            const redirectTypeCol = findHeaderCol(headerMap, ['redirectType', 'Redirect Type']) ?? 6;
-            const redirectValueCol = findHeaderCol(headerMap, ['redirectValue', 'Redirect Value']) ?? 7;
-            const isActiveCol = findHeaderCol(headerMap, ['isActive', 'Is Active']) ?? 8;
-            const startDateCol = findHeaderCol(headerMap, ['startDate', 'Start Date']) ?? 9;
-            const endDateCol = findHeaderCol(headerMap, ['endDate', 'End Date']) ?? 10;
-            const orderCol = findHeaderCol(headerMap, ['order', 'Order']) ?? 11;
-
-            const contentTypeCol = findHeaderCol(headerMap, ['contentItems.type', 'Content Type']) ?? 12;
-            const contentImageUrlCol =
-              findHeaderCol(headerMap, ['contentItems.imageUrl', 'Content Image URL', 'Content imageUrl']) ?? 13;
-            const contentBlockTitleCol =
-              findHeaderCol(headerMap, ['contentItems.blockTitle', 'Content Block Title']) ?? 14;
-            const contentLinkCol = findHeaderCol(headerMap, ['contentItems.link', 'Content Link']) ?? 15;
-            const contentIsNavigableCol =
-              findHeaderCol(headerMap, ['contentItems.isNavigable', 'Content Is Navigable']) ?? 16;
-            const contentOrderCol = findHeaderCol(headerMap, ['contentItems.order', 'Content Order']) ?? 17;
-
-            const allowedSlots = new Set(['hero', 'small', 'mid', 'large', 'info', 'category']);
-            const bannerGroups = new Map(); // key -> { base, items: [] }
-
-            for (let r = 2; r <= bannerWs.rowCount; r += 1) {
-              const row = bannerWs.getRow(r);
-              const rawRow = rowToRawObject(row, headerMap);
-              const slot = getCellText(row, slotCol).trim().toLowerCase();
-              if (!allowedSlots.has(slot)) continue;
-              const presentationMode = getCellText(row, presModeCol) || 'single';
-              const isNavigable = parseBoolean(getCellText(row, isNavigableCol), true);
-              const title = getCellText(row, titleCol);
-              const imageUrl = getCellText(row, imageUrlCol);
-              if (!imageUrl || !String(imageUrl).toLowerCase().includes('http')) continue;
-
-              const redirectType = getCellText(row, redirectTypeCol);
-              const redirectValue = getCellText(row, redirectValueCol);
-              const isActive = parseBoolean(getCellText(row, isActiveCol), true);
-              const startDate = parseDateCell(row.getCell(startDateCol)?.value);
-              const endDate = parseDateCell(row.getCell(endDateCol)?.value);
-              const order = Number.parseInt(getCellText(row, orderCol), 10) || (r - 1);
-
-              const contentTypeRaw = getCellText(row, contentTypeCol);
-              const contentType = mapBannerContentType(contentTypeRaw);
-              const contentImageUrl = getCellText(row, contentImageUrlCol);
-              const contentBlockTitle = getCellText(row, contentBlockTitleCol);
-              const contentLink = getCellText(row, contentLinkCol);
-              const contentIsNavigable = parseBoolean(getCellText(row, contentIsNavigableCol), true);
-              const contentOrder = Number.parseInt(getCellText(row, contentOrderCol), 10) || 1;
-
-              const key = `${slot}|${order}`;
-              if (!bannerGroups.has(key)) {
-                bannerGroups.set(key, {
-                  slot,
-                  presentationMode: presentationMode === 'carousel' ? 'carousel' : 'single',
-                  isNavigable,
-                  title: title || '',
-                  imageUrl,
-                  redirectType: redirectType || null,
-                  redirectValue: redirectValue || null,
-                  isActive,
-                  startDate,
-                  endDate,
-                  order,
-                  contentItems: [],
-                  rawRows: [],
-                });
-              }
-              bannerGroups.get(key).rawRows.push(rawRow);
-
-              if (contentType && (contentImageUrl || contentBlockTitle || contentLink)) {
-                bannerGroups.get(key).contentItems.push({
-                  type: contentType,
-                  order: contentOrder,
-                  imageUrl: contentImageUrl || undefined,
-                  text: contentType === 'text' ? (contentBlockTitle || undefined) : undefined,
-                  blockTitle: contentBlockTitle || undefined,
-                  link: contentLink || undefined,
-                  isNavigable: contentIsNavigable,
-                });
-              }
-            }
-
-            const allowedRedirectTypes = new Set([
-              'url',
-              'category',
-              'subcategory',
-              'collection',
-              'section',
-              'product',
-              'search',
-              'none',
-              'page',
-              'screen',
-              'banner',
-            ]);
-
-            const resolveCategoryId = async (value) => {
-              const v = String(value || '').trim();
-              if (!v) return null;
-              if (mongoose.Types.ObjectId.isValid(v)) {
-                // eslint-disable-next-line no-await-in-loop
-                const doc = await Category.findById(v).session(session).lean();
-                return doc?._id ? String(doc._id) : null;
-              }
-              // Try slug
-              // eslint-disable-next-line no-await-in-loop
-              let doc = await Category.findOne({ slug: v }).session(session).lean();
-              if (doc?._id) return String(doc._id);
-              // Try hierarchy code
-              if (/[A-Za-z]\d+/.test(v)) {
-                // eslint-disable-next-line no-await-in-loop
-                doc = await Category.findOne({ hierarchyCodes: v }).session(session).lean();
-                if (doc?._id) return String(doc._id);
-              }
-              // Fallback by name
-              // eslint-disable-next-line no-await-in-loop
-              doc = await Category.findOne({ name: v }).session(session).lean();
-              return doc?._id ? String(doc._id) : null;
-            };
-
-            for (const group of bannerGroups.values()) {
-              // eslint-disable-next-line no-await-in-loop
-              let bannerCategoryId = null;
-              if (group.slot === 'category' && group.redirectValue) {
-                // eslint-disable-next-line no-await-in-loop
-                bannerCategoryId = await resolveCategoryId(group.redirectValue);
-              }
-
-              const contentItems = Array.isArray(group.contentItems) ? group.contentItems : [];
-              contentItems.sort((a, b) => (a.order || 1) - (b.order || 1));
-
-              const update = {
-                slot: group.slot,
-                presentationMode: group.presentationMode,
-                isNavigable: group.isNavigable,
-                title: group.title,
-                imageUrl: group.imageUrl,
-                redirectType: group.redirectType && allowedRedirectTypes.has(group.redirectType) ? group.redirectType : null,
-                redirectValue: group.redirectValue || null,
-                categoryId: bannerCategoryId || null,
-                isActive: group.isActive,
-                ...(group.startDate ? { startDate: group.startDate } : {}),
-                ...(group.endDate ? { endDate: group.endDate } : {}),
-                order: group.order,
-                contentItems,
-                importRaw: { rows: group.rawRows || [] },
-              };
-
-              const filter = { slot: group.slot, order: group.order };
-              await Banner.findOneAndUpdate(filter, { $set: update }, { upsert: true, new: false, session });
-              counts.banners.upserted += 1;
-            }
-          }
+          await applyBannerDetails(wb, { session: txnSession, counts, warnings, errors });
 
           // -------------------------
           // 4) Category Display Images
@@ -997,7 +845,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
               let productOrder = 0;
 
               const upsertCategoryByCode = async ({ level, code, name, parentId, imageUrl, raw }) => {
-                const existing = await Category.findOne({ hierarchyCodes: code }).session(session).lean();
+                const existing = await Category.findOne({ hierarchyCodes: code }).session(txnSession).lean();
                 if (existing) {
                   await Category.findByIdAndUpdate(
                     existing._id,
@@ -1014,12 +862,12 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                           : [code],
                       },
                     },
-                    { session }
+                    { session: txnSession }
                   );
                   return String(existing._id);
                 }
 
-                const slug = await ensureUniqueCategorySlug(slugify(name || 'category'), null, session);
+                const slug = await ensureUniqueCategorySlug(slugify(name || 'category'), null, txnSession);
                 const order = level === 1 ? ++mainOrder : level === 2 ? ++subOrder : ++productOrder;
 
                 const created = await Category.create(
@@ -1037,7 +885,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                       importRaw: raw || null,
                     },
                   ],
-                  { session }
+                  { session: txnSession }
                 );
                 return String(created?.[0]?._id || created?._id || '');
               };
@@ -1071,6 +919,20 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                       });
                       counts.images.updated += 1;
                     }
+                  } else {
+                    // No Hierarchy Code Ref → fall back to name-based matching so we still
+                    // refresh the imageUrl for existing top-level categories whose names
+                    // don't line up 1:1 with the Categories tab (e.g. sheet "Fruits" vs DB
+                    // "FRUITS", sheet "Rice" vs DB "Rice Mandi"). We update every top-level
+                    // category whose token set is a superset of the sheet name's token set
+                    // (so "Rice" updates both "Rice Mandi" and the legacy "RICE Mandi").
+                    // eslint-disable-next-line no-await-in-loop
+                    const updated = await applyMainCategoryImageByName(
+                      catName,
+                      imageUrl,
+                      txnSession
+                    );
+                    counts.images.updated += updated;
                   }
                   continue;
                 }
@@ -1083,7 +945,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                     const hc = parseHierarchyCode(subCodes[0]);
                     if (hc) {
                       // eslint-disable-next-line no-await-in-loop
-                      const mainDoc = await Category.findOne({ hierarchyCodes: hc.mainCode }).session(session).lean();
+                      const mainDoc = await Category.findOne({ hierarchyCodes: hc.mainCode }).session(txnSession).lean();
                       const parentMainId = mainDoc?._id ? String(mainDoc._id) : null;
                       if (parentMainId) {
                         // eslint-disable-next-line no-await-in-loop
@@ -1152,31 +1014,59 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
               }
             }
           }
+
+          // -------------------------
+          // 4b) Backfill sub-category imageUrl from a linked product (last resort).
+          //
+          // Top-level (level 1) tiles must use the curated "Category Display Image" art —
+          // grabbing a random product image for them produces wrong-looking home tiles
+          // (e.g. a boiled-rice photo on the Vegetables tile). Sub-categories (level 2)
+          // can still benefit from a fallback when the sheet has no display image for them.
+          // -------------------------
+          const subcategoriesMissingImage = await Category.find({
+            isActive: true,
+            level: 2,
+            $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }, { imageUrl: null }],
+          })
+            .select('_id')
+            .session(txnSession)
+            .lean();
+
+          for (const cat of subcategoriesMissingImage) {
+            const productFilter = {
+              $or: [{ subcategoryId: cat._id }, { categoryId: cat._id }],
+              imageUrl: { $exists: true, $ne: '' },
+            };
+            // eslint-disable-next-line no-await-in-loop
+            const sampleProduct = await Product.findOne(productFilter).select('imageUrl').session(txnSession).lean();
+            if (!sampleProduct?.imageUrl) continue;
+            // eslint-disable-next-line no-await-in-loop
+            await Category.updateOne(
+              { _id: cat._id, $or: [{ imageUrl: { $exists: false } }, { imageUrl: '' }, { imageUrl: null }] },
+              { $set: { imageUrl: String(sampleProduct.imageUrl) } },
+              { session: txnSession }
+            );
+          }
         }
       }
 
       // If categories sheet existed but parsing failed early, product/banner/image counts may be partial.
+
+      // -------------------------
+      // 5) Home Page Content sheet → customer_home_section_definitions
+      // Must run AFTER products/categories/banners are upserted so name/SKU/bannerId
+      // references resolve against the freshly-imported data.
+      // -------------------------
+      try {
+        await applyHomePageContent(wb, { session: txnSession, counts, warnings, errors });
+      } catch (e) {
+        errors.push({ sheet: 'Home Page Content', message: `Home layout regeneration failed: ${e.message}` });
+      }
   };
 
-  try {
-    try {
-      await session.withTransaction(run);
-    } catch (err) {
-      const msg = String(err?.message || err || '');
-      if (msg.includes('Transaction numbers are only allowed')) {
-        // Standalone MongoDB (no replica set) disallows transactions.
-        warnings.push({
-          sheet: 'Mongo',
-          message: 'MongoDB transactions are not supported on this connection; running import without transaction.',
-        });
-        await run();
-      } else {
-        throw err;
-      }
-    }
-  } finally {
-    await session.endSession();
-  }
+  // Same rationale as skuMasterImport: one long-lived transaction for whole-sheet imports hits
+  // MongoDB time/size limits; the previous fallback re-ran the entire import (2× duration + mixed counts).
+  await executeImport(null);
 
   return {
     success: errors.length === 0,

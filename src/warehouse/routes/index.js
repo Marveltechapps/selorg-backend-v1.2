@@ -21,6 +21,7 @@ const inventoryRoutes = require('./inventoryRoutes');
 const attendanceRoutes = require('./attendanceRoutes');
 const devicesRoutes = require('./devicesRoutes');
 const notificationsRoutes = require('./notificationsRoutes');
+const logisticsRoutes = require('./logisticsRoutes');
 
 // Auth (login only) - no JWT required
 router.use('/auth', authRoutes);
@@ -51,6 +52,7 @@ protectedRouter.use('/reports', warehouseReportsRoutes);
 protectedRouter.use('/utilities', utilitiesRoutes);
 protectedRouter.use('/orders', orderRoutes);
 protectedRouter.use('/staff', staffRoutes);
+protectedRouter.use('/logistics', logisticsRoutes);
 router.use(protectedRouter);
 
 module.exports = router;

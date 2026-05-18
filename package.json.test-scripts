@@ -1,0 +1,19 @@
+{
+  "scripts": {
+    "test": "jest --detectOpenHandles --forceExit",
+    "test:watch": "jest --watch --passWithNoTests",
+    "test:coverage": "jest --coverage --collectCoverageFrom='src/**/*.js' --passWithNoTests",
+    "test:unit": "jest --testPathPattern='__tests__' --passWithNoTests",
+    "test:integration": "jest --testPathPattern='integration' --passWithNoTests",
+    "test:load": "k6 run tests/load/load-test.js",
+    "test:load:peak": "k6 run tests/load/load-test.js --vus 100 --duration 5m",
+    "test:load:sustained": "k6 run tests/load/load-test.js --vus 50 --duration 30m",
+    "test:ci": "jest --coverage --ci --testPathPattern='__tests__' --passWithNoTests",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:coverage",
+    "test:db-setup": "docker-compose -f docker-compose.test.yml up -d",
+    "test:db-down": "docker-compose -f docker-compose.test.yml down",
+    "test:db-clean": "docker-compose -f docker-compose.test.yml down -v",
+    "lint": "eslint src/ --fix || true",
+    "verify": "npm run test:coverage && npm run lint"
+  }
+}

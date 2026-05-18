@@ -6,6 +6,15 @@ const express = require('express');
 const router = express.Router();
 const systemConfigController = require('../controllers/systemConfigController');
 const systemToolsController = require('../controllers/systemToolsController');
+const { requirePermission } = require('../../core/middleware');
+const { PERMISSIONS } = require('../../config/permissions');
+
+/** Reads: admin.config.read — Writes/restarts/maintenance: admin.config.write */
+router.use((req, res, next) => {
+  const readOnly = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+  const permission = readOnly ? PERMISSIONS.ADMIN_CONFIG_READ : PERMISSIONS.ADMIN_CONFIG_WRITE;
+  return requirePermission(permission)(req, res, next);
+});
 
 // --- System Tools (server status, instances, logs, performance) ---
 // All require admin/super_admin via parent router

@@ -45,20 +45,20 @@ homeConfigSchema.path('trendingSearches').validate(function validateTrending(v) 
   return !Array.isArray(v) || v.length <= 10;
 }, 'trendingSearches cannot exceed 10 items');
 
-const KEY_PREFIX_PATTERN = /^(collections|deals|wellbeing|banner_main|banner_sub|banner|section)_[a-zA-Z0-9_-]+$/;
+const KEY_PREFIX_PATTERN = /^(collections|collection|deals|wellbeing|banner_main|banner_sub|banner|section|hero|categories|home|page|screen|video)_[a-zA-Z0-9_-]+$/;
 
 /** Validate section keys against allowlist. Use in controller before update. */
 function validateSectionKeys(keys) {
   if (!Array.isArray(keys)) return true;
   return keys.every((k) => {
     if (typeof k !== 'string') return false;
-    return VALID_SECTION_KEYS_SET.has(k) || KEY_PREFIX_PATTERN.test(k);
+    return /^[a-z][a-z0-9_]*$/.test(k) || KEY_PREFIX_PATTERN.test(k) || VALID_SECTION_KEYS_SET.has(k);
   });
 }
 
 function validateSectionDefinitions(defs) {
   if (!Array.isArray(defs)) return true;
-  return defs.every((d) => d && typeof d.key === 'string' && (VALID_SECTION_KEYS_SET.has(d.key) || KEY_PREFIX_PATTERN.test(d.key)));
+  return defs.every((d) => d && typeof d.key === 'string' && (/^[a-z][a-z0-9_]*$/.test(d.key) || KEY_PREFIX_PATTERN.test(d.key) || VALID_SECTION_KEYS_SET.has(d.key)));
 }
 const HomeConfig = mongoose.models.CustomerHomeConfig || mongoose.model('CustomerHomeConfig', homeConfigSchema, 'customer_home_configs');
 module.exports = {

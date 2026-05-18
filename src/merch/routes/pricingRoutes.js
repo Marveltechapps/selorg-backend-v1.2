@@ -1,4 +1,6 @@
 const express = require('express');
+const { requirePermission } = require('../../core/middleware');
+const { PERMISSIONS } = require('../../config/permissions');
 const {
   getPricingSKUs,
   updateSKUPrice,
@@ -36,71 +38,71 @@ const {
 
 const router = express.Router();
 
-router.get('/stats', getPricingStatsHandler);
+router.get('/stats', requirePermission(PERMISSIONS.PRICING_READ), getPricingStatsHandler);
 
 router.route('/references/categories')
-  .get(getReferencesCategories);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getReferencesCategories);
 
 router.route('/references/zones')
-  .get(getReferencesZones);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getReferencesZones);
 
 router.route('/skus')
-  .get(getPricingSKUs);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getPricingSKUs);
 
 router.route('/skus/:id')
-  .put(updateSKUPrice);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateSKUPrice);
 
 router.route('/surge-rules')
-  .get(getSurgeRules)
-  .post(createSurgeRule);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getSurgeRules)
+  .post(requirePermission(PERMISSIONS.PRICING_OVERRIDE), createSurgeRule);
 
 router.route('/surge-rules/:id')
-  .put(updateSurgeRule)
-  .delete(deleteSurgeRule);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateSurgeRule)
+  .delete(requirePermission(PERMISSIONS.PRICING_OVERRIDE), deleteSurgeRule);
 
 router.route('/surge-config')
-  .get(getSurgeConfig)
-  .put(updateSurgeConfig);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getSurgeConfig)
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateSurgeConfig);
 
 router.route('/price-rules')
-  .get(getPriceRules)
-  .post(createPriceRule);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getPriceRules)
+  .post(requirePermission(PERMISSIONS.PRICING_OVERRIDE), createPriceRule);
 
 router.route('/discounts')
-  .get(getDiscountCampaigns)
-  .post(createDiscountCampaign);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getDiscountCampaigns)
+  .post(requirePermission(PERMISSIONS.PRICING_OVERRIDE), createDiscountCampaign);
 
 router.route('/discounts/:id')
-  .put(updateDiscountCampaign)
-  .delete(deleteDiscountCampaign);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateDiscountCampaign)
+  .delete(requirePermission(PERMISSIONS.PRICING_OVERRIDE), deleteDiscountCampaign);
 
-router.get('/coupons', getCoupons);
-router.post('/coupons', createCoupon);
-router.post('/coupons/generate-code', generateCouponCode);
+router.get('/coupons', requirePermission(PERMISSIONS.PRICING_READ), getCoupons);
+router.post('/coupons', requirePermission(PERMISSIONS.PRICING_OVERRIDE), createCoupon);
+router.post('/coupons/generate-code', requirePermission(PERMISSIONS.PRICING_OVERRIDE), generateCouponCode);
 router.route('/coupons/:id')
-  .put(updateCoupon)
-  .delete(deleteCoupon);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateCoupon)
+  .delete(requirePermission(PERMISSIONS.PRICING_OVERRIDE), deleteCoupon);
 
 router.route('/flash-sales')
-  .get(getFlashSales)
-  .post(createFlashSale);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getFlashSales)
+  .post(requirePermission(PERMISSIONS.PRICING_OVERRIDE), createFlashSale);
 
 router.route('/flash-sales/:id')
-  .put(updateFlashSale)
-  .delete(deleteFlashSale);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateFlashSale)
+  .delete(requirePermission(PERMISSIONS.PRICING_OVERRIDE), deleteFlashSale);
 
 router.route('/bundles')
-  .get(getBundles)
-  .post(createBundle);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getBundles)
+  .post(requirePermission(PERMISSIONS.PRICING_OVERRIDE), createBundle);
 
 router.route('/bundles/:id')
-  .put(updateBundle)
-  .delete(deleteBundle);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateBundle)
+  .delete(requirePermission(PERMISSIONS.PRICING_OVERRIDE), deleteBundle);
 
 router.route('/pending-updates')
-  .get(getPendingUpdates);
+  .get(requirePermission(PERMISSIONS.PRICING_READ), getPendingUpdates);
 
 router.route('/pending-updates/:id')
-  .put(handlePendingUpdate);
+  .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), handlePendingUpdate);
 
 module.exports = router;

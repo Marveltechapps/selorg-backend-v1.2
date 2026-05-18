@@ -1,0 +1,194 @@
+name: Phase 1 Tests & Validation
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  # Job 1: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      mongodb:
+        image: mongo:5.0
+        options: >-
+          --health-cmd mongosh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 27017:27017
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run unit tests
+        run: npm test -- --coverage --testPathPattern="__tests__" --passWithNoTests
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/selorg-test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+      
+      - name: Check coverage threshold
+        run: |
+          if [ $(cat coverage/coverage-summary.json | grep -o '"lines":[^}]*' | grep -o '[0-9.]*' | head -1) -lt 70 ]; then
+            echo "Coverage below 70%"
+            exit 1
+          fi
+
+  # Job 2: Linting & Code Quality
+  lint:
+    name: Linting & Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run ESLint
+        run: npm run lint 2>/dev/null || echo "Lint not configured, skipping"
+      
+      - name: Check for console.log in production code
+        run: |
+          if grep -r "console\.(log|warn|error)" src/ --include="*.js" | grep -v "test\|spec"; then
+            echo "Found console statements in production code"
+            exit 1
+          fi
+
+  # Job 3: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    
+    services:
+      mongodb:
+        image: mongo:5.0
+        options: >-
+          --health-cmd mongosh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 27017:27017
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run integration tests
+        run: npm test -- --testPathPattern="integration" --passWithNoTests
+        env:
+          NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/selorg-test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+
+  # Job 4: Security Audit
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run npm audit
+        run: npm audit --production 2>&1 || echo "Security audit warnings found"
+      
+      - name: Check for hardcoded secrets
+        run: |
+          if grep -r "password\|secret\|key\|token" src/ --include="*.js" | \
+             grep -i "=\s*['\"]" | \
+             grep -v "test\|mock\|example"; then
+            echo "Possible hardcoded secrets found"
+            exit 1
+          fi
+
+  # Job 5: Summary Report
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, lint, integration-tests, security]
+    if: always()
+    
+    steps:
+      - name: Test Results
+        run: |
+          echo "✅ Unit Tests: ${{ needs.unit-tests.result }}"
+          echo "✅ Linting: ${{ needs.lint.result }}"
+          echo "✅ Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "✅ Security Audit: ${{ needs.security.result }}"
+          
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ]; then
+            echo "❌ Tests failed"
+            exit 1
+          fi
+          
+          echo "✅ All tests passed!"

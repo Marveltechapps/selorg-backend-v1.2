@@ -12,7 +12,8 @@ const financeAlertsController = require('../controllers/financeAlertsController'
 const financeAnalyticsController = require('../controllers/financeAnalyticsController');
 const approvalsController = require('../controllers/approvalsController');
 const pickerWithdrawalsController = require('../controllers/pickerWithdrawalsController');
-const { authenticateToken, requireRole, cacheMiddleware } = require('../../core/middleware');
+const { authenticateToken, requireRole, requirePermission, cacheMiddleware } = require('../../core/middleware');
+const { PERMISSIONS } = require('../../config/permissions');
 const { bindFinanceHubContext } = require('../middleware/financeHubContext');
 const { validateRequest } = require('../../middleware/zodValidator');
 const appConfig = require('../../config/app');
@@ -78,8 +79,12 @@ const authRoutes = require('./authRoutes');
 // Mount auth routes (login only)
 router.use('/auth', authRoutes);
 
-// All finance routes require JWT and role: finance, admin, super_admin
-const financeAuth = [authenticateToken, requireRole('finance', 'admin', 'super_admin')];
+// All finance routes require JWT, role, and payments.read (finance role defaults include payments.*)
+const financeAuth = [
+  authenticateToken,
+  requireRole('finance', 'admin', 'super_admin'),
+  requirePermission(PERMISSIONS.PAYMENTS_READ),
+];
 
 // Vendor payables: procurement vendor role + hub-scoped cache keys (see bindFinanceHubContext)
 const vendorPaymentsAuth = [
@@ -133,9 +138,26 @@ router.get('/refunds/queue', ...financeAuth, cacheMiddleware(appConfig.cache.fin
 // Place specific routes before parameterized routes to avoid accidental param matching (e.g. "chargebacks" being treated as :id)
 router.get('/refunds/chargebacks', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), refundsController.getChargebacks);
 router.get('/refunds/:id', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), validateRequest(getRefundDetailsSchema), refundsController.getRefundDetails);
-router.post('/refunds/:id/approve', ...financeAuth, validateRequest(approveRefundSchema), refundsController.approveRefund);
-router.post('/refunds/:id/reject', ...financeAuth, validateRequest(rejectRefundSchema), refundsController.rejectRefund);
-router.post('/refunds/:id/mark-completed', ...financeAuth, refundsController.markCompleted);
+router.post(
+  '/refunds/:id/approve',
+  ...financeAuth,
+  requirePermission(PERMISSIONS.PAYMENTS_REFUND),
+  validateRequest(approveRefundSchema),
+  refundsController.approveRefund
+);
+router.post(
+  '/refunds/:id/reject',
+  ...financeAuth,
+  requirePermission(PERMISSIONS.PAYMENTS_REFUND),
+  validateRequest(rejectRefundSchema),
+  refundsController.rejectRefund
+);
+router.post(
+  '/refunds/:id/mark-completed',
+  ...financeAuth,
+  requirePermission(PERMISSIONS.PAYMENTS_REFUND),
+  refundsController.markCompleted
+);
 
 // Rider Cash Reconciliation routes
 router.get('/rider-cash/summary', ...financeAuth, riderCashController.getSummary);

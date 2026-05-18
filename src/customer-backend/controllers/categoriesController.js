@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { Category } = require('../models/Category');
 const { Product } = require('../models/Product');
+const { StoreInventory } = require('../models/StoreInventory');
 const {
   getCategoryPayload,
   collectHierarchyCodesForSubcategory,
@@ -89,12 +90,23 @@ async function getCategoryProductsBySlug(req, res) {
       taxonomyOr = productTaxonomyOrForMainCategory(category._id, subcategories);
     }
 
+    const storeId = String(req.query.storeId || '').trim();
+
     let query = {
       classification: 'Style',
       isActive: true,
       isSaleable: true,
       $or: taxonomyOr,
     };
+
+    if (storeId) {
+      const availableItems = await StoreInventory.find(
+        { storeId, isAvailable: true, quantity: { $gt: 0 } }
+      ).select('productId').lean();
+      const availableIds = availableItems.map((i) => i.productId);
+      query._id = { $in: availableIds };
+    }
+
     if (String(inStock).toLowerCase() === 'true') {
       query = {
         $and: [

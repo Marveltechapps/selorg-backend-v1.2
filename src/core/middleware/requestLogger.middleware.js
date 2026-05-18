@@ -36,13 +36,13 @@ const requestLoggerMiddleware = (req, res, next) => {
       logger.logRequest(req, res, duration);
     }
 
-    if (process.env.ENABLE_METRICS === 'true') {
-      try {
-        const metrics = require('../../utils/metrics');
+    try {
+      const metrics = require('../../utils/metrics');
+      if (metrics.isMetricsEnabled && metrics.isMetricsEnabled()) {
         metrics.recordHttpRequest(req.method, req.path, res.statusCode, duration);
-      } catch (err) {
-        // Ignore metrics errors
       }
+    } catch (err) {
+      // Ignore metrics errors
     }
 
     if (typeof chunk === 'function') {

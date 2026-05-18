@@ -13,12 +13,15 @@ const NOTIFICATION_TYPES = {
   ORDER_ARRIVED: { title: 'Rider Arrived', template: 'Your rider has arrived with order #{orderNumber}. OTP: {otp}' },
   ORDER_DELIVERED: { title: 'Order Delivered', template: 'Your order #{orderNumber} has been delivered. Rate your experience!' },
   ORDER_CANCELLED: { title: 'Order Cancelled', template: 'Your order #{orderNumber} has been cancelled. {reason}' },
+  PAYMENT_FAILED: { title: 'Payment Failed', template: 'Payment for order #{orderNumber} failed. Reason: {reason}. Tap to retry.' },
+  PAYMENT_RETRY_AVAILABLE: { title: 'Retry Payment?', template: 'Your payment for order #{orderNumber} can be retried now.' },
   REFUND_APPROVED: { title: 'Refund Approved', template: 'Your refund of ₹{amount} for order #{orderNumber} has been approved' },
   REFUND_COMPLETED: { title: 'Refund Completed', template: '₹{amount} has been credited to your {method}' },
   REFUND_REJECTED: { title: 'Refund Update', template: 'Your refund request for order #{orderNumber} could not be processed. {reason}' },
   WALLET_CREDIT: { title: 'Wallet Credited', template: '₹{amount} has been added to your wallet. New balance: ₹{balance}' },
   SUPPORT_REPLY: { title: 'Support Update', template: 'Support replied to your ticket #{ticketId}' },
   DELIVERY_DELAYED: { title: 'Delivery Delayed', template: 'Your order #{orderNumber} is delayed. New ETA: {eta}. We apologize!' },
+  DELIVERY_SLA_BREACH: { title: 'SLA Breach - Compensation Issued', template: 'Your order #{orderNumber} was delayed by {delayMins} mins. ₹{compensation} has been credited as apology.' },
   MISSING_ITEMS: { title: 'Item Unavailable', template: '{count} item(s) in your order #{orderNumber} were unavailable. ₹{amount} has been refunded to your wallet.' },
 };
 
@@ -28,10 +31,10 @@ function fillTemplate(template, data) {
 
 const ORDER_CHANNEL_TYPES = new Set([
   'ORDER_PLACED', 'ORDER_CONFIRMED', 'ORDER_PACKED', 'ORDER_ON_WAY',
-  'ORDER_ARRIVED', 'ORDER_DELIVERED', 'ORDER_CANCELLED', 'DELIVERY_DELAYED', 'MISSING_ITEMS',
+  'ORDER_ARRIVED', 'ORDER_DELIVERED', 'ORDER_CANCELLED', 'DELIVERY_DELAYED', 'DELIVERY_SLA_BREACH', 'MISSING_ITEMS',
 ]);
 const PAYMENT_CHANNEL_TYPES = new Set([
-  'REFUND_APPROVED', 'REFUND_COMPLETED', 'REFUND_REJECTED', 'WALLET_CREDIT',
+  'PAYMENT_FAILED', 'PAYMENT_RETRY_AVAILABLE', 'REFUND_APPROVED', 'REFUND_COMPLETED', 'REFUND_REJECTED', 'WALLET_CREDIT',
 ]);
 
 function resolveChannelId(type) {

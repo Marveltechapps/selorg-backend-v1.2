@@ -5,12 +5,13 @@
  */
 const express = require('express');
 const cacheService = require('../../core/services/cache.service');
-const { cacheMiddleware } = require('../../core/middleware');
+const { cacheMiddleware, requirePermission } = require('../../core/middleware');
+const { PERMISSIONS } = require('../../config/permissions');
 const appConfig = require('../../config/app');
 
 const router = express.Router();
 
-router.get('/stats', cacheMiddleware(5), async (req, res, next) => {
+router.get('/stats', requirePermission(PERMISSIONS.ADMIN_CONFIG_READ), cacheMiddleware(5), async (req, res, next) => {
   try {
     const stats = await cacheService.getStats();
     res.json({

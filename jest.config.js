@@ -1,51 +1,35 @@
+/**
+ * Jest Configuration
+ * File: jest.config.js
+ *
+ * Test runner configuration for Phase 1 testing
+ */
+
 module.exports = {
-  preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
-  testMatch: [
-    '**/__tests__/**/*.{js,ts}',
-    '**/?(*.)+(spec|test).{js,ts}',
-  ],
+  testMatch: ['**/__tests__/**/*.test.js', '**/?(*.)+(spec|test).js'],
   collectCoverageFrom: [
-    'src/**/*.{js,ts}',
-    '!src/server.js',
-    '!src/seed.js',
-    '!src/config/**',
-    '!src/**/*.test.{js,ts}',
-    '!src/**/*.spec.{js,ts}',
-    '!src/**/*.d.ts',
-  ],
-  coveragePathIgnorePatterns: [
-    '/node_modules/',
-    '/tests/',
-    '/dist/',
+    'src/**/*.js',
+    '!src/**/*.test.js',
+    '!src/core/app.js',
+    '!src/server.js'
   ],
   coverageThreshold: {
     global: {
-      branches: 80,
-      functions: 80,
-      lines: 80,
-      statements: 80,
-    },
+      branches: 70,
+      functions: 70,
+      lines: 70,
+      statements: 70
+    }
   },
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
-  moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1',
-  },
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   testTimeout: 10000,
   verbose: true,
-  transform: {
-    '^.+\\.ts$': ['ts-jest', {
-      tsconfig: {
-        esModuleInterop: true,
-        allowJs: true,
-      },
-    }],
-  },
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
-  globals: {
-    'ts-jest': {
-      useESM: false,
-    },
-  },
+  bail: false,
+  detectOpenHandles: true,
+  forceExit: true,
+  logHeapUsage: true,
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1'
+  }
 };

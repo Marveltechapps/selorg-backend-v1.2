@@ -41,6 +41,29 @@ const transports = [
   }),
 ];
 
+// Optional Grafana Loki push (JSON logs for centralized querying)
+const lokiHost = process.env.LOKI_URL || process.env.LOKI_HOST;
+if (lokiHost && process.env.NODE_ENV !== 'test') {
+  try {
+    const LokiTransport = require('winston-loki');
+    transports.push(
+      new LokiTransport({
+        host: lokiHost.replace(/\/$/, ''),
+        labels: {
+          service: process.env.LOKI_SERVICE_NAME || 'selorg-backend',
+          env: process.env.NODE_ENV || 'development',
+        },
+        json: true,
+        batching: true,
+        interval: Number(process.env.LOKI_BATCH_INTERVAL_SEC || 5),
+      })
+    );
+  } catch (lokiErr) {
+    // eslint-disable-next-line no-console
+    console.warn('[logger] winston-loki not available', lokiErr.message);
+  }
+}
+
 // File transports for production
 if (process.env.NODE_ENV === 'production' || process.env.ENABLE_FILE_LOGGING === 'true') {
   // Error log file

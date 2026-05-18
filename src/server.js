@@ -14,6 +14,9 @@ const selectedEnvPath =
   overrideEnvPath || (isProd && fs.existsSync(prodEnvPath) ? prodEnvPath : defaultEnvPath);
 dotenv.config({ path: selectedEnvPath });
 
+// Sentry must initialize before other imports (OpenTelemetry auto-instrumentation)
+require('./instrument');
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -35,6 +38,8 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 const validateEnvironment = require('./config/validateEnv');
 const { createCorsOriginHandler } = require('./config/corsOrigins');
 const logger = require('./core/utils/logger');
+const { registerEventListeners } = require('./events/registerListeners');
+const { apiEnvelopeMiddleware } = require('./core/middleware/apiEnvelope.middleware');
 
 // Import dashboard routes
 const productionRoutes = require('./production/routes');
@@ -44,6 +49,8 @@ const adminRoutes = require('./admin/routes');
 const darkstoreRoutes = require('./darkstore/routes');
 const financeRoutes = require('./finance/routes');
 const warehouseRoutes = require('./warehouse/routes');
+const logisticsRoutes = require('./logistics/routes');
+const logisticsModule = require('./logistics');
 const sharedRoutes = require('./shared/routes');
 const staffRoutes = require('./staff/routes/staffRoutes');
 const riderAuthRoutes = require('./rider/routes/authRoutes');
@@ -130,9 +137,22 @@ if (process.env.NODE_ENV !== 'test') {
   connectDB();
   // Customer app startup (index creation); runs when DB is connected
   require('./customer-backend/startup').run();
+  // Bootstrap logistics module (RabbitMQ + Redis); non-fatal on failure
+  logisticsModule.bootstrap().catch((err) => {
+    logger.error('Logistics module bootstrap failed', { error: err?.message });
+  });
 }
 
 const app = express();
+
+if (process.env.NODE_ENV !== 'test') {
+  try {
+    registerEventListeners();
+    logger.info('Domain event listeners registered');
+  } catch (regErr) {
+    logger.warn('registerEventListeners failed', { error: regErr?.message });
+  }
+}
 
 app.use((req, res, next) => {
   console.log(`[GLOBAL LOG] ${req.method} ${req.path}`);
@@ -176,8 +196,20 @@ const compression = require('compression');
 app.use(compression());
 
 // Body parser with size limits
-app.use(express.json({ limit: '10mb' }));
+app.use(
+  express.json({
+    limit: '10mb',
+    verify: (req, res, buf) => {
+      if (req.originalUrl && req.originalUrl.includes('/logistics/webhooks/porter')) {
+        req.rawBody = Buffer.from(buf);
+      }
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Phase A: normalize legacy JSON responses to standard envelope (skips `success` already set)
+app.use(apiEnvelopeMiddleware);
 
 const strictCors = cors({
   origin: createCorsOriginHandler((origin, allowedOrigins) => {
@@ -312,6 +344,7 @@ app.use('/api/v1/delivery', deliveryWithHealth);
 app.use('/api/v1/finance', financeRoutes);
 app.use('/api/v1/vendor', vendorRoutes);
 app.use('/api/v1/warehouse', warehouseRoutes);
+app.use('/api/v1/logistics', logisticsRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/support', require('./support/routes/supportRoutes'));
 app.use('/api/v1/shared', sharedRoutes);
@@ -335,11 +368,11 @@ if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'tru
 }
 
 // Metrics endpoint (Prometheus)
-if (process.env.ENABLE_METRICS === 'true') {
-  const metrics = require('./utils/metrics');
+const metricsModule = require('./utils/metrics');
+if (metricsModule.isMetricsEnabled()) {
   app.get('/metrics', async (req, res) => {
     try {
-      const metricsData = await metrics.getMetrics();
+      const metricsData = await metricsModule.getMetrics();
       res.set('Content-Type', 'text/plain');
       res.send(metricsData);
     } catch (err) {
@@ -347,6 +380,17 @@ if (process.env.ENABLE_METRICS === 'true') {
     }
   });
   logger.info('Prometheus metrics available at /metrics');
+}
+
+// Sentry Express error capture (before custom JSON error formatter)
+if (process.env.SENTRY_DSN || process.env.SENTRY_BACKEND_DSN) {
+  try {
+    const Sentry = require('@sentry/node');
+    Sentry.setupExpressErrorHandler(app);
+    logger.info('Sentry Express error handler registered');
+  } catch (sentryErr) {
+    logger.warn('Sentry setupExpressErrorHandler skipped', { error: sentryErr?.message });
+  }
 }
 
 // Global error handler middleware (must be last)
@@ -448,6 +492,13 @@ if (process.env.NODE_ENV !== 'test') {
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
+  if (process.env.SENTRY_DSN || process.env.SENTRY_BACKEND_DSN) {
+    try {
+      require('@sentry/node').captureException(err instanceof Error ? err : new Error(String(err)));
+    } catch (_) {
+      /* ignore */
+    }
+  }
   logger.error('Unhandled Promise Rejection', {
     error: err.message,
     stack: err.stack,
@@ -468,6 +519,13 @@ process.on('uncaughtException', (err) => {
         3. Wait for the port to become available`,
     });
   } else {
+    if (process.env.SENTRY_DSN || process.env.SENTRY_BACKEND_DSN) {
+      try {
+        require('@sentry/node').captureException(err);
+      } catch (_) {
+        /* ignore */
+      }
+    }
     logger.error('Uncaught Exception', {
       error: err.message,
       stack: err.stack,

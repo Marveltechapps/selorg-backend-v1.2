@@ -33,6 +33,7 @@ const settingsRoutes = require('./settingsRoutes');
 const pickOpsRoutes = require('./pickOpsRoutes');
 const issueRoutes = require('./issueRoutes');
 const operationsRoutes = require('./operationsRoutes');
+const logisticsRoutes = require('./logisticsRoutes');
 const devTestController = require('../controllers/devTestController');
 
 // Auth (login only) - no JWT required
@@ -70,6 +71,7 @@ protectedRouter.use('/settings', settingsRoutes);
 protectedRouter.use('/pick-ops', pickOpsRoutes);
 protectedRouter.use('/issues', issueRoutes);
 protectedRouter.use('/operations', operationsRoutes);
+protectedRouter.use('/logistics', logisticsRoutes);
 // Dev-only: test real-time events. Routes always registered; controller returns 404 in production.
 protectedRouter.post('/dev/emit-test-order', devTestController.emitTestOrder);
 protectedRouter.post('/dev/emit-test-order-update', devTestController.emitTestOrderUpdate);

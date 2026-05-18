@@ -1,0 +1,24 @@
+'use strict';
+
+const express = require('express');
+const { logisticsScope } = require('../../logistics/middleware/logisticsScope.middleware');
+const ordersRoutes = require('../../logistics/routes/ordersRoutes');
+const estimateRoutes = require('../../logistics/routes/estimateRoutes');
+
+const router = express.Router();
+router.use(logisticsScope('VENDOR_TO_WAREHOUSE'));
+router.use((req, res, next) => {
+  const pathOnly = (req.originalUrl || '').split('?')[0];
+  if (
+    req.method === 'POST' &&
+    /\/logistics\/orders\/?$/.test(pathOnly) &&
+    !pathOnly.includes('/cancel')
+  ) {
+    req.body = { ...(req.body || {}), type: 'VENDOR_TO_WAREHOUSE' };
+  }
+  next();
+});
+router.use('/orders', ordersRoutes);
+router.use('/estimate', estimateRoutes);
+
+module.exports = router;

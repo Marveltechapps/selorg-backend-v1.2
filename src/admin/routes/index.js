@@ -26,6 +26,7 @@ const pickerOpsRoutes = require('./pickerOpsRoutes');
 const pickerActionLogsRoutes = require('./pickerActionLogsRoutes');
 const trainingVideoAdminRoutes = require('./trainingVideoAdminRoutes');
 const pickerConfigRoutes = require('./pickerConfigRoutes');
+const platformConfigRoutes = require('./platformConfigRoutes');
 
 const router = express.Router();
 
@@ -61,6 +62,7 @@ protectedRouter.use('/picker', pickerOpsRoutes);
 protectedRouter.use('/pickers', pickerApprovalsRoutes);
 protectedRouter.use('/training-videos', trainingVideoAdminRoutes);
 protectedRouter.use('/picker-config', pickerConfigRoutes);
+protectedRouter.use('/platform-config', platformConfigRoutes);
 router.use(protectedRouter);
 
 module.exports = router;

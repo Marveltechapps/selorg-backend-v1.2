@@ -12,7 +12,10 @@ const {
   completeWorldlinePayment,
   getWorldlineStatus,
   worldlineReturn,
+  getPaymentRetryStatus,
+  retryPayment,
 } = require('../controllers/worldlinePaymentsController');
+const { recordFailure } = require('../controllers/paymentRetryController');
 
 const router = Router();
 // Worldline / Paynimo returnUrl (NO auth; gateway callback/redirect target)
@@ -28,5 +31,10 @@ router.post('/methods/:id/default', auth, setDefaultMethod);
 router.post('/worldline/session', auth, createWorldlineSession);
 router.post('/worldline/complete', auth, completeWorldlinePayment);
 router.get('/worldline/status', auth, getWorldlineStatus);
+
+// Payment retry endpoints (new)
+router.get('/:orderId/retry-status', auth, getPaymentRetryStatus);
+router.post('/:orderId/retry', auth, retryPayment);
+router.post('/record-failure', auth, recordFailure);
 
 module.exports = router;

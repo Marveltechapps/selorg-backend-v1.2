@@ -1,13 +1,24 @@
 /**
  * Prometheus metrics collection
  * Provides metrics for monitoring application performance
+ *
+ * Enable: ENABLE_METRICS=true | 1  (always on when set)
+ * Disable in prod: ENABLE_METRICS=false | 0
+ * Default: enabled when NODE_ENV=production unless ENABLE_METRICS=false
  */
 
 let promClient = null;
 
+function isMetricsEnabled() {
+  const flag = String(process.env.ENABLE_METRICS || '').trim().toLowerCase();
+  if (flag === 'false' || flag === '0') return false;
+  if (flag === 'true' || flag === '1') return true;
+  return process.env.NODE_ENV === 'production';
+}
+
 // Initialize Prometheus client (lazy loading)
 const getPrometheusClient = () => {
-  if (!promClient && process.env.ENABLE_METRICS === 'true') {
+  if (!promClient && isMetricsEnabled()) {
     try {
       const prom = require('prom-client');
       promClient = prom;
@@ -86,6 +97,7 @@ const getMetrics = async () => {
 
 module.exports = {
   getPrometheusClient,
+  isMetricsEnabled,
   recordHttpRequest,
   getMetrics,
 };

@@ -43,6 +43,7 @@ const productSchema = new mongoose.Schema(
     sku: { type: String, default: '' },
     classification: { type: String, enum: ['Style', 'Variant'], default: 'Style', index: true },
     tag: { type: String, default: '' },
+    subClassification: { type: String, default: '' },
     hierarchyCode: { type: String, default: '', index: true },
     description: {
       type: new mongoose.Schema(
@@ -271,7 +272,7 @@ const productSchema = new mongoose.Schema(
 productSchema.index({ isActive: 1, order: 1 });
 productSchema.index({ categoryId: 1 });
 productSchema.index({ subcategoryId: 1 });
-productSchema.index({ sku: 1 });
+productSchema.index({ sku: 1 }, { unique: true, sparse: true });
 productSchema.index({ status: 1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ hierarchyCode: 1, classification: 1, isActive: 1, isSaleable: 1 });
