@@ -162,13 +162,7 @@ jobs:
         run: npm audit --production 2>&1 || echo "Security audit warnings found"
       
       - name: Check for hardcoded secrets
-        run: |
-          if grep -r "password\|secret\|key\|token" src/ --include="*.js" | \
-             grep -i "=\s*['\"]" | \
-             grep -v "test\|mock\|example"; then
-            echo "Possible hardcoded secrets found"
-            exit 1
-          fi
+        run: bash security-audit.sh
 
   # Job 5: Summary Report
   summary:

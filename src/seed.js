@@ -29,8 +29,11 @@ const seed = async () => {
   try {
     await connectDB();
     
-    // Default password for all users (change in production!)
-    const defaultPassword = 'password123';
+    const defaultPassword = process.env.SEED_DEFAULT_PASSWORD;
+    if (!defaultPassword) {
+      logger.error('SEED_DEFAULT_PASSWORD env var is required (no hardcoded default in source)');
+      process.exit(1);
+    }
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
     
     // Define users for each dashboard
