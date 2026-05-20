@@ -10,8 +10,98 @@ const AdminSupportFeedback = require('../models/AdminSupportFeedback');
 const User = require('../../vendor/models/User');
 const PickerSupportTicket = require('../../picker/models/supportTicket.model');
 const PickerUser = require('../../picker/models/user.model');
+const { Escalation } = require('../../common-models/Escalation');
+const RefundRequest = require('../../finance/models/RefundRequest');
+const { Order } = require('../../customer-backend/models/Order');
+const dispatchService = require('../../rider/services/dispatchService');
 
 let ticketCounter = 0;
+
+function isPickerTicketId(id) {
+  return id && String(id).startsWith('picker-support-');
+}
+
+function getPickerTicketRawId(id) {
+  return String(id).replace(/^picker-support-/, '');
+}
+
+function makeServiceError(message, status = 400) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function mapCategoryToEscalationType(category) {
+  const map = {
+    order: 'customer_complaint',
+    payment: 'refund_dispute',
+    delivery: 'delivery_failed',
+    account: 'other',
+    technical: 'other',
+    feedback: 'customer_complaint',
+  };
+  return map[String(category || '').toLowerCase()] || 'other';
+}
+
+async function resolveAgentObjectId(agent = {}) {
+  const candidates = [agent.agentId, agent.userId, agent.id].filter(Boolean);
+  for (const id of candidates) {
+    if (mongoose.Types.ObjectId.isValid(String(id))) {
+      return new mongoose.Types.ObjectId(String(id));
+    }
+  }
+  if (agent.email) {
+    const user = await User.findOne({ email: String(agent.email).toLowerCase() }).select('_id').lean();
+    if (user?._id) return user._id;
+  }
+  const adminUser = await User.findOne({ role: { $in: ['admin', 'super_admin'] } }).select('_id').lean();
+  if (adminUser?._id) return adminUser._id;
+  throw makeServiceError('Could not resolve admin user for this action');
+}
+
+async function resolveOrderForTicket(ticketId, mappedTicket, payload = {}) {
+  const orderNumberFromPayload = String(payload.orderNumber || '').trim();
+
+  if (isPickerTicketId(ticketId)) {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      const pickerDoc = await PickerSupportTicket.findById(rawId).select('orderNumber').lean();
+      const orderNumber =
+        orderNumberFromPayload || pickerDoc?.orderNumber || mappedTicket?.orderNumber || '';
+      if (orderNumber) {
+        return Order.findOne({ orderNumber }).lean();
+      }
+    }
+    return null;
+  }
+
+  if (mongoose.Types.ObjectId.isValid(ticketId)) {
+    const doc = await AdminSupportTicket.findById(ticketId).select('orderId orderNumber').lean();
+    if (doc?.orderId) {
+      const byId = await Order.findById(doc.orderId).lean();
+      if (byId) return byId;
+    }
+    const orderNumber = orderNumberFromPayload || doc?.orderNumber || mappedTicket?.orderNumber || '';
+    if (orderNumber) {
+      return Order.findOne({ orderNumber }).lean();
+    }
+  }
+
+  if (orderNumberFromPayload) {
+    return Order.findOne({ orderNumber: orderNumberFromPayload }).lean();
+  }
+  if (mappedTicket?.orderNumber) {
+    return Order.findOne({ orderNumber: mappedTicket.orderNumber }).lean();
+  }
+  return null;
+}
+
+async function persistPickerOrderNumber(ticketId, orderNumber) {
+  if (!isPickerTicketId(ticketId) || !orderNumber) return;
+  const rawId = getPickerTicketRawId(ticketId);
+  if (!mongoose.Types.ObjectId.isValid(rawId)) return;
+  await PickerSupportTicket.findByIdAndUpdate(rawId, { $set: { orderNumber } });
+}
 
 function mapPickerCategoryToAdmin(cat) {
   const c = String(cat || '').toLowerCase();
@@ -25,8 +115,34 @@ function mapPickerCategoryToAdmin(cat) {
 function mapPickerSupportTicketToAdmin(t, user) {
   const status = t.status === 'resolved' ? 'resolved' : t.status === 'in_progress' ? 'in_progress' : 'open';
   const category = mapPickerCategoryToAdmin(t.category);
+  const ticketId = `picker-support-${t._id}`;
+  const notes = [];
+  if (t.message) {
+    notes.push({
+      id: `picker-initial-${t._id}`,
+      ticketId,
+      authorId: String(t.userId),
+      authorName: user?.name || 'Picker',
+      type: 'customer_reply',
+      content: t.message,
+      createdAt: t.createdAt,
+      isInternal: false,
+    });
+  }
+  (t.replies || []).forEach((r, idx) => {
+    notes.push({
+      id: r._id ? String(r._id) : `picker-reply-${t._id}-${idx}`,
+      ticketId,
+      authorId: r.authorId,
+      authorName: r.authorName,
+      type: r.type || 'agent_reply',
+      content: r.content,
+      createdAt: r.createdAt,
+      isInternal: r.isInternal || false,
+    });
+  });
   return {
-    id: `picker-support-${t._id}`,
+    id: ticketId,
     ticketNumber: `PCK-${String(t._id).slice(-8).toUpperCase()}`,
     subject: t.subject || t.category || 'Picker support',
     description: t.message || '',
@@ -38,9 +154,9 @@ function mapPickerSupportTicketToAdmin(t, user) {
     customerEmail: user?.phone ? `${String(user.phone).replace(/\s/g, '')}@picker.local` : 'picker@local',
     customerPhone: user?.phone || '',
     customerId: String(t.userId),
-    assignedTo: undefined,
-    assignedToName: undefined,
-    orderNumber: undefined,
+    assignedTo: t.assignedTo || undefined,
+    assignedToName: t.assignedToName || undefined,
+    orderNumber: t.orderNumber || undefined,
     tags: ['picker_app', t.category].filter(Boolean),
     responseTime: undefined,
     resolutionTime: undefined,
@@ -49,7 +165,7 @@ function mapPickerSupportTicketToAdmin(t, user) {
     resolvedAt: undefined,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
-    notes: [],
+    notes,
   };
 }
 
@@ -216,6 +332,24 @@ async function createTicket(data, agentId, agentName) {
 }
 
 async function updateTicket(id, data) {
+  if (isPickerTicketId(id)) {
+    const rawId = getPickerTicketRawId(id);
+    if (!mongoose.Types.ObjectId.isValid(rawId)) return null;
+    const pickerUpdate = {};
+    if (data.status) {
+      pickerUpdate.status =
+        data.status === 'closed' || data.status === 'resolved' ? 'resolved' : data.status;
+    }
+    const doc = await PickerSupportTicket.findByIdAndUpdate(
+      rawId,
+      { $set: pickerUpdate },
+      { new: true }
+    ).lean();
+    if (!doc) return null;
+    const user = await PickerUser.findById(doc.userId).select('name phone').lean();
+    return mapPickerSupportTicketToAdmin(doc, user);
+  }
+
   const doc = await AdminSupportTicket.findByIdAndUpdate(
     id,
     { $set: data },
@@ -232,17 +366,39 @@ async function updateTicket(id, data) {
 async function assignTicket(ticketId, agentId, agentName) {
   const user = await User.findById(agentId).select('name email').lean();
   const name = agentName || user?.name || 'Unknown';
+
+  if (isPickerTicketId(ticketId)) {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (!mongoose.Types.ObjectId.isValid(rawId)) return null;
+    const doc = await PickerSupportTicket.findByIdAndUpdate(
+      rawId,
+      { $set: { assignedTo: String(agentId), assignedToName: name, status: 'in_progress' } },
+      { new: true }
+    ).lean();
+    if (!doc) return null;
+    await addTicketNote(ticketId, {
+      authorId: String(agentId),
+      authorName: name,
+      type: 'internal_note',
+      content: `Ticket assigned to ${name}`,
+      isInternal: true,
+    });
+    return getTicketById(ticketId);
+  }
+
   const doc = await AdminSupportTicket.findByIdAndUpdate(
     ticketId,
     { $set: { assignedTo: agentId, assignedToName: name, status: 'in_progress' } },
     { new: true }
-  ).populate('assignedTo', 'name email').lean();
+  )
+    .populate('assignedTo', 'name email')
+    .lean();
   if (!doc) return null;
 
   await AdminSupportTicketNote.create({
     ticketId: doc._id,
     authorId: agentId,
-    authorName,
+    authorName: name,
     type: 'assignment',
     content: `Ticket assigned to ${name}`,
     isInternal: true,
@@ -253,12 +409,73 @@ async function assignTicket(ticketId, agentId, agentName) {
 }
 
 async function addTicketNote(ticketId, noteData) {
+  const content = String(noteData.content || '').trim();
+  if (!content) {
+    const err = new Error('Note content is required');
+    err.status = 400;
+    throw err;
+  }
+
+  if (isPickerTicketId(ticketId)) {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (!mongoose.Types.ObjectId.isValid(rawId)) {
+      const err = new Error('Invalid ticket id');
+      err.status = 400;
+      throw err;
+    }
+    const doc = await PickerSupportTicket.findByIdAndUpdate(
+      rawId,
+      {
+        $push: {
+          replies: {
+            authorId: noteData.authorId,
+            authorName: noteData.authorName,
+            type: noteData.type || 'agent_reply',
+            content,
+            isInternal: noteData.isInternal || false,
+          },
+        },
+        $set: { status: 'in_progress' },
+      },
+      { new: true }
+    ).lean();
+    if (!doc) {
+      const err = new Error('Ticket not found');
+      err.status = 404;
+      throw err;
+    }
+    const lastReply = doc.replies[doc.replies.length - 1];
+    return {
+      id: lastReply._id ? String(lastReply._id) : `picker-reply-${doc._id}-${doc.replies.length - 1}`,
+      ticketId: `picker-support-${doc._id}`,
+      authorId: lastReply.authorId,
+      authorName: lastReply.authorName,
+      type: lastReply.type,
+      content: lastReply.content,
+      createdAt: lastReply.createdAt,
+      isInternal: lastReply.isInternal || false,
+    };
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(ticketId)) {
+    const err = new Error('Invalid ticket id');
+    err.status = 400;
+    throw err;
+  }
+
+  const ticketExists = await AdminSupportTicket.findById(ticketId).select('_id').lean();
+  if (!ticketExists) {
+    const err = new Error('Ticket not found');
+    err.status = 404;
+    throw err;
+  }
+
   const doc = await AdminSupportTicketNote.create({
     ticketId: new mongoose.Types.ObjectId(ticketId),
     authorId: noteData.authorId,
     authorName: noteData.authorName,
     type: noteData.type || 'agent_reply',
-    content: noteData.content,
+    content,
     isInternal: noteData.isInternal || false,
   });
   return {
@@ -273,8 +490,62 @@ async function addTicketNote(ticketId, noteData) {
   };
 }
 
-async function closeTicket(ticketId) {
-  return updateTicket(ticketId, { status: 'closed', resolvedAt: new Date() });
+async function closeTicket(ticketId, agent = {}) {
+  const agentId = String(agent.agentId || 'admin');
+  const agentName = String(agent.agentName || 'Admin');
+  const closedAt = new Date();
+
+  if (isPickerTicketId(ticketId)) {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (!mongoose.Types.ObjectId.isValid(rawId)) return null;
+    const doc = await PickerSupportTicket.findByIdAndUpdate(
+      rawId,
+      {
+        $set: { status: 'resolved' },
+        $push: {
+          replies: {
+            authorId: agentId,
+            authorName: agentName,
+            type: 'agent_reply',
+            content: 'Ticket closed by admin',
+            isInternal: true,
+          },
+        },
+      },
+      { new: true }
+    ).lean();
+    if (!doc) return null;
+    const user = await PickerUser.findById(doc.userId).select('name phone').lean();
+    return mapPickerSupportTicketToAdmin(doc, user);
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(ticketId)) return null;
+
+  const ticket = await AdminSupportTicket.findById(ticketId).select('_id status').lean();
+  if (!ticket) return null;
+
+  if (ticket.status !== 'closed') {
+    await AdminSupportTicketNote.create({
+      ticketId: ticket._id,
+      authorId: agentId,
+      authorName: agentName,
+      type: 'status_change',
+      content: 'Ticket closed',
+      isInternal: true,
+    });
+  }
+
+  const doc = await AdminSupportTicket.findByIdAndUpdate(
+    ticketId,
+    { $set: { status: 'closed', resolvedAt: closedAt } },
+    { new: true }
+  )
+    .populate('assignedTo', 'name email')
+    .lean();
+  if (!doc) return null;
+
+  const notes = await AdminSupportTicketNote.find({ ticketId: doc._id }).sort({ createdAt: 1 }).lean();
+  return mapTicketToResponse(doc, notes);
 }
 
 async function listAgents() {
@@ -485,6 +756,245 @@ async function listFeedback() {
   }));
 }
 
+async function escalateTicket(ticketId, payload = {}, agent = {}) {
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) return null;
+
+  const targetTeam = payload.targetTeam === 'rider_ops' ? 'rider_ops' : 'darkstore';
+  const description = String(
+    payload.description || payload.notes || ticket.description || ticket.subject || ''
+  ).trim();
+  if (!description) throw makeServiceError('Escalation description is required');
+
+  const agentId = String(agent.agentId || '');
+  const createdBy = await resolveAgentObjectId(agent);
+
+  const order = await resolveOrderForTicket(ticketId, ticket, payload);
+  const escalationPayload = {
+    targetTeam,
+    type: mapCategoryToEscalationType(ticket.category),
+    description,
+    priority:
+      ticket.priority === 'urgent' ? 'critical' : ticket.priority === 'high' ? 'high' : 'medium',
+    status: 'open',
+    createdBy,
+    orderId: order?._id || undefined,
+    customerId:
+      ticket.customerId && mongoose.Types.ObjectId.isValid(ticket.customerId)
+        ? new mongoose.Types.ObjectId(ticket.customerId)
+        : undefined,
+  };
+
+  if (!isPickerTicketId(ticketId) && mongoose.Types.ObjectId.isValid(ticketId)) {
+    escalationPayload.ticketId = new mongoose.Types.ObjectId(ticketId);
+  }
+
+  const escalation = await Escalation.create(escalationPayload);
+  const teamLabel = targetTeam === 'darkstore' ? 'Store' : 'Rider Ops';
+
+  await addTicketNote(ticketId, {
+    authorId: agentId,
+    authorName: String(agent.agentName || 'Admin'),
+    type: 'internal_note',
+    content: `Escalated to ${teamLabel}: ${description}`,
+    isInternal: true,
+  });
+
+  if (isPickerTicketId(ticketId)) {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      await PickerSupportTicket.findByIdAndUpdate(rawId, {
+        $set: { escalatedTo: targetTeam, status: 'in_progress' },
+      });
+    }
+  } else {
+    await AdminSupportTicket.findByIdAndUpdate(ticketId, {
+      $set: {
+        escalatedTo: targetTeam,
+        escalationType: escalationPayload.type,
+        escalationId: escalation._id,
+        status: 'in_progress',
+      },
+    });
+  }
+
+  return getTicketById(ticketId);
+}
+
+async function triggerRefund(ticketId, payload = {}, agent = {}) {
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) return null;
+
+  const orderNumberInput = String(payload.orderNumber || '').trim();
+  if (orderNumberInput) {
+    await persistPickerOrderNumber(ticketId, orderNumberInput);
+  }
+
+  const order = await resolveOrderForTicket(ticketId, ticket, payload);
+  if (!order) {
+    throw makeServiceError(
+      isPickerTicketId(ticketId)
+        ? 'Enter a valid customer order number to trigger a refund'
+        : 'Link an order to this ticket before triggering a refund'
+    );
+  }
+
+  const amount = Number(payload.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw makeServiceError('Valid refund amount is required');
+  }
+
+  const reasonText = String(
+    payload.reasonText || payload.reason || 'Triggered from support ticket'
+  ).trim();
+  const validReasons = [
+    'item_damaged',
+    'expired',
+    'late_delivery',
+    'wrong_item',
+    'customer_cancelled',
+    'item_not_available',
+    'quality_issue',
+    'partial_delivery',
+    'other',
+  ];
+  const reasonCode = validReasons.includes(payload.reasonCode) ? payload.reasonCode : 'other';
+
+  const refund = await RefundRequest.create({
+    orderId: String(order._id),
+    orderNumber: order.orderNumber,
+    customerId: String(order.userId),
+    customerName: ticket.customerName || 'Customer',
+    customerEmail: ticket.customerEmail || '',
+    customerPhone: ticket.customerPhone || '',
+    reasonCode,
+    reasonText,
+    amount,
+    currency: 'INR',
+    status: 'pending',
+    channel: 'customer_support',
+    ticketId:
+      !isPickerTicketId(ticketId) && mongoose.Types.ObjectId.isValid(ticketId)
+        ? new mongoose.Types.ObjectId(ticketId)
+        : undefined,
+    timeline: [
+      {
+        status: 'pending',
+        timestamp: new Date(),
+        actor: String(agent.agentName || 'Admin'),
+        note: reasonText,
+      },
+    ],
+  });
+
+  if (!isPickerTicketId(ticketId)) {
+    await AdminSupportTicket.findByIdAndUpdate(ticketId, {
+      $set: { linkedRefundId: refund._id, status: 'in_progress' },
+    });
+  } else {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      await PickerSupportTicket.findByIdAndUpdate(rawId, {
+        $set: { orderNumber: order.orderNumber, status: 'in_progress' },
+      });
+    }
+  }
+
+  await addTicketNote(ticketId, {
+    authorId: String(agent.agentId || 'admin'),
+    authorName: String(agent.agentName || 'Admin'),
+    type: 'internal_note',
+    content: `Refund requested: ₹${amount.toFixed(2)} — ${reasonText}`,
+    isInternal: true,
+  });
+
+  const updatedTicket = await getTicketById(ticketId);
+  return {
+    ticket: updatedTicket,
+    refund: {
+      id: refund._id.toString(),
+      amount: refund.amount,
+      status: refund.status,
+      orderNumber: refund.orderNumber,
+    },
+  };
+}
+
+async function triggerRedelivery(ticketId, payload = {}, agent = {}) {
+  const ticket = await getTicketById(ticketId);
+  if (!ticket) return null;
+
+  const orderNumberInput = String(payload.orderNumber || '').trim();
+  if (orderNumberInput) {
+    await persistPickerOrderNumber(ticketId, orderNumberInput);
+  }
+
+  const order = await resolveOrderForTicket(ticketId, ticket, payload);
+  if (!order) {
+    throw makeServiceError(
+      isPickerTicketId(ticketId)
+        ? 'Enter a valid customer order number to trigger re-delivery'
+        : 'Link an order to this ticket before triggering re-delivery'
+    );
+  }
+
+  const addr = order.deliveryAddress || {};
+  const dropLocation = [addr.line1, addr.line2, addr.city, addr.state, addr.pincode]
+    .filter(Boolean)
+    .join(', ')
+    .trim();
+  if (!dropLocation) {
+    throw makeServiceError('Order has no delivery address for re-delivery');
+  }
+
+  let items = (order.items || [])
+    .map((i) => i.productName || i.name)
+    .filter(Boolean);
+  if (items.length === 0) {
+    items = ['Re-delivery items'];
+  }
+
+  const notes =
+    String(payload.notes || '').trim() ||
+    `Re-delivery from support ticket ${ticket.ticketNumber}`;
+
+  const dispatch = await dispatchService.createManualOrder({
+    orderType: 'standard',
+    items,
+    dropLocation,
+    customerName: ticket.customerName || 'Customer',
+    customerPhone: ticket.customerPhone || '',
+    pickupLocation: 'Store',
+  });
+
+  if (isPickerTicketId(ticketId)) {
+    const rawId = getPickerTicketRawId(ticketId);
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      await PickerSupportTicket.findByIdAndUpdate(rawId, {
+        $set: { orderNumber: order.orderNumber, status: 'in_progress' },
+      });
+    }
+  } else {
+    await AdminSupportTicket.findByIdAndUpdate(ticketId, {
+      $set: { status: 'in_progress' },
+    });
+  }
+
+  await addTicketNote(ticketId, {
+    authorId: String(agent.agentId || 'admin'),
+    authorName: String(agent.agentName || 'Admin'),
+    type: 'internal_note',
+    content: `${notes} (Dispatch order: ${dispatch.orderId})`,
+    isInternal: true,
+  });
+
+  const updatedTicket = await getTicketById(ticketId);
+  return {
+    ticket: updatedTicket,
+    dispatch,
+  };
+}
+
 module.exports = {
   listTickets,
   getTicketById,
@@ -505,4 +1015,7 @@ module.exports = {
   updateFAQ,
   deleteFAQ,
   listFeedback,
+  escalateTicket,
+  triggerRefund,
+  triggerRedelivery,
 };

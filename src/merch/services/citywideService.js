@@ -8,9 +8,36 @@ const OpsIntegrationHealth = require('../models/OpsIntegrationHealth');
 const OpsSurgeConfig = require('../models/OpsSurgeConfig');
 const OpsDispatchConfig = require('../models/OpsDispatchConfig');
 const OpsSlaConfig = require('../models/OpsSlaConfig');
+const { CustomerUser } = require('../../customer-backend/models/CustomerUser');
+const Notification = require('../../customer-backend/models/Notification');
+const websocketService = require('../../utils/websocket');
 const logger = require('../../core/utils/logger');
 
 const DEFAULT_CITY_ID = 'default';
+const MAX_DISPATCH_LOG_ENTRIES = 100;
+
+async function appendDispatchLog(cityId, entry) {
+  const logEntry = {
+    timestamp: new Date(),
+    action: entry.action,
+    message: entry.message || '',
+    status: entry.status || 'running',
+    userId: entry.userId || null,
+  };
+  await OpsDispatchConfig.findOneAndUpdate(
+    { cityId },
+    {
+      $push: {
+        activityLog: {
+          $each: [logEntry],
+          $position: 0,
+          $slice: MAX_DISPATCH_LOG_ENTRIES,
+        },
+      },
+    },
+    { upsert: true }
+  );
+}
 
 /**
  * Format seconds to "Xm Ys"
@@ -385,14 +412,27 @@ async function getSurgeConfig(cityId = DEFAULT_CITY_ID) {
  */
 async function updateSurgeConfig(cityId, update, userId) {
   const { zoneId, multiplier, ...rest } = update;
+  const current = await OpsSurgeConfig.findOne({ cityId }).lean();
   const setUpdate = { updatedBy: userId, updatedAt: new Date(), ...rest };
 
   if (zoneId != null && multiplier != null) {
-    const config = await OpsSurgeConfig.findOne({ cityId }).lean();
-    const zoneMultipliers = { ...(config?.zoneMultipliers || {}) };
+    const zoneMultipliers = { ...(current?.zoneMultipliers || {}) };
     zoneMultipliers[zoneId] = multiplier;
     setUpdate.zoneMultipliers = zoneMultipliers;
     setUpdate.active = Object.values(zoneMultipliers).some((m) => m > 1) || (rest.globalMultiplier > 1);
+  }
+
+  const nextMultiplier = rest.globalMultiplier ?? current?.globalMultiplier ?? 1.0;
+  const willBeActive = rest.active === true || nextMultiplier > 1 || setUpdate.active === true;
+  if (willBeActive && nextMultiplier > 1) {
+    setUpdate.active = true;
+    if (!current?.active || !current?.startTime) {
+      setUpdate.startTime = new Date();
+      setUpdate.estimatedEnd = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      if (!setUpdate.reason && !current?.reason) {
+        setUpdate.reason = 'Peak demand';
+      }
+    }
   }
 
   await OpsSurgeConfig.findOneAndUpdate(
@@ -401,6 +441,109 @@ async function updateSurgeConfig(cityId, update, userId) {
     { new: true, upsert: true }
   );
   return getSurgeConfig(cityId);
+}
+
+/**
+ * Increase global surge multiplier by 0.1x (max 2.0x)
+ */
+async function increaseSurgePricing(cityId, userId) {
+  const current = await OpsSurgeConfig.findOne({ cityId }).lean();
+  const currentMult = current?.globalMultiplier ?? 1.0;
+  const newMult = Math.min(2.0, Math.round((currentMult + 0.1) * 10) / 10);
+  return updateSurgeConfig(cityId, { globalMultiplier: newMult, active: true }, userId);
+}
+
+/**
+ * Notify active customers about active surge pricing
+ */
+async function notifySurgeCustomers(cityId, userId) {
+  const config = await getSurgeConfig(cityId);
+  if (!config.active || config.globalMultiplier <= 1) {
+    const err = new Error('Activate surge pricing before notifying customers');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const title = 'Surge pricing in effect';
+  const body = `Delivery fees may be slightly higher (${config.globalMultiplier.toFixed(1)}x) due to high demand in your area.`;
+
+  const users = await CustomerUser.find({ status: 'active' }).select('_id').limit(500).lean();
+  if (users.length > 0) {
+    const notifications = users.map((u) => ({
+      userId: u._id,
+      title,
+      body,
+      data: { type: 'surge_pricing', multiplier: config.globalMultiplier, cityId },
+      read: false,
+    }));
+    await Notification.insertMany(notifications);
+  }
+
+  websocketService.broadcastToRole('customer', 'surge:notification', {
+    title,
+    body,
+    multiplier: config.globalMultiplier,
+    cityId,
+  });
+
+  logger.info('Surge customer notifications sent', { cityId, count: users.length, userId });
+  return { sent: users.length, surgeInfo: config };
+}
+
+/**
+ * Notify online riders about surge period
+ */
+async function notifySurgeRiders(cityId, userId) {
+  const config = await getSurgeConfig(cityId);
+  if (!config.active || config.globalMultiplier <= 1) {
+    const err = new Error('Activate surge pricing before notifying riders');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const title = 'Surge period active';
+  const body = `High demand in your area — ${config.globalMultiplier.toFixed(1)}x delivery incentives may apply. Stay online to earn more.`;
+
+  const riders = await Rider.find({ status: { $in: ['online', 'idle', 'busy'] } }).select('id').lean();
+
+  websocketService.broadcastToRole('rider', 'surge:notification', {
+    title,
+    body,
+    multiplier: config.globalMultiplier,
+    cityId,
+    zonesAffected: config.zonesAffected,
+  });
+
+  riders.forEach((rider) => {
+    websocketService.broadcastToUser(rider.id, 'surge:notification', {
+      title,
+      body,
+      multiplier: config.globalMultiplier,
+      cityId,
+    });
+  });
+
+  logger.info('Surge rider notifications sent', { cityId, count: riders.length, userId });
+  return { sent: riders.length, surgeInfo: config };
+}
+
+/**
+ * Execute a surge quick action
+ */
+async function executeSurgeAction(cityId, action, userId) {
+  switch (action) {
+    case 'increase_pricing':
+      return { surgeInfo: await increaseSurgePricing(cityId, userId) };
+    case 'notify_customers':
+      return notifySurgeCustomers(cityId, userId);
+    case 'notify_riders':
+      return notifySurgeRiders(cityId, userId);
+    default: {
+      const err = new Error(`Unknown surge action: ${action}`);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
 }
 
 /**
@@ -429,12 +572,18 @@ async function getDispatchConfig(cityId = DEFAULT_CITY_ID) {
     };
   }
   const uptime = config.lastRestart ? Math.floor((Date.now() - new Date(config.lastRestart).getTime()) / 60000) : 0;
+  let processingOrders = 0;
+  try {
+    processingOrders = await Order.countDocuments({ status: 'pending' });
+  } catch (err) {
+    logger.warn('Failed to count pending orders for dispatch config', { err: err.message });
+  }
   return {
     status: config.status || 'running',
     lastRestart: config.lastRestart,
     uptime: `${uptime} mins`,
     uptimePercent: 99,
-    processingOrders: 0,
+    processingOrders,
     avgDispatchTime: 45,
     successRate: 99,
     configuration: config.config || {
@@ -470,6 +619,24 @@ async function updateDispatchConfig(cityId, update, userId) {
     { $set: setUpdate },
     { new: true, upsert: true }
   );
+
+  if (update?.status && update.status !== current?.status) {
+    const action = update.status === 'paused' ? 'pause' : 'resume';
+    await appendDispatchLog(cityId, {
+      action,
+      message: `Dispatch engine ${action === 'pause' ? 'paused' : 'resumed'}`,
+      status: nextStatus,
+      userId,
+    });
+  } else if (update?.config && Object.keys(update.config).length > 0) {
+    await appendDispatchLog(cityId, {
+      action: 'config_update',
+      message: 'Dispatch configuration updated',
+      status: nextStatus,
+      userId,
+    });
+  }
+
   return getDispatchConfig(cityId);
 }
 
@@ -482,7 +649,53 @@ async function restartDispatch(cityId, userId) {
     { status: 'running', lastRestart: new Date(), updatedBy: userId, updatedAt: new Date() },
     { new: true, upsert: true }
   );
+  await appendDispatchLog(cityId, {
+    action: 'restart',
+    message: 'Dispatch engine restarted',
+    status: 'running',
+    userId,
+  });
   return getDispatchConfig(cityId);
+}
+
+/**
+ * Manual override — force pause or resume regardless of current state
+ */
+async function manualOverrideDispatch(cityId, { status, reason }, userId) {
+  const targetStatus = status === 'paused' ? 'paused' : 'running';
+  await OpsDispatchConfig.findOneAndUpdate(
+    { cityId },
+    {
+      status: targetStatus,
+      updatedBy: userId,
+      updatedAt: new Date(),
+      ...(targetStatus === 'running' ? { lastRestart: new Date() } : {}),
+    },
+    { upsert: true }
+  );
+  await appendDispatchLog(cityId, {
+    action: 'manual_override',
+    message: reason?.trim() || `Manual override: forced ${targetStatus}`,
+    status: targetStatus,
+    userId,
+  });
+  return getDispatchConfig(cityId);
+}
+
+/**
+ * Get dispatch engine activity logs
+ */
+async function getDispatchLogs(cityId = DEFAULT_CITY_ID, limit = 50) {
+  const config = await OpsDispatchConfig.findOne({ cityId }).lean();
+  const logs = (config?.activityLog || []).slice(0, limit);
+  return logs.map((log, index) => ({
+    id: `${cityId}-${index}-${new Date(log.timestamp).getTime()}`,
+    timestamp: log.timestamp,
+    action: log.action,
+    message: log.message,
+    status: log.status,
+    userId: log.userId,
+  }));
 }
 
 /**
@@ -588,10 +801,16 @@ module.exports = {
   getIntegrationHealth,
   getSurgeConfig,
   updateSurgeConfig,
+  increaseSurgePricing,
+  notifySurgeCustomers,
+  notifySurgeRiders,
+  executeSurgeAction,
   endSurge,
   getDispatchConfig,
   updateDispatchConfig,
   restartDispatch,
+  manualOverrideDispatch,
+  getDispatchLogs,
   getSlaConfig,
   seedCitywideData,
 };

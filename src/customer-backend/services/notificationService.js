@@ -175,5 +175,7 @@ module.exports = {
   sendPushNotification,
   sendOrderStatusNotification,
   sendRefundNotification,
+  deliverToExpo,
+  fillTemplate,
   NOTIFICATION_TYPES,
 };

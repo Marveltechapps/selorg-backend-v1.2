@@ -43,6 +43,27 @@ async function updateConfig(id, patch) {
   return LogisticsProviderConfig.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
 }
 
+async function reorderConfig(id, direction) {
+  const configs = await LogisticsProviderConfig.find().sort({ priority: 1, name: 1 }).lean();
+  const idx = configs.findIndex((c) => String(c._id) === String(id));
+  if (idx < 0) return null;
+
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= configs.length) {
+    return listConfigs();
+  }
+
+  const current = configs[idx];
+  const adjacent = configs[swapIdx];
+  const currentPriority = current.priority;
+  const adjacentPriority = adjacent.priority;
+
+  await LogisticsProviderConfig.findByIdAndUpdate(current._id, { $set: { priority: adjacentPriority } });
+  await LogisticsProviderConfig.findByIdAndUpdate(adjacent._id, { $set: { priority: currentPriority } });
+
+  return listConfigs();
+}
+
 function encryptCredentialsIfKeyPresent(obj) {
   const key = process.env.LOGISTICS_CRED_ENCRYPTION_KEY;
   if (!key || !obj) return '';
@@ -53,5 +74,6 @@ module.exports = {
   ensureDefaultConfigs,
   listConfigs,
   updateConfig,
+  reorderConfig,
   encryptCredentialsIfKeyPresent,
 };

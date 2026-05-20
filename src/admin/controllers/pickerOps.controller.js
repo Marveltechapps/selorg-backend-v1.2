@@ -94,6 +94,16 @@ async function deactivateAgency(req, res, next) {
   }
 }
 
+async function activateAgency(req, res, next) {
+  try {
+    const { agencyId } = req.params;
+    await pickerOpsService.activateAgency(agencyId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listStoreShiftSlots(req, res, next) {
   try {
     const { storeId } = req.params;
@@ -233,6 +243,7 @@ module.exports = {
   listAgencies,
   createAgency,
   deactivateAgency,
+  activateAgency,
   listStoreShiftSlots,
   createStoreShiftSlot,
   listOtRequests,

@@ -113,8 +113,24 @@ async function sendAdminCreationConfirmationEmail({
   await sendEmail({ to, subject, html, text });
 }
 
+async function sendAdminPasswordResetEmail({ to, name, temporaryPassword }) {
+  const subject = 'Your Selorg Admin Password Has Been Reset';
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1f2937">
+      <h2 style="margin:0 0 12px 0">Password reset</h2>
+      <p style="margin:0 0 12px 0">Hi ${name || 'User'}, your admin account password was reset by an administrator.</p>
+      <p style="margin:0 0 8px 0">Temporary password:</p>
+      <div style="font-size:22px;letter-spacing:2px;font-weight:700;background:#f3f4f6;padding:12px 16px;border-radius:8px;display:inline-block">${temporaryPassword}</div>
+      <p style="margin:16px 0 0 0;color:#6b7280">Sign in and change your password as soon as possible.</p>
+    </div>
+  `;
+  const text = `Hi ${name || 'User'}, your Selorg admin password was reset. Temporary password: ${temporaryPassword}`;
+  await sendEmail({ to, subject, html, text });
+}
+
 module.exports = {
   sendAdminUserOtpEmail,
   sendAdminUserCreatedEmail,
   sendAdminCreationConfirmationEmail,
+  sendAdminPasswordResetEmail,
 };

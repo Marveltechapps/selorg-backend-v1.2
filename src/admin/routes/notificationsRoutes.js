@@ -24,7 +24,7 @@ router.get('/scheduled', authenticateToken, cacheMiddleware(cacheTtl), notificat
 // Automation
 router.get('/automation', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.listAutomation);
 router.post('/automation', authenticateToken, notificationsController.createAutomation);
-router.put('/automation/:id', authenticateToken, notificationsController.updateAutomationStatus);
+router.put('/automation/:id', authenticateToken, notificationsController.updateAutomation);
 
 // Analytics & History
 router.get('/analytics', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.getAnalytics);

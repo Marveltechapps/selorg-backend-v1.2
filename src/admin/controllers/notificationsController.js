@@ -3,6 +3,9 @@ const NotificationCampaign = require('../models/NotificationCampaign');
 const NotificationScheduled = require('../models/NotificationScheduled');
 const NotificationAutomation = require('../models/NotificationAutomation');
 const NotificationHistory = require('../models/NotificationHistory');
+const { dispatchCampaign } = require('../services/campaignDispatchService');
+const { invalidateNotifications } = require('../cacheInvalidation');
+const logger = require('../../core/utils/logger');
 const { asyncHandler } = require('../../core/middleware');
 
 /** Extract variables from template body (e.g. {{user_name}} -> user_name) */
@@ -51,6 +54,7 @@ const notificationsController = {
       priority: priority || 'medium',
       status: status || 'active',
     });
+    await invalidateNotifications().catch(() => {});
     const data = toTemplate(template);
     res.status(201).json({ success: true, data });
   }),
@@ -62,6 +66,7 @@ const notificationsController = {
       { new: true, runValidators: true }
     );
     if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
+    await invalidateNotifications().catch(() => {});
     const data = toTemplate(template);
     res.json({ success: true, data });
   }),
@@ -69,6 +74,7 @@ const notificationsController = {
   deleteTemplate: asyncHandler(async (req, res) => {
     const result = await NotificationTemplate.findByIdAndDelete(req.params.id);
     if (!result) return res.status(404).json({ success: false, message: 'Template not found' });
+    await invalidateNotifications().catch(() => {});
     res.json({ success: true });
   }),
 
@@ -104,15 +110,38 @@ const notificationsController = {
 
   createCampaign: asyncHandler(async (req, res) => {
     const { name, templateId, templateName, segment, channels, scheduleType, scheduledAt } = req.body;
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Campaign name is required' });
+    }
+    if (!templateId) {
+      return res.status(400).json({ success: false, message: 'templateId is required' });
+    }
+
     const template = await NotificationTemplate.findById(templateId);
     if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
+
     const isImmediate = scheduleType === 'immediate' || !scheduleType;
-    const campaign = await NotificationCampaign.create({
-      name: name || 'New Campaign',
+    if (!isImmediate && !scheduledAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Schedule date and time is required for scheduled campaigns',
+      });
+    }
+
+    const campaignChannels =
+      channels && Array.isArray(channels) && channels.length > 0
+        ? channels
+        : template.channels?.length > 0
+          ? template.channels
+          : ['push'];
+
+    let campaign = await NotificationCampaign.create({
+      name: String(name).trim(),
       templateId,
       templateName: templateName || template.name,
       segment: segment || 'all',
-      channels: channels && Array.isArray(channels) ? channels : ['push'],
+      channels: campaignChannels,
       status: isImmediate ? 'active' : 'scheduled',
       scheduledAt: isImmediate ? undefined : scheduledAt ? new Date(scheduledAt) : undefined,
       startedAt: isImmediate ? new Date() : undefined,
@@ -126,6 +155,7 @@ const notificationsController = {
       clickRate: 0,
       createdBy: req.user?.email || req.user?.name || 'admin',
     });
+
     if (!isImmediate && scheduledAt) {
       await NotificationScheduled.create({
         campaignId: campaign._id,
@@ -137,10 +167,21 @@ const notificationsController = {
         status: 'pending',
         createdBy: campaign.createdBy,
       });
+    } else if (isImmediate) {
+      try {
+        await dispatchCampaign(campaign, template);
+        campaign = await NotificationCampaign.findById(campaign._id);
+      } catch (err) {
+        logger.error('Campaign dispatch failed', {
+          campaignId: campaign._id.toString(),
+          err: err.message,
+        });
+      }
     }
+
+    await invalidateNotifications().catch(() => {});
+
     const data = campaign.toJSON();
-    data.id = data._id.toString();
-    delete data._id;
     res.status(201).json({ success: true, data });
   }),
 
@@ -152,6 +193,7 @@ const notificationsController = {
       { new: true }
     );
     if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+    await invalidateNotifications().catch(() => {});
     res.json({ success: true });
   }),
 
@@ -211,20 +253,78 @@ const notificationsController = {
       successRate: 0,
     });
     const data = rule.toJSON();
-    data.id = data._id.toString();
-    delete data._id;
+    await invalidateNotifications().catch(() => {});
     res.status(201).json({ success: true, data });
   }),
 
-  updateAutomationStatus: asyncHandler(async (req, res) => {
-    const { status } = req.body;
-    const rule = await NotificationAutomation.findByIdAndUpdate(
-      req.params.id,
-      { $set: { status } },
-      { new: true }
-    );
+  updateAutomation: asyncHandler(async (req, res) => {
+    const { status, name, trigger, templateId, delay, channels, conditions } = req.body;
+    const rule = await NotificationAutomation.findById(req.params.id);
     if (!rule) return res.status(404).json({ success: false, message: 'Automation rule not found' });
-    res.json({ success: true });
+
+    const isFullUpdate =
+      name !== undefined ||
+      trigger !== undefined ||
+      templateId !== undefined ||
+      delay !== undefined ||
+      channels !== undefined ||
+      conditions !== undefined;
+
+    if (!isFullUpdate) {
+      if (status === undefined) {
+        return res.status(400).json({ success: false, message: 'No fields to update' });
+      }
+      rule.status = status;
+      await rule.save();
+      await invalidateNotifications().catch(() => {});
+      return res.json({ success: true });
+    }
+
+    if (name !== undefined) {
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ success: false, message: 'Rule name is required' });
+      }
+      rule.name = String(name).trim();
+    }
+    if (trigger !== undefined) {
+      rule.trigger = trigger;
+    }
+    if (templateId !== undefined) {
+      const template = await NotificationTemplate.findById(templateId);
+      if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
+      rule.templateId = templateId;
+      rule.templateName = template.name;
+    }
+    if (delay !== undefined) {
+      rule.delay = typeof delay === 'number' ? delay : parseInt(delay, 10) || 0;
+    }
+    if (channels !== undefined) {
+      if (!Array.isArray(channels) || channels.length === 0) {
+        return res.status(400).json({ success: false, message: 'At least one channel is required' });
+      }
+      rule.channels = channels;
+    }
+    if (conditions !== undefined) {
+      rule.conditions = conditions;
+    }
+    if (status !== undefined) {
+      rule.status = status;
+    }
+
+    await rule.save();
+    await invalidateNotifications().catch(() => {});
+
+    const populated = await NotificationAutomation.findById(rule._id)
+      .populate('templateId', 'name')
+      .lean();
+    const data = {
+      ...populated,
+      id: populated._id.toString(),
+      _id: undefined,
+      templateId: populated.templateId?._id?.toString() || populated.templateId?.toString(),
+      templateName: populated.templateName || populated.templateId?.name || 'N/A',
+    };
+    res.json({ success: true, data });
   }),
 
   // --- Analytics ---

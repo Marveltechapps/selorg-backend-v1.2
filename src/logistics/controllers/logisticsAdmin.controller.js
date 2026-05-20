@@ -21,6 +21,17 @@ const patchProvider = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
+const reorderProvider = asyncHandler(async (req, res) => {
+  const data = await providerConfig.reorderConfig(
+    req.validatedParams.id,
+    req.validatedBody.direction
+  );
+  if (!data) {
+    throw new LogisticsError('Provider config not found', 404, 'NOT_FOUND');
+  }
+  res.json({ success: true, data });
+});
+
 const costPerRoute = asyncHandler(async (req, res) => {
   const data = await analytics.costPerRoute(req.validatedQuery.from, req.validatedQuery.to);
   res.json({ success: true, data });
@@ -36,4 +47,11 @@ const kpis = asyncHandler(async (_req, res) => {
   res.json({ success: true, data });
 });
 
-module.exports = { listProviders, patchProvider, costPerRoute, slaBreaches, kpis };
+module.exports = {
+  listProviders,
+  patchProvider,
+  reorderProvider,
+  costPerRoute,
+  slaBreaches,
+  kpis,
+};

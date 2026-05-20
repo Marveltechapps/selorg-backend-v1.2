@@ -37,6 +37,7 @@ router.post('/pickers/:pickerId/push', ...adminOrWorkforce, pickerOpsController.
 router.get('/agencies', ...adminOrWorkforce, pickerOpsController.listAgencies);
 router.post('/agencies', ...adminOrWorkforce, pickerOpsController.createAgency);
 router.post('/agencies/:agencyId/deactivate', ...adminOrWorkforce, pickerOpsController.deactivateAgency);
+router.post('/agencies/:agencyId/activate', ...adminOrWorkforce, pickerOpsController.activateAgency);
 
 // Shift slots per store
 router.get('/stores/:storeId/shift-slots', ...adminOrWorkforce, pickerOpsController.listStoreShiftSlots);

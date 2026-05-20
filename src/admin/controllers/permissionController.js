@@ -1,4 +1,5 @@
 const Permission = require('../models/Permission');
+const Role = require('../models/Role');
 const logger = require('../../core/utils/logger');
 const cacheInvalidation = require('../cacheInvalidation');
 const { logAdminAction } = require('../services/adminAudit.service');
@@ -317,6 +318,23 @@ const deletePermission = async (req, res, next) => {
       });
     }
 
+    const rolesUsing = await Role.find({ permissions: permission.name, isActive: true })
+      .select('name')
+      .lean();
+    if (rolesUsing.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'PERMISSION_IN_USE',
+          message: `Cannot delete: assigned to ${rolesUsing.length} role(s): ${rolesUsing.map((r) => r.name).join(', ')}`,
+        },
+        meta: {
+          requestId: req.id,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     await Permission.findByIdAndDelete(id);
 
     logger.info('Permission deleted', {
@@ -326,6 +344,7 @@ const deletePermission = async (req, res, next) => {
     });
 
     await cacheInvalidation.invalidatePermissions().catch(() => {});
+    await cacheInvalidation.invalidateRoles().catch(() => {});
     await logAdminAction({
       action: 'permission_deleted',
       entityType: 'permission',

@@ -15,9 +15,18 @@ const patchProviderBody = z
     message: 'Provide isActive and/or priority',
   });
 
+const reorderProviderBody = z.object({
+  direction: z.enum(['up', 'down']),
+});
+
 const analyticsCostQuery = z.object({
   from: z.coerce.date(),
   to: z.coerce.date(),
 });
 
-module.exports = { patchProviderParams, patchProviderBody, analyticsCostQuery };
+module.exports = {
+  patchProviderParams,
+  patchProviderBody,
+  reorderProviderBody,
+  analyticsCostQuery,
+};

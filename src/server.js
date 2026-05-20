@@ -279,8 +279,10 @@ app.use('/api/v1/rider/auth', riderAuthRoutes);
 // may not yet implement all administrative or onboarding features.
 const riderHrRoutes = require('./rider/routes/hrRoutes');
 const riderKitRoutes = require('./rider/routes/kitRoutes');
+const riderLegalAdminRoutes = require('./rider/routes/admin/legalAdminRoutes');
 app.use('/api/v1/rider/hr', riderHrRoutes);
 app.use('/api/v1/rider/kit', riderKitRoutes);
+app.use('/api/v1/rider/admin/legal', riderLegalAdminRoutes);
 
 // CRITICAL: Mount legacy rider orders (list, assign, alert) BEFORE main rider router.
 // This ensures /api/v1/rider/orders/:orderId/assign always uses warehouse orderService

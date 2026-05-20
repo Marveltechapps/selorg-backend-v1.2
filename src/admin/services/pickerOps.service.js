@@ -21,15 +21,19 @@ async function listPickers({ q, status, page = 1, limit = 50 }) {
     query.$or = [{ name: rx }, { phone: rx }];
   }
   if (status && status !== 'all') {
-    const target =
-      status === 'pending'
-        ? 'PENDING'
-        : status === 'approved'
-          ? 'ACTIVE'
-          : status === 'rejected'
-            ? 'REJECTED'
-            : 'BLOCKED';
-    query.status = target;
+    if (status === 'deactivated') {
+      query.status = { $in: ['BLOCKED', 'SUSPENDED'] };
+    } else {
+      const target =
+        status === 'pending'
+          ? 'PENDING'
+          : status === 'approved'
+            ? 'ACTIVE'
+            : status === 'rejected'
+              ? 'REJECTED'
+              : 'BLOCKED';
+      query.status = target;
+    }
   }
 
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
@@ -152,6 +156,12 @@ async function createAgency(payload) {
 
 async function deactivateAgency(agencyId) {
   const agency = await PickerAgency.findByIdAndUpdate(agencyId, { $set: { isActive: false } }, { new: true }).lean();
+  if (!agency) throw new Error('Agency not found');
+  return agency;
+}
+
+async function activateAgency(agencyId) {
+  const agency = await PickerAgency.findByIdAndUpdate(agencyId, { $set: { isActive: true } }, { new: true }).lean();
   if (!agency) throw new Error('Agency not found');
   return agency;
 }
@@ -325,6 +335,7 @@ module.exports = {
   listAgencies,
   createAgency,
   deactivateAgency,
+  activateAgency,
   listStoreShiftSlots,
   createStoreShiftSlot,
   listOtRequests,

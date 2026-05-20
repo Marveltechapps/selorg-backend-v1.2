@@ -150,6 +150,26 @@ const updateSurge = async (req, res, next) => {
   }
 };
 
+// POST /merch/citywide/surge/actions
+const executeSurgeAction = async (req, res, next) => {
+  try {
+    const cityId = getCityId(req);
+    const userId = req.user?.id || req.user?.email || 'unknown';
+    const { action } = req.body || {};
+    const validActions = ['increase_pricing', 'notify_customers', 'notify_riders'];
+    if (!action || !validActions.includes(action)) {
+      return next(new ErrorResponse(`action must be one of: ${validActions.join(', ')}`, 400));
+    }
+    const data = await citywideService.executeSurgeAction(cityId, action, userId);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    if (err.statusCode) {
+      return next(new ErrorResponse(err.message, err.statusCode));
+    }
+    next(err);
+  }
+};
+
 // DELETE /merch/citywide/surge
 const endSurge = async (req, res, next) => {
   try {
@@ -197,6 +217,34 @@ const restartDispatch = async (req, res, next) => {
   }
 };
 
+// POST /merch/citywide/dispatch/manual-override
+const manualOverrideDispatch = async (req, res, next) => {
+  try {
+    const cityId = getCityId(req);
+    const userId = req.user?.id || req.user?.email || 'unknown';
+    const { status, reason } = req.body || {};
+    if (!status || !['running', 'paused'].includes(status)) {
+      return next(new ErrorResponse('status must be "running" or "paused"', 400));
+    }
+    const data = await citywideService.manualOverrideDispatch(cityId, { status, reason }, userId);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /merch/citywide/dispatch/logs
+const getDispatchLogs = async (req, res, next) => {
+  try {
+    const cityId = getCityId(req);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+    const data = await citywideService.getDispatchLogs(cityId, limit);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // GET /merch/citywide/sla
 const getSla = async (req, res, next) => {
   try {
@@ -225,6 +273,8 @@ module.exports = {
   getZoneDetail,
   getZoneOrderTrend,
   restartDispatch,
+  manualOverrideDispatch,
+  getDispatchLogs,
   getIncidents,
   getIncidentById,
   updateIncident,
@@ -233,6 +283,7 @@ module.exports = {
   getIntegrationHealth,
   getSurge,
   updateSurge,
+  executeSurgeAction,
   endSurge,
   getDispatch,
   updateDispatch,

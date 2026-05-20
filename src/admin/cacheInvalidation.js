@@ -38,6 +38,10 @@ async function invalidateCacheStats() {
   await cacheService.delPattern(`${PREFIX}/cache*`);
 }
 
+async function invalidateNotifications() {
+  await cacheService.delPattern(`${PREFIX}/notifications*`);
+}
+
 module.exports = {
   invalidateUsers,
   invalidateRoles,
@@ -47,4 +51,5 @@ module.exports = {
   invalidateStaff,
   invalidateAudit,
   invalidateCacheStats,
+  invalidateNotifications,
 };

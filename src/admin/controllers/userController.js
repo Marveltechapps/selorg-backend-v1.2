@@ -12,6 +12,7 @@ const {
   sendAdminUserOtpEmail,
   sendAdminUserCreatedEmail,
   sendAdminCreationConfirmationEmail,
+  sendAdminPasswordResetEmail,
 } = require('../services/userOnboardingEmailService');
 
 const DASHBOARD_ROLES = ['darkstore', 'production', 'merch', 'rider', 'finance', 'warehouse', 'admin', 'vendor'];
@@ -61,6 +62,46 @@ function hashOtp(email, otp) {
     .createHash('sha256')
     .update(`${email.toLowerCase()}|${otp}|${process.env.OTP_HASH_SECRET || 'selorg-admin-otp'}`)
     .digest('hex');
+}
+
+function generateTempPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#';
+  const randomBytes = crypto.randomBytes(12);
+  let plain = '';
+  for (let i = 0; i < 12; i++) {
+    plain += chars[randomBytes[i] % chars.length];
+  }
+  return `${plain}A1`;
+}
+
+async function applyPasswordReset(user, plainPassword, sendEmail = true) {
+  const hashedPassword = await bcrypt.hash(plainPassword, 10);
+  user.password = hashedPassword;
+  await user.save();
+
+  const dashboardRole = getDashboardRole(user.role);
+  if (dashboardRole) {
+    try {
+      await VendorUser.findOneAndUpdate(
+        { email: user.email.toLowerCase() },
+        { $set: { password: hashedPassword } },
+        { upsert: false }
+      );
+    } catch (syncErr) {
+      logger.warn('Failed to sync password reset to dashboard login', {
+        email: user.email,
+        err: syncErr.message,
+      });
+    }
+  }
+
+  if (sendEmail) {
+    await sendAdminPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      temporaryPassword: plainPassword,
+    });
+  }
 }
 
 /**
@@ -899,11 +940,65 @@ const assignRole = async (req, res, next) => {
 };
 
 /**
+ * Reset user password (admin-initiated)
+ */
+const resetPassword = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const sendEmail = req.body?.sendEmail !== false;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'USER_NOT_FOUND',
+          message: 'User not found',
+        },
+        meta: {
+          requestId: req.id,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    const plainPassword = generateTempPassword();
+    await applyPasswordReset(user, plainPassword, sendEmail);
+
+    await auditAdminAction(req, 'admin', 'user_password_reset', 'User', id, {
+      email: user.email,
+      emailSent: sendEmail,
+    });
+    await cacheInvalidation.invalidateUsers().catch(() => {});
+
+    res.json({
+      success: true,
+      data: {
+        newPassword: plainPassword,
+        message: 'Password has been reset',
+        emailSent: sendEmail,
+      },
+      meta: {
+        requestId: req.id,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error('Error resetting user password', {
+      error: error.message,
+      stack: error.stack,
+      requestId: req.id,
+    });
+    next(error);
+  }
+};
+
+/**
  * Bulk user operations
  */
 const bulkUserAction = async (req, res, next) => {
   try {
-    const { action, userIds, roleId, updates } = req.body;
+    const { action, userIds, roleId, updates, sendEmail } = req.body;
 
     if (!action || !userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({
@@ -919,7 +1014,7 @@ const bulkUserAction = async (req, res, next) => {
       });
     }
 
-    const validActions = ['activate', 'deactivate', 'assign_role', 'update'];
+    const validActions = ['activate', 'deactivate', 'assign_role', 'update', 'reset_password'];
     if (!validActions.includes(action)) {
       return res.status(400).json({
         success: false,
@@ -980,7 +1075,7 @@ const bulkUserAction = async (req, res, next) => {
       }
     }
 
-    const results = { updated: 0, failed: 0, errors: [] };
+    const results = { updated: 0, failed: 0, errors: [], passwords: [] };
 
     for (const id of userIds) {
       try {
@@ -1003,12 +1098,27 @@ const bulkUserAction = async (req, res, next) => {
           if (updates.status) user.status = updates.status;
           if (updates.department !== undefined) user.department = updates.department;
           if (updates.notes !== undefined) user.notes = updates.notes;
+        } else if (action === 'reset_password') {
+          const plainPassword = generateTempPassword();
+          await applyPasswordReset(user, plainPassword, sendEmail !== false);
+          results.passwords.push({
+            userId: id,
+            email: user.email,
+            newPassword: plainPassword,
+          });
         }
 
-        await user.save();
+        if (action !== 'reset_password') {
+          await user.save();
+        }
         results.updated++;
 
-        const auditAction = action === 'assign_role' ? 'role_assign' : 'user_update';
+        const auditAction =
+          action === 'assign_role'
+            ? 'role_assign'
+            : action === 'reset_password'
+              ? 'user_password_reset'
+              : 'user_update';
         await auditAdminAction(req, 'admin', auditAction, 'User', id, {
           action,
           email: user.email,
@@ -1051,5 +1161,6 @@ module.exports = {
   updateUser,
   deleteUser,
   assignRole,
+  resetPassword,
   bulkUserAction,
 };

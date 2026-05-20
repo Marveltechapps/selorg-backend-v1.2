@@ -27,6 +27,7 @@ const pickerActionLogsRoutes = require('./pickerActionLogsRoutes');
 const trainingVideoAdminRoutes = require('./trainingVideoAdminRoutes');
 const pickerConfigRoutes = require('./pickerConfigRoutes');
 const platformConfigRoutes = require('./platformConfigRoutes');
+const appSettingsRoutes = require('./appSettingsRoutes');
 
 const router = express.Router();
 
@@ -49,6 +50,7 @@ protectedRouter.use('/access-logs', accessLogsRoutes);
 protectedRouter.use('/sessions', sessionsRoutes);
 protectedRouter.use('/cache', cacheRoutes);
 protectedRouter.use('/system', systemRoutes);
+protectedRouter.use('/app-settings', appSettingsRoutes);
 protectedRouter.use('/integrations', integrationRoutes);
 protectedRouter.use('/applications', applicationsRoutes);
 protectedRouter.use('/analytics', analyticsRoutes);

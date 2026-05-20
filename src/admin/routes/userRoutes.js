@@ -33,6 +33,7 @@ router.post('/verification/verify-otp', requirePermission(PERMISSIONS.ADMIN_USER
 
 // Create/update/delete users - requires manage_users permission
 router.post('/', requirePermission(PERMISSIONS.ADMIN_USERS_WRITE), asyncHandler(userController.createUser));
+router.put('/:id/reset-password', requirePermission(PERMISSIONS.ADMIN_USERS_WRITE), asyncHandler(userController.resetPassword));
 router.put('/:id', requirePermission(PERMISSIONS.ADMIN_USERS_WRITE), asyncHandler(userController.updateUser));
 router.delete('/:id', requirePermission(PERMISSIONS.ADMIN_USERS_WRITE), asyncHandler(userController.deleteUser));
 

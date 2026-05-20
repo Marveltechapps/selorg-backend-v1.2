@@ -13,6 +13,9 @@ router.patch('/tickets/:id', adminSupportController.updateTicket);
 router.post('/tickets/:id/assign', adminSupportController.assignTicket);
 router.post('/tickets/:id/notes', adminSupportController.addNote);
 router.post('/tickets/:id/close', adminSupportController.closeTicket);
+router.post('/tickets/:id/escalate', adminSupportController.escalateTicket);
+router.post('/tickets/:id/refund', adminSupportController.triggerRefund);
+router.post('/tickets/:id/redelivery', adminSupportController.triggerRedelivery);
 
 router.get('/agents', adminSupportController.listAgents);
 router.get('/categories', adminSupportController.listCategories);

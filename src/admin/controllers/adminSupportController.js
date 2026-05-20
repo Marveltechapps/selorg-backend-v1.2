@@ -44,11 +44,15 @@ const assignTicket = asyncHandler(async (req, res) => {
 });
 
 const addNote = asyncHandler(async (req, res) => {
+  const content = String(req.body.content || '').trim();
+  if (!content) {
+    return res.status(400).json({ success: false, error: 'Note content is required' });
+  }
   const noteData = {
-    authorId: req.body.authorId || req.user?.id || 'agent-1',
-    authorName: req.body.authorName || req.user?.name || 'Current Agent',
+    authorId: req.body.authorId || req.user?.userId || req.user?.id || 'agent-1',
+    authorName: req.body.authorName || req.user?.name || req.user?.email || 'Current Agent',
     type: req.body.type || 'agent_reply',
-    content: req.body.content,
+    content,
     isInternal: req.body.isInternal || false,
   };
   const data = await adminSupportService.addTicketNote(req.params.id, noteData);
@@ -56,7 +60,10 @@ const addNote = asyncHandler(async (req, res) => {
 });
 
 const closeTicket = asyncHandler(async (req, res) => {
-  const data = await adminSupportService.closeTicket(req.params.id);
+  const data = await adminSupportService.closeTicket(req.params.id, {
+    agentId: req.user?.userId || req.user?.id || 'admin',
+    agentName: req.user?.name || req.user?.email || 'Admin',
+  });
   if (!data) return res.status(404).json({ success: false, error: 'Ticket not found' });
   res.json({ success: true, data });
 });
@@ -130,6 +137,56 @@ const listFeedback = asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 });
 
+const agentFromRequest = (req) => ({
+  agentId: req.user?.userId || req.user?.id || req.user?._id,
+  agentName: req.user?.name || req.user?.email || 'Admin',
+});
+
+const escalateTicket = asyncHandler(async (req, res) => {
+  try {
+    const data = await adminSupportService.escalateTicket(
+      req.params.id,
+      req.body,
+      agentFromRequest(req)
+    );
+    if (!data) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    const status = err.status || 400;
+    return res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+const triggerRefund = asyncHandler(async (req, res) => {
+  try {
+    const data = await adminSupportService.triggerRefund(
+      req.params.id,
+      req.body,
+      agentFromRequest(req)
+    );
+    if (!data) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    const status = err.status || 400;
+    return res.status(status).json({ success: false, error: err.message });
+  }
+});
+
+const triggerRedelivery = asyncHandler(async (req, res) => {
+  try {
+    const data = await adminSupportService.triggerRedelivery(
+      req.params.id,
+      req.body,
+      agentFromRequest(req)
+    );
+    if (!data) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    const status = err.status || 400;
+    return res.status(status).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = {
   listTickets,
   getTicket,
@@ -150,4 +207,7 @@ module.exports = {
   updateFAQ,
   deleteFAQ,
   listFeedback,
+  escalateTicket,
+  triggerRefund,
+  triggerRedelivery,
 };

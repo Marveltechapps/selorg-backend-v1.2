@@ -2,6 +2,20 @@ const Settings = require('../models/Settings');
 const AuditLog = require('../models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
+const { mergeAppSettings } = require('../../admin/controllers/appSettingsController');
+
+function toPlainSettings(doc) {
+  if (!doc) return mergeAppSettings(null);
+  const raw = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+  return mergeAppSettings({
+    refreshIntervals: raw.refreshIntervals,
+    storeMode: raw.storeMode,
+    notifications: raw.notifications,
+    display: raw.display,
+    performance: raw.performance,
+    outbound: raw.outbound,
+  });
+}
 
 /**
  * Get Application Settings
@@ -21,15 +35,17 @@ const getSettings = async (req, res) => {
       await settings.save();
     }
     
+    const normalized = toPlainSettings(settings);
     res.status(200).json({
       success: true,
       settings: {
-        refreshIntervals: settings.refreshIntervals,
-        storeMode: settings.storeMode,
-        notifications: settings.notifications,
-        display: settings.display,
-        performance: settings.performance,
-        outbound: settings.outbound,
+        ...normalized,
+        outbound: settings.outbound || {
+          autoDispatchEnabled: true,
+          autoDispatchThreshold: 5,
+          maxOrdersPerRider: 5,
+          enableRiderAutoAssignment: true,
+        },
       },
       lastUpdated: settings.lastUpdated,
     });
@@ -110,14 +126,11 @@ const updateSettings = async (req, res) => {
       store_id: storeId,
     });
     
+    const normalized = toPlainSettings(settings);
     res.status(200).json({
       success: true,
       settings: {
-        refreshIntervals: settings.refreshIntervals,
-        storeMode: settings.storeMode,
-        notifications: settings.notifications,
-        display: settings.display,
-        performance: settings.performance,
+        ...normalized,
         outbound: settings.outbound,
       },
       lastUpdated: settings.lastUpdated,
