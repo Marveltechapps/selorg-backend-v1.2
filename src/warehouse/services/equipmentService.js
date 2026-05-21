@@ -49,8 +49,16 @@ const equipmentService = {
 
   addEquipment: async (warehouseKey, data) => {
     const id = data.equipmentId || data.id || `EQP-${(await WarehouseEquipment.countDocuments(warehouseKeyMatch(warehouseKey)) + 1).toString().padStart(3, '0')}`;
+
+    const existing = await WarehouseEquipment.findOne(mergeWarehouseFilter({ id }, warehouseKey));
+    if (existing) {
+      throw new ErrorResponse(`Equipment ID ${id} already exists`, 400);
+    }
+
     const doc = await WarehouseEquipment.create({
       id,
+      // Legacy DB index on serialNumber is unique non-sparse; always set a value.
+      serialNumber: data.serialNumber || id,
       name: data.name || 'New Equipment',
       type: data.type || 'forklift',
       status: data.status === 'idle' ? 'idle' : 'active',

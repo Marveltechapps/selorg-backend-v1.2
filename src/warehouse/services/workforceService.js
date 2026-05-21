@@ -5,6 +5,7 @@ const WarehouseTraining = require('../models/WarehouseTraining');
 const WarehouseAttendance = require('../models/WarehouseAttendance');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
 const { mergeWarehouseFilter, warehouseKeyMatch, warehouseFieldsForCreate } = require('../constants/warehouseScope');
+const { validateStaffPayload } = require('../constants/workforceConstants');
 
 /**
  * @desc Warehouse Workforce Service
@@ -48,20 +49,26 @@ const workforceService = {
   },
 
   addStaff: async (warehouseKey, data) => {
+    const validation = validateStaffPayload(data);
+    if (!validation.valid) {
+      throw new ErrorResponse(validation.errors.join('; '), 400);
+    }
+
+    const { name, email, phone, role, shift, hourlyRate } = validation.payload;
     const count = await Staff.countDocuments(warehouseKeyMatch(warehouseKey));
     const id = data.id || `STAFF-${(count + 1).toString().padStart(3, '0')}`;
     const staffData = {
       id,
-      name: data.name,
-      role: data.role || 'Picker',
+      name,
+      role,
       status: 'Offline',
-      shift: data.shift || 'morning',
-      email: data.email || '',
-      phone: data.phone || '',
+      shift,
+      email,
+      phone,
       joinDate: data.joinDate || new Date().toISOString().split('T')[0],
       joinedAt: data.joinDate ? new Date(data.joinDate) : new Date(),
       productivity: data.productivity || 0,
-      hourlyRate: data.hourlyRate || 0
+      hourlyRate,
     };
     const staff = await Staff.create({ ...staffData, ...warehouseFieldsForCreate(warehouseKey) });
     return {

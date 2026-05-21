@@ -4,6 +4,7 @@ const StorageLocation = require('../models/StorageLocation');
 const Picklist = require('../models/Picklist');
 const WarehouseEquipment = require('../models/WarehouseEquipment');
 const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
+const { listAdminZonesForWarehouse } = require('./warehouseAdminZoneService');
 
 /**
  * Parse CSV buffer to rows. Expects header: SKU, Name, Category, Price, Quantity (or similar)
@@ -76,6 +77,11 @@ const utilitiesService = {
   },
 
   getZones: async (warehouseKey) => {
+    const adminZones = await listAdminZonesForWarehouse(warehouseKey);
+    if (adminZones.length > 0) {
+      return adminZones.map((z) => z.name);
+    }
+
     const zones = await StorageLocation.distinct('zone', warehouseKeyMatch(warehouseKey));
     const normalizedPrimaryZones = (zones || [])
       .filter(z => z != null && String(z).trim())
@@ -85,7 +91,6 @@ const utilitiesService = {
       return [...new Set(normalizedPrimaryZones)].sort();
     }
 
-    // Fallback for warehouses that do not yet have storage locations seeded.
     const [picklistZones, equipmentZones] = await Promise.all([
       Picklist.distinct('zone', warehouseKeyMatch(warehouseKey)),
       WarehouseEquipment.distinct('zone', warehouseKeyMatch(warehouseKey)),

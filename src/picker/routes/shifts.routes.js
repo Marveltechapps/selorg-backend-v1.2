@@ -26,5 +26,6 @@ router.get('/', ...dashboardAuth, shiftManagementController.list);
 router.post('/', ...dashboardAuth, shiftManagementController.create);
 router.patch('/:id', ...dashboardAuth, shiftManagementController.update);
 router.post('/:id/assign', ...dashboardAuth, shiftManagementController.assign);
+router.post('/:id/reassign', ...dashboardAuth, shiftManagementController.reassign);
 
 module.exports = router;

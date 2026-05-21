@@ -1,7 +1,83 @@
 const Picklist = require('../models/Picklist');
 const PickingBatch = require('../models/PickingBatch');
+const WarehouseOrder = require('../models/Order');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
 const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
+
+function normalizePicklistStatus(status) {
+  const raw = (status && String(status).trim()) || 'pending';
+  const s = raw.toLowerCase();
+  if (s === 'queued') return 'pending';
+  if (s === 'inprogress' || s === 'in-progress') return 'picking';
+  return s;
+}
+
+function normalizePicklistPriority(priority) {
+  if (priority === 'high' || priority === 'urgent') return 'urgent';
+  if (priority === 'medium') return 'high';
+  return 'standard';
+}
+
+async function loadOrdersForPicklists(warehouseKey, picklists) {
+  const keys = new Set();
+  for (const p of picklists) {
+    for (const k of [p.orderId, p.order_id, p.id]) {
+      if (k && String(k).trim()) keys.add(String(k).trim());
+    }
+  }
+  if (keys.size === 0) return new Map();
+
+  const keyList = [...keys];
+  const orders = await WarehouseOrder.find(
+    mergeWarehouseFilter(
+      {
+        $or: [{ id: { $in: keyList } }, { order_id: { $in: keyList } }],
+      },
+      warehouseKey
+    )
+  ).lean();
+
+  const orderByKey = new Map();
+  for (const o of orders) {
+    if (o.id) orderByKey.set(o.id, o);
+    if (o.order_id) orderByKey.set(o.order_id, o);
+  }
+  return orderByKey;
+}
+
+function mapPicklistForFrontend(picklist, orderByKey) {
+  const orderKey = picklist.orderId || picklist.order_id || picklist.id;
+  const order =
+    orderByKey.get(orderKey) ||
+    orderByKey.get(picklist.orderId) ||
+    orderByKey.get(picklist.order_id) ||
+    orderByKey.get(picklist.id);
+
+  const customer =
+    picklist.customer ||
+    picklist.customerName ||
+    picklist.customer_name ||
+    order?.customerName ||
+    order?.customer_name ||
+    order?.dropLocation ||
+    '';
+
+  const items = Number(picklist.items);
+  const itemCount = Number.isFinite(items) && items > 0
+    ? items
+    : Number(picklist.items_count) || (Array.isArray(order?.items) ? order.items.length : 0);
+
+  return {
+    id: picklist.id || picklist.picklist_id || String(picklist._id || ''),
+    orderId: picklist.orderId || picklist.order_id || picklist.id || '',
+    customer: String(customer).trim(),
+    items: itemCount,
+    priority: normalizePicklistPriority(picklist.priority),
+    status: normalizePicklistStatus(picklist.status),
+    picker: picklist.picker || picklist.picker_id || undefined,
+    zone: picklist.zone || picklist.locationZone || order?.zone || '',
+  };
+}
 
 /**
  * @desc Outbound Operations Service
@@ -17,12 +93,8 @@ const outboundService = {
     const picklists = await Picklist.find(mergeWarehouseFilter(query, warehouseKey))
       .sort({ createdAt: -1 })
       .lean();
-    // Map priority values to match frontend expectations
-    return picklists.map(p => ({
-      ...p,
-      priority: p.priority === 'high' ? 'urgent' : p.priority === 'medium' ? 'high' : 'standard',
-      status: p.status === 'queued' ? 'pending' : p.status
-    }));
+    const orderByKey = await loadOrdersForPicklists(warehouseKey, picklists);
+    return picklists.map((p) => mapPicklistForFrontend(p, orderByKey));
   },
 
   /**

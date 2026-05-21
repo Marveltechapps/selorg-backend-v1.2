@@ -11,9 +11,12 @@ const GRNSchema = new mongoose.Schema({
   discrepancyNotes: { type: String },
   discrepancyType: { type: String },
   vendorPOId: { type: mongoose.Schema.Types.ObjectId, ref: 'PurchaseOrder', index: true },
+  dockId: { type: String, trim: true, index: true },
 }, { timestamps: true, collection: 'warehouse_grns' });
 
 GRNSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
-module.exports = mongoose.models.GRN || mongoose.model('GRN', GRNSchema);
+// Must not use model name 'GRN' — darkstore/vendor/production also register 'GRN' with different schemas.
+module.exports =
+  mongoose.models.WarehouseGRN || mongoose.model('WarehouseGRN', GRNSchema, 'warehouse_grns');
 

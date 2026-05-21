@@ -1,4 +1,5 @@
 const equipmentService = require('../services/equipmentService');
+const cacheInvalidation = require('../cacheInvalidation');
 const { asyncHandler } = require('../../core/middleware');
 
 /**
@@ -22,6 +23,7 @@ const equipmentController = {
 
   addEquipment: asyncHandler(async (req, res) => {
     const equipment = await equipmentService.addEquipment(req.user.warehouseKey, req.body);
+    await cacheInvalidation.invalidateWarehouse().catch(() => {});
     res.status(201).json({ success: true, data: equipment });
   }),
 
@@ -32,11 +34,13 @@ const equipmentController = {
 
   reportIssue: asyncHandler(async (req, res) => {
     const ticket = await equipmentService.reportIssue(req.user.warehouseKey, req.params.id, req.body);
+    await cacheInvalidation.invalidateWarehouse().catch(() => {});
     res.status(200).json({ success: true, data: ticket, meta: { message: 'Issue reported successfully' } });
   }),
 
   resolveIssue: asyncHandler(async (req, res) => {
     const equipment = await equipmentService.resolveIssue(req.user.warehouseKey, req.params.id);
+    await cacheInvalidation.invalidateWarehouse().catch(() => {});
     res.status(200).json({ success: true, data: equipment, meta: { message: 'Issue marked as resolved' } });
   }),
 

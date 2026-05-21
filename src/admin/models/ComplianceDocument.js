@@ -66,6 +66,7 @@ function toDoc(doc) {
     tags: d.tags || [],
     acknowledged: d.acknowledged || false,
     acknowledgedBy: d.acknowledgedBy || [],
+    fileUrl: d.fileUrl || null,
     lastUpdated: d.updatedAt?.toISOString?.() || d.uploadedAt?.toISOString?.() || new Date().toISOString(),
   };
 }

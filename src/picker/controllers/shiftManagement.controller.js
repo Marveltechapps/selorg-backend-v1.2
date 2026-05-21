@@ -3,6 +3,7 @@
  */
 const shiftManagementService = require('../services/shiftManagement.service');
 const { success, error } = require('../utils/response.util');
+const { invalidatePickerCache } = require('../cacheInvalidation');
 
 const list = async (req, res, next) => {
   try {
@@ -17,6 +18,7 @@ const list = async (req, res, next) => {
 const create = async (req, res, next) => {
   try {
     const data = await shiftManagementService.createShift(req.body);
+    await invalidatePickerCache();
     success(res, data, 201);
   } catch (err) {
     next(err);
@@ -27,6 +29,7 @@ const update = async (req, res, next) => {
   try {
     const data = await shiftManagementService.updateShift(req.params.id, req.body);
     if (!data) return res.status(404).json({ success: false, message: 'Shift not found' });
+    await invalidatePickerCache();
     success(res, data);
   } catch (err) {
     next(err);
@@ -64,10 +67,36 @@ const assign = async (req, res, next) => {
     if (!result.success) {
       return res.status(400).json({ success: false, message: result.error });
     }
+    await invalidatePickerCache();
     success(res, { message: result.message || 'Picker assigned' });
   } catch (err) {
     next(err);
   }
 };
 
-module.exports = { list, create, update, getRoster, listPickers, assign };
+const reassign = async (req, res, next) => {
+  try {
+    const { previousPickerId, newPickerId, date } = req.body;
+    if (!previousPickerId || !newPickerId || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'previousPickerId, newPickerId, and date are required',
+      });
+    }
+    const result = await shiftManagementService.reassignPicker(
+      req.params.id,
+      previousPickerId,
+      newPickerId,
+      date
+    );
+    if (!result.success) {
+      return res.status(400).json({ success: false, message: result.error });
+    }
+    await invalidatePickerCache();
+    success(res, { message: result.message || 'Picker reassigned' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { list, create, update, getRoster, listPickers, assign, reassign };

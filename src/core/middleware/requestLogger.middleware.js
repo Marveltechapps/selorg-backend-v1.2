@@ -1,4 +1,5 @@
 const logger = require('../utils/logger');
+const runtimePerformanceTracker = require('../../shared/services/runtimePerformanceTracker');
 
 const REQUEST_LOG = process.env.REQUEST_LOG || 'full';
 const MINIMAL = REQUEST_LOG === 'minimal';
@@ -37,6 +38,7 @@ const requestLoggerMiddleware = (req, res, next) => {
     }
 
     try {
+      runtimePerformanceTracker.recordRequest(duration);
       const metrics = require('../../utils/metrics');
       if (metrics.isMetricsEnabled && metrics.isMetricsEnabled()) {
         metrics.recordHttpRequest(req.method, req.path, res.statusCode, duration);

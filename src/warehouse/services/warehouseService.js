@@ -1,5 +1,6 @@
 const GRN = require('../models/GRN');
 const Picklist = require('../models/Picklist');
+const WarehouseOrder = require('../models/Order');
 const InventoryItem = require('../models/InventoryItem');
 const StockAlert = require('../models/StockAlert');
 const StorageLocation = require('../models/StorageLocation');
@@ -7,7 +8,175 @@ const InventoryAdjustment = require('../models/InventoryAdjustment');
 const QCInspection = require('../models/QCInspection');
 const Staff = require('../models/Staff');
 const WarehouseEquipment = require('../models/WarehouseEquipment');
+const WarehouseException = require('../models/WarehouseException');
 const { mergeWarehouseFilter, warehouseKeyMatch } = require('../constants/warehouseScope');
+
+const ACTIVE_PICKLIST_FILTER = { status: { $nin: ['completed', 'cancelled'] } };
+
+const PENDING_STATUSES = new Set(['queued', 'pending', 'assigned']);
+const PICKING_STATUSES = new Set(['picking', 'inprogress', 'in-progress', 'paused']);
+const DISPATCHING_STATUSES = new Set([
+  'dispatching',
+  'packing',
+  'ready',
+  'ready_to_dispatch',
+  'staged',
+  'dispatch',
+]);
+
+function normalizePicklistStatus(status) {
+  const raw = (status && String(status).trim()) || 'pending';
+  const s = raw.toLowerCase();
+  if (s === 'queued') return 'pending';
+  return s;
+}
+
+function resolvePicklistItemCount(picklist, order) {
+  const n = Number(picklist?.items);
+  if (Number.isFinite(n) && n > 0) return n;
+  if (Array.isArray(picklist?.items) && picklist.items.length > 0) return picklist.items.length;
+  if (Array.isArray(picklist?.lineItems) && picklist.lineItems.length > 0) {
+    return picklist.lineItems.reduce(
+      (sum, line) => sum + (Number(line?.quantity) || 1),
+      0
+    );
+  }
+  if (Array.isArray(order?.items) && order.items.length > 0) return order.items.length;
+  return 0;
+}
+
+function resolvePicklistDestination(picklist, order) {
+  const fromPicklist =
+    picklist?.customer ||
+    picklist?.customerName ||
+    picklist?.customer_name ||
+    picklist?.destination ||
+    picklist?.dropLocation;
+  if (fromPicklist && String(fromPicklist).trim()) return String(fromPicklist).trim();
+
+  if (order) {
+    const deliveryLine =
+      order.delivery?.address &&
+      typeof order.delivery.address === 'object' &&
+      (order.delivery.address.line1 || order.delivery.address.city)
+        ? [order.delivery.address.line1, order.delivery.address.city]
+            .filter(Boolean)
+            .join(', ')
+        : null;
+    const fromOrder =
+      order.dropLocation ||
+      deliveryLine ||
+      order.customerName ||
+      order.pickupLocation;
+    if (fromOrder && String(fromOrder).trim()) return String(fromOrder).trim();
+  }
+
+  const zone = picklist?.zone || picklist?.locationZone;
+  if (zone && String(zone).trim()) return `Zone ${String(zone).trim()}`;
+
+  return '';
+}
+
+function mapPicklistToFlowEntry(picklist, orderByKey) {
+  const orderKey = picklist.orderId || picklist.order_id || picklist.id;
+  const order =
+    orderByKey.get(orderKey) ||
+    orderByKey.get(picklist.orderId) ||
+    orderByKey.get(picklist.order_id) ||
+    orderByKey.get(picklist.id);
+
+  return {
+    id: picklist.id || picklist.orderId || picklist.order_id || String(picklist._id || ''),
+    orderId: picklist.orderId || picklist.order_id || picklist.id || String(picklist._id || ''),
+    customer: resolvePicklistDestination(picklist, order),
+    items: resolvePicklistItemCount(picklist, order),
+    priority:
+      picklist.priority === 'high' || picklist.priority === 'urgent'
+        ? 'urgent'
+        : picklist.priority === 'medium'
+          ? 'high'
+          : 'standard',
+    status: normalizePicklistStatus(picklist.status),
+    zone: picklist.zone || picklist.locationZone || order?.zone || '',
+    updatedAt: picklist.updatedAt,
+  };
+}
+
+async function loadOrdersForPicklists(warehouseKey, picklists) {
+  const keys = new Set();
+  for (const p of picklists) {
+    for (const k of [p.orderId, p.order_id, p.id]) {
+      if (k && String(k).trim()) keys.add(String(k).trim());
+    }
+  }
+  if (keys.size === 0) return new Map();
+
+  const keyList = [...keys];
+  const orders = await WarehouseOrder.find(
+    mergeWarehouseFilter(
+      {
+        $or: [
+          { id: { $in: keyList } },
+          { order_id: { $in: keyList } },
+        ],
+      },
+      warehouseKey
+    )
+  ).lean();
+
+  const orderByKey = new Map();
+  for (const o of orders) {
+    if (o.id) orderByKey.set(o.id, o);
+    if (o.order_id) orderByKey.set(o.order_id, o);
+  }
+  return orderByKey;
+}
+
+async function countOrderFlowByStatus(warehouseKey) {
+  const rows = await Picklist.aggregate([
+    { $match: mergeWarehouseFilter(ACTIVE_PICKLIST_FILTER, warehouseKey) },
+    {
+      $project: {
+        statusNorm: {
+          $toLower: { $ifNull: ['$status', 'pending'] },
+        },
+      },
+    },
+    { $group: { _id: '$statusNorm', count: { $sum: 1 } } },
+  ]);
+
+  let pending = 0;
+  let picking = 0;
+  let dispatching = 0;
+
+  for (const row of rows) {
+    const status = normalizePicklistStatus(row._id);
+    const count = row.count || 0;
+    if (PENDING_STATUSES.has(status)) pending += count;
+    else if (PICKING_STATUSES.has(status)) picking += count;
+    else if (DISPATCHING_STATUSES.has(status)) dispatching += count;
+    else dispatching += count;
+  }
+
+  return {
+    pending,
+    picking,
+    dispatching,
+    total: pending + picking + dispatching,
+  };
+}
+
+function deriveOperationalStatus(metrics, openExceptions) {
+  const { inboundQueue = 0, outboundQueue = 0, criticalAlerts = 0, capacityUtilization = {} } = metrics;
+  const bins = capacityUtilization.bins ?? 0;
+  if (criticalAlerts > 0 || openExceptions > 2 || outboundQueue > 50 || inboundQueue > 25) {
+    return { status: 'critical', message: 'Immediate attention required' };
+  }
+  if (outboundQueue > 20 || inboundQueue > 12 || bins >= 90 || openExceptions > 0) {
+    return { status: 'warning', message: 'Elevated load — monitor closely' };
+  }
+  return { status: 'healthy', message: 'Operations running normally' };
+}
 
 /**
  * @desc Warehouse Overview Service
@@ -19,7 +188,7 @@ const warehouseService = {
       mergeWarehouseFilter({ status: { $in: ['pending', 'in-progress'] } }, warehouseKey)
     );
     const outboundQueue = await Picklist.countDocuments(
-      mergeWarehouseFilter({ status: { $in: ['queued', 'assigned', 'picking'] } }, warehouseKey)
+      mergeWarehouseFilter(ACTIVE_PICKLIST_FILTER, warehouseKey)
     );
     const criticalAlerts = await StockAlert.countDocuments(
       mergeWarehouseFilter({ priority: 'high' }, warehouseKey)
@@ -54,8 +223,19 @@ const warehouseService = {
     const coldUtil = coldTotal > 0 ? Math.round((coldOccupied / coldTotal) * 1000) / 10 : 0;
 
     // ambient/util for non-cold zones (fallback)
-    const ambientTotal = totalBins - coldTotal;
-    const ambientOccupied = occupiedBins - coldOccupied;
+    const stageTotal = await StorageLocation.countDocuments(
+      mergeWarehouseFilter({ zone: { $regex: 'stage', $options: 'i' } }, warehouseKey)
+    );
+    const stageOccupied = await StorageLocation.countDocuments(
+      mergeWarehouseFilter(
+        { zone: { $regex: 'stage', $options: 'i' }, status: 'occupied' },
+        warehouseKey
+      )
+    );
+    const stageUtil = stageTotal > 0 ? Math.round((stageOccupied / stageTotal) * 1000) / 10 : 0;
+
+    const ambientTotal = Math.max(0, totalBins - coldTotal - stageTotal);
+    const ambientOccupied = Math.max(0, occupiedBins - coldOccupied - stageOccupied);
     const ambientUtil = ambientTotal > 0 ? Math.round((ambientOccupied / ambientTotal) * 1000) / 10 : 0;
 
     return {
@@ -66,34 +246,19 @@ const warehouseService = {
       capacityUtilization: {
         bins: binsUtil,
         coldStorage: coldUtil,
+        stage: stageUtil,
         ambient: ambientUtil
       }
     };
   },
 
   getOrderFlow: async (warehouseKey) => {
-    const picklists = await Picklist.find(
-      mergeWarehouseFilter({ status: { $ne: 'completed' } }, warehouseKey)
-    )
-      .sort({ createdAt: -1 })
+    const picklists = await Picklist.find(mergeWarehouseFilter(ACTIVE_PICKLIST_FILTER, warehouseKey))
+      .sort({ updatedAt: -1 })
       .limit(20)
       .lean();
-    // Normalize mixed legacy records to a stable frontend contract.
-    return picklists.map(p => ({
-      id: p.id || p.orderId || p.order_id || String(p._id || ''),
-      orderId: p.orderId || p.order_id || p.id || String(p._id || 'N/A'),
-      customer: p.customer || p.customerName || p.customer_name || 'Unknown destination',
-      items: Number.isFinite(Number(p.items)) ? Number(p.items) : (Array.isArray(p.items) ? p.items.length : 0),
-      priority:
-        p.priority === 'high' || p.priority === 'urgent'
-          ? 'urgent'
-          : p.priority === 'medium'
-            ? 'high'
-            : 'standard',
-      status: p.status === 'queued' ? 'pending' : (p.status || 'pending'),
-      zone: p.zone || p.locationZone || 'General',
-      updatedAt: p.updatedAt
-    }));
+    const orderByKey = await loadOrdersForPicklists(warehouseKey, picklists);
+    return picklists.map((p) => mapPicklistToFlowEntry(p, orderByKey));
   },
 
   getDailyReport: async (warehouseKey, date = new Date()) => {
@@ -150,53 +315,95 @@ const warehouseService = {
   },
 
   getOperationsView: async (warehouseKey) => {
-    // Build operational snapshot from DB
     const lastUpdate = new Date().toISOString();
+    const metrics = await warehouseService.getMetrics(warehouseKey);
 
-    // Zones: group storage locations by zone for utilization
+    const picklists = await Picklist.find(mergeWarehouseFilter(ACTIVE_PICKLIST_FILTER, warehouseKey))
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .lean();
+
+    const orderByKey = await loadOrdersForPicklists(warehouseKey, picklists);
+    const recentOrders = picklists.map((p) => mapPicklistToFlowEntry(p, orderByKey));
+
+    const orderFlowCounts = await countOrderFlowByStatus(warehouseKey);
+
+    const openExceptions = await WarehouseException.countDocuments(
+      mergeWarehouseFilter({ status: { $in: ['open', 'investigating'] } }, warehouseKey)
+    );
+    const activeStaff = await Staff.countDocuments(
+      mergeWarehouseFilter({ status: { $in: ['active', 'Active'] } }, warehouseKey)
+    );
+
     const zonesAgg = await StorageLocation.aggregate([
       { $match: warehouseKeyMatch(warehouseKey) },
-      { $group: {
-        _id: '$zone',
-        total: { $sum: 1 },
-        occupied: { $sum: { $cond: [{ $eq: ['$status', 'occupied'] }, 1, 0 ] } }
-      }},
-      { $project: {
-        id: '$_id',
-        name: '$_id',
-        utilization: { $cond: [{ $gt: ['$total', 0] }, { $multiply: [{ $divide: ['$occupied', '$total'] }, 100] }, 0 ] },
-        total: 1,
-        occupied: 1
-      }}
+      {
+        $group: {
+          _id: '$zone',
+          total: { $sum: 1 },
+          occupied: { $sum: { $cond: [{ $eq: ['$status', 'occupied'] }, 1, 0] } },
+        },
+      },
+      {
+        $project: {
+          id: '$_id',
+          name: '$_id',
+          utilization: {
+            $cond: [{ $gt: ['$total', 0] }, { $multiply: [{ $divide: ['$occupied', '$total'] }, 100] }, 0],
+          },
+          total: 1,
+          occupied: 1,
+        },
+      },
+      { $sort: { utilization: -1 } },
+      { $limit: 12 },
     ]);
 
-    const zones = zonesAgg.map(z => ({
+    const zones = zonesAgg.map((z) => ({
       id: z.id || 'unknown',
       name: z.name || 'unknown',
       utilization: Math.round((z.utilization || 0) * 10) / 10,
-      activeStaff: 0 // requires workforce per-zone mapping if available
+      total: z.total || 0,
+      occupied: z.occupied || 0,
     }));
 
-    // Equipment status summary
     const equipment = await WarehouseEquipment.aggregate([
       { $match: warehouseKeyMatch(warehouseKey) },
-      { $group: {
-        _id: '$type',
-        total: { $sum: 1 },
-        active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
-        maintenance: { $sum: { $cond: [{ $eq: ['$status', 'maintenance'] }, 1, 0] } }
-      }}
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: 1 },
+          active: { $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] } },
+          maintenance: { $sum: { $cond: [{ $eq: ['$status', 'maintenance'] }, 1, 0] } },
+        },
+      },
     ]);
     const equipmentStatus = {};
-    equipment.forEach(e => {
+    equipment.forEach((e) => {
       const key = e._id || 'other';
       equipmentStatus[key] = { total: e.total, active: e.active, maintenance: e.maintenance };
     });
 
+    const { status: operationalStatus, message: statusMessage } = deriveOperationalStatus(metrics, openExceptions);
+
     return {
       lastUpdate,
+      operationalStatus,
+      statusMessage,
+      metrics,
+      orderFlow: {
+        total: orderFlowCounts.total,
+        byStatus: {
+          picking: orderFlowCounts.picking,
+          pending: orderFlowCounts.pending,
+          dispatching: orderFlowCounts.dispatching,
+        },
+        recent: recentOrders,
+      },
       zones,
-      equipmentStatus
+      equipmentStatus,
+      openExceptions,
+      activeStaff,
     };
   },
 

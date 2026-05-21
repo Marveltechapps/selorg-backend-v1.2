@@ -7,6 +7,77 @@ const BatchRejection = require('../models/BatchRejection');
 const ErrorResponse = require("../../core/utils/ErrorResponse");
 const { mergeWarehouseFilter, warehouseFieldsForCreate, warehouseKeyMatch } = require('../constants/warehouseScope');
 
+function mapInspectionRecord(i) {
+  const dateValue = i.date || i.createdAt;
+  const parsedDate = dateValue ? new Date(dateValue) : new Date();
+  const date = Number.isNaN(parsedDate.getTime())
+    ? new Date().toISOString().split('T')[0]
+    : parsedDate.toISOString().split('T')[0];
+
+  return {
+    id: i.id || i.inspection_id || String(i._id || ''),
+    inspectionId: i.inspectionId || i.inspection_id || i.id || String(i._id || ''),
+    batchId: i.batchId || i.batch_id || '',
+    productName: i.productName || i.product_name || i.check_type || '',
+    inspector: i.inspector || 'System',
+    date,
+    status: i.status || 'pending',
+    score: Number(i.score) || 0,
+    itemsInspected: Number(i.itemsInspected ?? i.items_inspected) || 0,
+    defectsFound: Number(i.defectsFound ?? i.defects_found) || 0,
+  };
+}
+
+function formatQcDate(value) {
+  if (!value) return new Date().toISOString().split('T')[0];
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? new Date().toISOString().split('T')[0]
+    : parsed.toISOString().split('T')[0];
+}
+
+function normalizeSampleResult(result) {
+  const raw = String(result || 'pending').toLowerCase();
+  if (raw === 'pass' || raw === 'passed') return 'pass';
+  if (raw === 'fail' || raw === 'failed') return 'fail';
+  return 'pending';
+}
+
+function mapSampleRecord(s) {
+  return {
+    id: s.id || s.sample_id || String(s._id || ''),
+    sampleId: s.sampleId || s.sample_id || s.id || String(s._id || ''),
+    batchId: s.batchId || s.batch_id || '',
+    productName: s.productName || s.product_name || '',
+    testType: s.testType || s.test_type || '',
+    result: normalizeSampleResult(s.result),
+    testedBy: s.testedBy || s.tested_by || s.tester || 'System',
+    date: formatQcDate(s.date || s.testDate || s.received_date || s.createdAt),
+  };
+}
+
+function normalizeComplianceDocStatus(status) {
+  const raw = String(status || 'valid').toLowerCase();
+  if (raw === 'active' || raw === 'valid') return 'valid';
+  if (raw === 'expiring-soon' || raw === 'expiring_soon' || raw === 'expiring soon') return 'expiring-soon';
+  if (raw === 'expired') return 'expired';
+  if (raw === 'pending') return 'expiring-soon';
+  return 'valid';
+}
+
+function mapComplianceDocRecord(d) {
+  return {
+    id: d.id || d.doc_id || String(d._id || ''),
+    docId: d.docId || d.doc_id || d.id || String(d._id || ''),
+    docName: d.docName || d.doc_name || d.title || 'Untitled Document',
+    type: d.type || 'License',
+    issuedDate: formatQcDate(d.issuedDate || d.issued_date || d.createdAt),
+    expiryDate: formatQcDate(d.expiryDate || d.expiry_date),
+    status: normalizeComplianceDocStatus(d.status),
+  };
+}
+
 /**
  * @desc QC & Compliance Service
  */
@@ -16,18 +87,7 @@ const qcService = {
     const inspections = await QCInspection.find(warehouseKeyMatch(warehouseKey))
       .sort({ createdAt: -1 })
       .lean();
-    return inspections.map(i => ({
-      id: i.id,
-      inspectionId: i.inspectionId || i.id,
-      batchId: i.batchId,
-      productName: i.productName,
-      inspector: i.inspector || 'System',
-      date: i.date ? new Date(i.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      status: i.status || 'pending',
-      score: i.score || 0,
-      itemsInspected: i.itemsInspected || 0,
-      defectsFound: i.defectsFound || 0
-    }));
+    return inspections.map(mapInspectionRecord);
   },
 
   createInspection: async (warehouseKey, data) => {
@@ -35,24 +95,16 @@ const qcService = {
       const count = await QCInspection.countDocuments(warehouseKeyMatch(warehouseKey));
       data.id = `INS-${(count + 1).toString().padStart(3, '0')}`;
     }
+    if (!data.inspectionId) {
+      data.inspectionId = data.id;
+    }
     return await QCInspection.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
   },
 
   getInspectionById: async (warehouseKey, id) => {
     const i = await QCInspection.findOne(mergeWarehouseFilter({ id }, warehouseKey)).lean();
     if (!i) throw new ErrorResponse(`Inspection not found with id ${id}`, 404);
-    return {
-      id: i.id,
-      inspectionId: i.inspectionId || i.id,
-      batchId: i.batchId,
-      productName: i.productName,
-      inspector: i.inspector || 'System',
-      date: i.date ? new Date(i.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      status: i.status || 'pending',
-      score: i.score || 0,
-      itemsInspected: i.itemsInspected || 0,
-      defectsFound: i.defectsFound || 0
-    };
+    return mapInspectionRecord(i);
   },
 
   updateInspection: async (warehouseKey, id, data) => {
@@ -77,11 +129,41 @@ const qcService = {
   },
 
   createTemperatureLog: async (warehouseKey, data) => {
-    if (!data.id) {
-      const count = await TemperatureLog.countDocuments(warehouseKeyMatch(warehouseKey));
-      data.id = `TEMP-${(count + 1).toString().padStart(3, '0')}`;
+    const zone = String(data.zone || '').trim();
+    if (!zone) throw new ErrorResponse('Zone is required', 400);
+
+    const temperature = Number(data.temperature);
+    if (!Number.isFinite(temperature)) throw new ErrorResponse('Valid temperature is required', 400);
+
+    const humidity = Number(data.humidity);
+    const normalizedHumidity = Number.isFinite(humidity) ? humidity : 0;
+
+    const zoneLower = zone.toLowerCase();
+    let status = 'normal';
+    if (zoneLower.includes('freezer') && temperature > -15) status = 'critical';
+    else if (zoneLower.includes('cold') && (temperature < 2 || temperature > 8)) status = 'warning';
+
+    let timestamp = new Date();
+    if (data.timestamp) {
+      const parsed = new Date(data.timestamp);
+      if (!Number.isNaN(parsed.getTime())) timestamp = parsed;
     }
-    return await TemperatureLog.create({ ...data, ...warehouseFieldsForCreate(warehouseKey) });
+
+    let id = data.id;
+    if (!id) {
+      const count = await TemperatureLog.countDocuments(warehouseKeyMatch(warehouseKey));
+      id = `TEMP-${(count + 1).toString().padStart(3, '0')}`;
+    }
+
+    return await TemperatureLog.create({
+      id,
+      zone,
+      temperature,
+      humidity: normalizedHumidity,
+      status,
+      timestamp,
+      ...warehouseFieldsForCreate(warehouseKey),
+    });
   },
 
   getTempChartData: async (warehouseKey, id, period = '24h') => {
@@ -146,44 +228,19 @@ const qcService = {
   // --- Compliance Docs ---
   listComplianceDocs: async (warehouseKey) => {
     const docs = await ComplianceDoc.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
-    return docs.map(d => ({
-      id: d.id,
-      docId: d.docId || d.id,
-      docName: d.docName || d.title || 'Untitled Document',
-      type: d.type || 'License',
-      issuedDate: d.issuedDate ? new Date(d.issuedDate).toISOString().split('T')[0] : '2023-01-01',
-      expiryDate: d.expiryDate ? new Date(d.expiryDate).toISOString().split('T')[0] : '2025-01-01',
-      status: d.status || 'valid'
-    }));
+    return docs.map(mapComplianceDocRecord);
   },
 
   getComplianceDoc: async (warehouseKey, id) => {
     const d = await ComplianceDoc.findOne(mergeWarehouseFilter({ id }, warehouseKey)).lean();
     if (!d) throw new ErrorResponse(`Document not found with id ${id}`, 404);
-    return {
-      id: d.id,
-      docId: d.docId || d.id,
-      docName: d.docName || d.title || 'Untitled Document',
-      type: d.type || 'License',
-      issuedDate: d.issuedDate ? new Date(d.issuedDate).toISOString().split('T')[0] : '2023-01-01',
-      expiryDate: d.expiryDate ? new Date(d.expiryDate).toISOString().split('T')[0] : '2025-01-01',
-      status: d.status || 'valid'
-    };
+    return mapComplianceDocRecord(d);
   },
 
   // --- Sample Tests ---
   listSamples: async (warehouseKey) => {
     const samples = await SampleTest.find(warehouseKeyMatch(warehouseKey)).sort({ createdAt: -1 }).lean();
-    return samples.map(s => ({
-      id: s.id,
-      sampleId: s.sampleId || s.id,
-      batchId: s.batchId,
-      productName: s.productName,
-      testType: s.testType,
-      result: s.result || 'pending',
-      testedBy: s.testedBy || s.tester || 'System',
-      date: (s.date || s.testDate) ? new Date(s.date || s.testDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
-    }));
+    return samples.map(mapSampleRecord);
   },
 
   createSample: async (warehouseKey, data) => {
@@ -205,12 +262,18 @@ const qcService = {
   },
 
   updateSample: async (warehouseKey, id, data) => {
-    const sample = await SampleTest.findOne(mergeWarehouseFilter({ id }, warehouseKey));
+    const sample = await SampleTest.findOne(
+      mergeWarehouseFilter(
+        {
+          $or: [{ id }, { sampleId: id }, { sample_id: id }],
+        },
+        warehouseKey
+      )
+    );
     if (!sample) throw new ErrorResponse(`Sample test not found with id ${id}`, 404);
-    // Map result to schema if needed (SampleTest has result field)
-    if (data.result !== undefined) sample.result = data.result;
+    if (data.result !== undefined) sample.result = normalizeSampleResult(data.result);
     await sample.save();
-    return sample;
+    return mapSampleRecord(sample.toObject());
   },
 
   // --- Compliance Checks ---

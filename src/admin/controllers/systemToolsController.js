@@ -9,9 +9,9 @@ const ErrorLog = require('../models/ErrorLog');
 const SystemPerformanceMetric = require('../models/SystemPerformanceMetric');
 const mongoose = require('mongoose');
 const logger = require('../../core/utils/logger');
-
-// In-memory request metrics for performance (simple aggregation)
-const requestMetrics = { count: 0, responseTimes: [], lastReset: Date.now() };
+const { getRecentBufferedLogs } = require('../../core/utils/memoryCircularLogTransport');
+const { tailCombinedLog } = require('../../core/utils/tailWinstonLogFile');
+const runtimePerformanceTracker = require('../../shared/services/runtimePerformanceTracker');
 
 /**
  * Format uptime in human-readable string
@@ -132,32 +132,84 @@ const restartInstance = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get error logs
+ * Dedupe helper for merging log sources by rough identity
+ */
+function logDedupeKey(row) {
+  return `${row.timestamp}\0${row.level}\0${row.service}\0${String(row.message).slice(0, 240)}`;
+}
+
+/**
+ * System logs — live Winston ring buffer merged with persisted ErrorLog and file tail fallback
  * GET /admin/system/logs?service=&level=&limit=
  */
 const getLogs = asyncHandler(async (req, res) => {
-  const { service, level, limit = 100 } = req.query;
-  const query = {};
-  if (service) query.service = new RegExp(service, 'i');
-  if (level) query.level = level;
+  const { service, level, limit = '100' } = req.query;
+  const limitNum = Math.min(parseInt(String(limit), 10) || 100, 500);
 
-  const logs = await ErrorLog.find(query)
-    .sort({ timestamp: -1 })
-    .limit(Math.min(parseInt(limit, 10) || 100, 500))
-    .lean();
+  try {
+    const buffered = getRecentBufferedLogs({
+      limit: limitNum,
+      level: typeof level === 'string' ? level : '',
+      service: typeof service === 'string' ? service : '',
+    });
 
-  const data = logs.map((log) => ({
-    id: log._id.toString(),
-    timestamp: log.timestamp,
-    level: log.level,
-    service: log.service,
-    message: log.message,
-    details: log.stack || log.details ? JSON.stringify(log.stack || log.details) : undefined,
-    correlation_id: log.correlation_id,
-    stack: log.stack,
-  }));
+    const seen = new Set(buffered.map(logDedupeKey));
+    /** @type {Array<Record<string, unknown>>} */
+    let extras = [];
 
-  res.json({ success: true, data });
+    if (buffered.length < limitNum) {
+      const remain = limitNum - buffered.length;
+      const dbQuery = {};
+      if (service && String(service).trim()) dbQuery.service = new RegExp(service.trim(), 'i');
+      if (level && level !== 'all') dbQuery.level = level;
+
+      const dbLogs = await ErrorLog.find(dbQuery).sort({ timestamp: -1 }).limit(remain).lean();
+      extras = dbLogs
+        .map((log) => ({
+          id: log._id.toString(),
+          timestamp:
+            log.timestamp instanceof Date ? log.timestamp.toISOString() : String(log.timestamp || ''),
+          level: log.level || 'error',
+          service: log.service || 'selorg-backend',
+          message: log.message || '',
+          details:
+            log.stack || log.details
+              ? JSON.stringify(log.stack ?? log.details, null, 0)
+              : undefined,
+          correlation_id: log.correlation_id,
+          stack: log.stack,
+        }))
+        .filter((row) => {
+          const k = logDedupeKey(row);
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+    }
+
+    /** @type {Array<Record<string, unknown>>} */
+    let data = [...buffered, ...extras].sort((a, b) => {
+      const ta = new Date(String(a.timestamp)).getTime();
+      const tb = new Date(String(b.timestamp)).getTime();
+      return tb - ta;
+    });
+
+    if (data.length === 0) {
+      data = tailCombinedLog({ limit: limitNum, level, service });
+    } else {
+      data = data.slice(0, limitNum);
+    }
+
+    res.json({ success: true, data });
+  } catch (err) {
+    logger.warn('Failed to assemble system logs; returning buffer only', { error: String(err.message) });
+    const fallback = getRecentBufferedLogs({
+      limit: limitNum,
+      level: typeof level === 'string' ? level : '',
+      service: typeof service === 'string' ? service : '',
+    });
+    res.json({ success: true, data: fallback });
+  }
 });
 
 /**
@@ -167,42 +219,50 @@ const getLogs = asyncHandler(async (req, res) => {
 const getPerformanceMetrics = asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
 
-  const metrics = await SystemPerformanceMetric.find()
+  const persisted = await SystemPerformanceMetric.find()
     .sort({ timestamp: -1 })
     .limit(limit)
     .lean();
 
-  if (metrics.length > 0) {
-    const data = metrics.reverse().map((m) => ({
-      timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString().slice(11, 16) : m.timestamp,
+  const persistedData = persisted.reverse().map((m) => ({
+    timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
+    cpu: Number(m.cpu || 0),
+    memory: Number(m.memory || 0),
+    requests: Number(m.requests || 0),
+    responseTime: Number(m.responseTime || m.latencyP95 || 0),
+  }));
+
+  const live = runtimePerformanceTracker.getLiveSnapshot();
+
+  if (persistedData.length > 0) {
+    const lastPersistedAt = new Date(persistedData[persistedData.length - 1].timestamp).getTime();
+    const liveAt = new Date(live.timestamp).getTime();
+    const merged = liveAt - lastPersistedAt > 20 * 1000
+      ? [...persistedData, live]
+      : persistedData.map((m, idx, arr) => (idx === arr.length - 1 ? { ...m, ...live } : m));
+
+    const data = merged.slice(-limit).map((m) => ({
+      timestamp: new Date(m.timestamp).toISOString().slice(11, 16),
       cpu: m.cpu,
       memory: m.memory,
       requests: m.requests,
-      responseTime: m.responseTime || m.latencyP95,
+      responseTime: m.responseTime,
     }));
     return res.json({ success: true, data });
   }
 
-  // Fallback: compute from current process
-  const usage = process.memoryUsage();
-  const totalMem = os.totalmem();
-  const usedMem = totalMem - os.freemem();
-  const memoryPercent = totalMem > 0 ? Math.round((usage.heapUsed / totalMem) * 100) : 0;
-  const data = [
-    {
-      timestamp: new Date().toISOString().slice(11, 16),
-      cpu: Math.round((os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100),
-      memory: memoryPercent,
-      requests: requestMetrics.count,
-      responseTime: requestMetrics.responseTimes.length
-        ? Math.round(
-            requestMetrics.responseTimes.reduce((a, b) => a + b, 0) / requestMetrics.responseTimes.length
-          )
-        : 0,
-    },
-  ];
-
-  res.json({ success: true, data });
+  res.json({
+    success: true,
+    data: [
+      {
+        timestamp: new Date(live.timestamp).toISOString().slice(11, 16),
+        cpu: live.cpu,
+        memory: live.memory,
+        requests: live.requests,
+        responseTime: live.responseTime,
+      },
+    ],
+  });
 });
 
 /**

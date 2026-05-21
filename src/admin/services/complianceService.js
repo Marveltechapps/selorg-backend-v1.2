@@ -31,6 +31,28 @@ async function createDocument(payload, uploadedBy, filePath, fileSize) {
   return toDoc(doc);
 }
 
+async function updateDocument(documentId, payload = {}) {
+  const doc = await ComplianceDocument.findById(documentId);
+  if (!doc) return null;
+
+  if (typeof payload.name === 'string') doc.name = payload.name;
+  if (typeof payload.type === 'string') doc.type = payload.type;
+  if (typeof payload.category === 'string') doc.category = payload.category;
+  if (typeof payload.description === 'string') doc.description = payload.description;
+  if (typeof payload.fileSize === 'string') doc.fileSize = payload.fileSize;
+  if (typeof payload.fileUrl === 'string') doc.fileUrl = payload.fileUrl;
+  if (Array.isArray(payload.tags)) doc.tags = payload.tags;
+
+  await doc.save();
+  return toDoc(doc);
+}
+
+async function deleteDocument(documentId) {
+  const doc = await ComplianceDocument.findByIdAndDelete(documentId).lean();
+  if (!doc) return null;
+  return toDoc({ ...doc, id: doc._id.toString() });
+}
+
 async function listCertifications() {
   const certs = await ComplianceCertification.find().sort({ expiryDate: 1 }).lean();
   return certs.map((c) => toCert({ ...c, id: c._id.toString() }));
@@ -153,6 +175,8 @@ async function getMetrics() {
 module.exports = {
   listDocuments,
   createDocument,
+  updateDocument,
+  deleteDocument,
   listCertifications,
   listAudits,
   createAudit,

@@ -12,5 +12,8 @@ const ComplianceDocSchema = new mongoose.Schema({
 
 ComplianceDocSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
-module.exports = mongoose.models.ComplianceDoc || mongoose.model('ComplianceDoc', ComplianceDocSchema);
+// Unique model name — darkstore/production also register `ComplianceDoc` on the shared connection.
+module.exports =
+  mongoose.models.WarehouseComplianceDoc ||
+  mongoose.model('WarehouseComplianceDoc', ComplianceDocSchema);
 

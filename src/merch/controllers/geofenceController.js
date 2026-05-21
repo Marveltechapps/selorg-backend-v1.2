@@ -2,6 +2,8 @@ const Zone = require('../models/Zone');
 const ZoneAudit = require('../models/ZoneAudit');
 const Store = require('../models/Store');
 const City = require('../models/City');
+const Order = require('../../warehouse/models/Order');
+const Rider = require('../../rider/models/Rider');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 
 // Map legacy type/status to Admin Geofence format
@@ -48,6 +50,88 @@ const DEFAULT_ANALYTICS = {
   capacityUsage: 0,
   customerSatisfaction: 0,
 };
+
+const ACTIVE_ORDER_STATUSES = ['assigned', 'picked_up', 'in_transit', 'delayed', 'pending'];
+
+function polygonAreaSqKm(polygon = []) {
+  if (!Array.isArray(polygon) || polygon.length < 3) return 0;
+  const meanLatRad =
+    (polygon.reduce((sum, p) => sum + Number(p.lat || 0), 0) / polygon.length) * (Math.PI / 180);
+  const kmPerDegLat = 111.32;
+  const kmPerDegLng = 111.32 * Math.cos(meanLatRad);
+  let area = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const curr = polygon[i];
+    const next = polygon[(i + 1) % polygon.length];
+    const x1 = Number(curr.lng || 0) * kmPerDegLng;
+    const y1 = Number(curr.lat || 0) * kmPerDegLat;
+    const x2 = Number(next.lng || 0) * kmPerDegLng;
+    const y2 = Number(next.lat || 0) * kmPerDegLat;
+    area += x1 * y2 - x2 * y1;
+  }
+  return Number((Math.abs(area) / 2).toFixed(2));
+}
+
+async function buildComputedAnalytics(zoneLike) {
+  const zoneName = zoneLike?.name;
+  const settings = { ...DEFAULT_SETTINGS, ...(zoneLike?.settings || {}) };
+  const fallbackAnalytics = { ...DEFAULT_ANALYTICS, ...(zoneLike?.analytics || {}) };
+  if (!zoneName) {
+    const areaSizeFallback = polygonAreaSqKm(zoneLike?.polygon);
+    return {
+      ...fallbackAnalytics,
+      areaSize: areaSizeFallback || fallbackAnalytics.areaSize || 0,
+      capacityUsage: settings.maxCapacity > 0
+        ? Math.min(100, Math.round(((fallbackAnalytics.activeOrders || 0) / settings.maxCapacity) * 100))
+        : 0,
+    };
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const [activeOrders, totalOrders, dailyOrders, deliveredStats, riderCount] = await Promise.all([
+    Order.countDocuments({ zone: zoneName, status: { $in: ACTIVE_ORDER_STATUSES } }),
+    Order.countDocuments({ zone: zoneName }),
+    Order.countDocuments({ zone: zoneName, createdAt: { $gte: todayStart } }),
+    Order.aggregate([
+      { $match: { zone: zoneName, status: 'delivered' } },
+      {
+        $group: {
+          _id: null,
+          avgDeliveryTime: { $avg: { $ifNull: ['$deliveryTimeSeconds', 0] } },
+          revenue: {
+            $sum: {
+              $ifNull: [
+                '$total_bill',
+                { $ifNull: ['$totalBill', { $ifNull: ['$amount', 0] }] },
+              ],
+            },
+          },
+        },
+      },
+    ]),
+    Rider.countDocuments({ zone: zoneName, status: { $in: ['online', 'busy', 'idle'] } }),
+  ]);
+
+  const areaSize = polygonAreaSqKm(zoneLike?.polygon) || Number(zoneLike?.areaSqKm || 0);
+  const avgDeliveryTimeSeconds = Number(deliveredStats?.[0]?.avgDeliveryTime || 0);
+  const capacityUsage = settings.maxCapacity > 0
+    ? Math.min(100, Math.round((activeOrders / settings.maxCapacity) * 100))
+    : 0;
+
+  return {
+    ...fallbackAnalytics,
+    areaSize,
+    activeOrders,
+    totalOrders,
+    dailyOrders,
+    revenue: Number(deliveredStats?.[0]?.revenue || 0),
+    avgDeliveryTime: Math.round(avgDeliveryTimeSeconds / 60),
+    riderCount,
+    capacityUsage,
+  };
+}
 
 // Convert points [{x,y}] to polygon [{lat,lng}] (approximate, for legacy zones)
 function pointsToPolygon(points, centerLat = 19.076, centerLng = 72.8777) {
@@ -119,6 +203,13 @@ function buildZoneFromBody(body, existing) {
   if (body.points != null && Array.isArray(body.points) && body.points.length >= 3) {
     updates.polygon = pointsToPolygon(body.points, 19.076, 72.8777);
   }
+  if (updates.polygon && updates.polygon.length >= 3) {
+    updates.areaSqKm = polygonAreaSqKm(updates.polygon);
+    updates.analytics = {
+      ...(updates.analytics || zone.analytics || DEFAULT_ANALYTICS),
+      areaSize: updates.areaSqKm,
+    };
+  }
   return { ...zone, ...updates };
 }
 
@@ -153,7 +244,33 @@ const resolveCityId = async (body, existingZone = null) => {
 const getZones = async (req, res, next) => {
   try {
     const zones = await Zone.find().sort({ createdAt: -1 }).populate('cityId', 'name').lean();
-    const data = zones.map((z) => zoneToGeofenceZone(z));
+    const withComputed = await Promise.all(
+      zones.map(async (z) => {
+        const computedAnalytics = await buildComputedAnalytics(z);
+        const computedArea = polygonAreaSqKm(z.polygon) || z.areaSqKm || 0;
+        return {
+          ...z,
+          areaSqKm: computedArea,
+          analytics: computedAnalytics,
+        };
+      })
+    );
+    if (withComputed.length > 0) {
+      await Zone.bulkWrite(
+        withComputed.map((z) => ({
+          updateOne: {
+            filter: { _id: z._id },
+            update: {
+              $set: {
+                areaSqKm: z.areaSqKm,
+                analytics: z.analytics,
+              },
+            },
+          },
+        }))
+      );
+    }
+    const data = withComputed.map((z) => zoneToGeofenceZone(z));
     res.status(200).json({ success: true, count: data.length, data });
   } catch (err) {
     next(err);
@@ -168,7 +285,16 @@ const getZoneById = async (req, res, next) => {
     if (!zone) {
       return next(new ErrorResponse(`Zone not found with id of ${req.params.id}`, 404));
     }
-    res.status(200).json({ success: true, data: zoneToGeofenceZone(zone) });
+    const computedAnalytics = await buildComputedAnalytics(zone);
+    const computedArea = polygonAreaSqKm(zone.polygon) || zone.areaSqKm || 0;
+    await Zone.findByIdAndUpdate(zone._id, {
+      analytics: computedAnalytics,
+      areaSqKm: computedArea,
+    });
+    res.status(200).json({
+      success: true,
+      data: zoneToGeofenceZone({ ...zone, analytics: computedAnalytics, areaSqKm: computedArea }),
+    });
   } catch (err) {
     next(err);
   }
@@ -184,6 +310,10 @@ const createZone = async (req, res, next) => {
     }
     const body = buildZoneFromBody(req.body, null);
     body.cityId = cityId;
+    body.analytics = await buildComputedAnalytics(body);
+    if (body.analytics?.areaSize) {
+      body.areaSqKm = body.analytics.areaSize;
+    }
     const zone = await Zone.create(body);
     const performedBy = req.user?.email || req.body?.createdBy || 'admin';
     await ZoneAudit.create({
@@ -216,6 +346,10 @@ const updateZone = async (req, res, next) => {
     body.cityId = cityId;
     const previousStatus = zone.status;
     Object.assign(zone, body);
+    zone.analytics = await buildComputedAnalytics(zone);
+    if (zone.analytics?.areaSize) {
+      zone.areaSqKm = zone.analytics.areaSize;
+    }
     await zone.save();
 
     const action = body.status !== previousStatus
@@ -320,6 +454,8 @@ const toggleZoneStatus = async (req, res, next) => {
       changes: `Status changed to ${status}`,
       performedBy,
     });
+    const computedAnalytics = await buildComputedAnalytics(zone);
+    await Zone.findByIdAndUpdate(zone._id, { analytics: computedAnalytics });
     const doc = await Zone.findById(zone._id).populate('cityId', 'name').lean();
     res.status(200).json({ success: true, data: zoneToGeofenceZone(doc) });
   } catch (err) {

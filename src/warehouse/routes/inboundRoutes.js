@@ -6,6 +6,8 @@ const inboundController = require('../controllers/inboundController');
  * @desc Inbound Operations Routes
  */
 
+router.get('/summary', inboundController.getInboundSummary);
+
 // GRN Management
 router.get('/grns', inboundController.getGRNs);
 router.post('/grns', inboundController.createGRN);

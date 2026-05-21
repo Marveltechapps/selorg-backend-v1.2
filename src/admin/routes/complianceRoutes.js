@@ -4,28 +4,12 @@
  */
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const complianceController = require('../controllers/complianceController');
 
 const router = express.Router();
 
-const uploadDir = process.env.FILE_UPLOAD_DIR || 'uploads';
-const complianceUploadDir = path.join(uploadDir, 'compliance');
-if (!fs.existsSync(complianceUploadDir)) {
-  fs.mkdirSync(complianceUploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, complianceUploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname) || '.pdf';
-    const name = `compliance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-    cb(null, name);
-  },
-});
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: parseInt(process.env.MAX_UPLOAD_SIZE, 10) || 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = /\.(pdf|doc|docx|jpg|jpeg|png|gif|webp)$/i;
@@ -36,6 +20,8 @@ const upload = multer({
 
 router.get('/documents', complianceController.listDocuments);
 router.post('/documents', upload.single('file'), complianceController.uploadDocument);
+router.patch('/documents/:id', upload.single('file'), complianceController.updateDocument);
+router.delete('/documents/:id', complianceController.deleteDocument);
 
 router.get('/certifications', complianceController.listCertifications);
 router.get('/audits', complianceController.listAudits);

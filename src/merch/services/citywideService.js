@@ -1,6 +1,7 @@
 const Order = require('../../warehouse/models/Order');
 const Rider = require('../../rider/models/Rider');
 const Zone = require('../models/Zone');
+const City = require('../models/City');
 const Store = require('../models/Store');
 const OpsIncident = require('../models/OpsIncident');
 const OpsException = require('../models/OpsException');
@@ -129,94 +130,298 @@ async function getLiveMetrics(cityId = DEFAULT_CITY_ID) {
   }
 }
 
+/** Build map from aggregation rows where _id is group key */
+function countsByZoneId(rows, valueKey = 'count') {
+  const m = {};
+  for (const row of rows || []) {
+    if (row && row._id != null) m[row._id] = row[valueKey] ?? row.count ?? 0;
+  }
+  return m;
+}
+
+/**
+ * Derive rider balance vs concurrent orders — real ops signal beyond raw headcount.
+ */
+function computeRiderStatus(activeOrders, activeRiders) {
+  if (!activeOrders) return 'normal';
+  if (!activeRiders) return activeOrders >= 4 ? 'shortage' : 'overload';
+  const ratio = activeOrders / Math.max(activeRiders, 1);
+  if (ratio >= 2.75) return 'overload';
+  if (ratio <= 0.85 && activeOrders >= 2) return 'shortage';
+  return 'normal';
+}
+
+/**
+ * Operational status: Critical / Warning reflect failures & saturation; Surge overlays demand pricing when ops are not failing.
+ */
+function computeZoneOperationalStatus(options) {
+  const {
+    capacityPercent,
+    slaBreachCount,
+    avgDeliveryTimeSeconds,
+    targetSeconds,
+    zoneSurgeMultiplier,
+    globalSurgeOn,
+    globalMultiplier,
+    zoneMetaSurgeMultiplier,
+    riderStatus,
+  } = options;
+
+  let status = 'normal';
+  let slaStatus = 'on_track';
+
+  const effectiveTarget = typeof targetSeconds === 'number' && targetSeconds > 0 ? targetSeconds : 15 * 60;
+  const deliveryVsSlaBreached =
+    typeof avgDeliveryTimeSeconds === 'number' &&
+    avgDeliveryTimeSeconds > 0 &&
+    avgDeliveryTimeSeconds > effectiveTarget * 1.2;
+
+  if (slaBreachCount >= 3 || capacityPercent >= 92 || (deliveryVsSlaBreached && slaBreachCount >= 1)) {
+    status = 'critical';
+  } else if (slaBreachCount > 0 || capacityPercent >= 72 || riderStatus === 'overload' || deliveryVsSlaBreached) {
+    status = 'warning';
+  }
+
+  const multFromPricing = Math.max(
+    Number(zoneSurgeMultiplier) || 1,
+    Number(zoneMetaSurgeMultiplier) || 1,
+    globalSurgeOn && globalMultiplier > 1 ? globalMultiplier : 1,
+  );
+  const demandSurging = globalSurgeOn || multFromPricing > 1.01;
+
+  if (status === 'normal' && demandSurging && multFromPricing > 1) {
+    status = 'surge';
+  }
+
+  if (slaBreachCount > 0 || deliveryVsSlaBreached) slaStatus = 'breach';
+  else if (capacityPercent >= 80) slaStatus = 'warning';
+  else slaStatus = 'on_track';
+
+  return { status, slaStatus };
+}
+
+/**
+ * Stores linked to a zone (by name tag or Zone ref).
+ */
+function collectStoresForZone(allStores, zoneDoc) {
+  const zoneName = zoneDoc.name;
+  const zoneIdStr = zoneDoc._id?.toString();
+  const bucket = [];
+  const seen = new Set();
+  for (const s of allStores || []) {
+    const idStr = s._id?.toString();
+    const linkedByZones = Array.isArray(s.zones) && s.zones.includes(zoneName);
+    const linkedByRef = zoneIdStr && String(s.zoneId || '') === zoneIdStr;
+    if (!linkedByZones && !linkedByRef) continue;
+    if (idStr && seen.has(idStr)) continue;
+    if (idStr) seen.add(idStr);
+    bucket.push(s);
+  }
+  return bucket;
+}
+
 /**
  * Get zones with live metrics for heatmap
  */
 async function getZonesWithMetrics(cityId = DEFAULT_CITY_ID) {
   try {
     const zones = await Zone.find({ isVisible: true }).sort({ createdAt: 1 }).lean();
-    const surgeConfig = await OpsSurgeConfig.findOne({ cityId }).lean();
+    const [slaConfig, surgeConfig] = await Promise.all([
+      OpsSlaConfig.findOne({ cityId }).lean(),
+      OpsSurgeConfig.findOne({ cityId }).lean(),
+    ]);
+    const targetSeconds = (slaConfig?.targetMinutes ?? 15) * 60;
     const zoneMultipliers = surgeConfig?.zoneMultipliers || {};
+    const globalMult = Number(surgeConfig?.globalMultiplier) || 1;
+    const globalSurgeOn = !!(surgeConfig?.active && globalMult > 1);
 
-    const result = [];
+    const zoneNames = [...new Set(zones.map((z) => z.name).filter(Boolean))];
+    const zoneMongoIds = zones.map((z) => z._id).filter(Boolean);
+
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const activeOrderStatuses = ['assigned', 'picked_up', 'in_transit', 'delayed', 'pending'];
+    const riderAllowed = ['online', 'busy', 'idle'];
+
+    let orderActiveAgg = [];
+    let ridersAgg = [];
+    let breachAgg = [];
+    let avgDeliverAgg = [];
+    let storesForCity = [];
+
+    if (zoneNames.length > 0) {
+      try {
+        [
+          orderActiveAgg,
+          ridersAgg,
+          breachAgg,
+          avgDeliverAgg,
+          storesForCity,
+        ] = await Promise.all([
+          Order.aggregate([
+            { $match: { zone: { $in: zoneNames }, status: { $in: activeOrderStatuses } } },
+            { $group: { _id: '$zone', count: { $sum: 1 } } },
+          ]),
+          Rider.aggregate([
+            { $match: { zone: { $in: zoneNames }, status: { $in: riderAllowed } } },
+            { $group: { _id: '$zone', count: { $sum: 1 } } },
+          ]),
+          Order.aggregate([
+            {
+              $match: {
+                zone: { $in: zoneNames },
+                $or: [
+                  { status: 'delayed' },
+                  {
+                    status: { $nin: ['delivered', 'rto', 'returned'] },
+                    slaDeadline: { $lt: now },
+                  },
+                ],
+              },
+            },
+            { $group: { _id: '$zone', count: { $sum: 1 } } },
+          ]),
+          Order.aggregate([
+            {
+              $match: {
+                zone: { $in: zoneNames },
+                status: 'delivered',
+                completedAt: { $gte: twentyFourHoursAgo },
+                deliveryTimeSeconds: { $exists: true, $ne: null },
+              },
+            },
+            { $group: { _id: '$zone', avgSecs: { $avg: '$deliveryTimeSeconds' } } },
+          ]),
+          Store.find({
+            $or: [{ zones: { $in: zoneNames } }, { zoneId: { $in: zoneMongoIds } }],
+          }).lean(),
+        ]);
+      } catch (err) {
+        logger.warn('Citywide zone bulk aggregates partial failure', { error: err.message });
+      }
+    }
+
+    const orderMap = countsByZoneId(orderActiveAgg);
+    const riderMap = countsByZoneId(ridersAgg);
+    const breachMap = countsByZoneId(breachAgg);
+    const avgMap = countsByZoneId(avgDeliverAgg, 'avgSecs');
+
+    const resultArr = [];
+
     for (let i = 0; i < zones.length; i++) {
       const z = zones[i];
       const zoneName = z.name;
       const zoneId = z._id?.toString() || `zone-${i + 1}`;
 
-      let activeOrders = 0;
-      let activeRiders = 0;
-      let avgDeliveryTimeSeconds = 0;
-      let slaBreachCount = 0;
+      const activeOrders = orderMap[zoneName] ?? 0;
+      const activeRiders = riderMap[zoneName] ?? 0;
+      const slaBreachCount = breachMap[zoneName] ?? 0;
+      let avgDeliveryTimeSeconds =
+        avgMap[zoneName] != null ? Math.round(Number(avgMap[zoneName]) || 0) : 0;
 
-      try {
-        const [orderStats, riderCount, deliveredInZone, breachCount] = await Promise.all([
-          Order.countDocuments({
-            zone: zoneName,
-            status: { $in: ['assigned', 'picked_up', 'in_transit', 'delayed', 'pending'] },
-          }),
-          Rider.countDocuments({ zone: zoneName, status: { $in: ['online', 'busy', 'idle'] } }),
-          Order.find({
-            zone: zoneName,
-            status: 'delivered',
-            completedAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-            deliveryTimeSeconds: { $exists: true, $ne: null },
-          }).select('deliveryTimeSeconds').lean(),
-          Order.countDocuments({
-            zone: zoneName,
-            $or: [
-              { status: 'delayed' },
-              { status: { $nin: ['delivered'] }, slaDeadline: { $lt: new Date() } },
-            ],
-          }),
-        ]);
-
-        activeOrders = orderStats ?? 0;
-        activeRiders = riderCount ?? 0;
-        slaBreachCount = breachCount ?? 0;
-
-        if (deliveredInZone.length > 0) {
-          const total = deliveredInZone.reduce((sum, o) => sum + (o.deliveryTimeSeconds || 0), 0);
-          avgDeliveryTimeSeconds = Math.round(total / deliveredInZone.length);
-        }
-      } catch (err) {
-        logger.warn('Citywide zone metrics partial failure', { zone: zoneName, error: err.message });
+      /** Zone geofence itself disabled — surface as offline regardless of backlog */
+      if (/^inactive$/i.test(String(z.status || ''))) {
+        resultArr.push({
+          id: zoneId,
+          zoneNumber: i + 1,
+          zoneName,
+          status: 'offline',
+          capacityPercent: 0,
+          activeOrders: orderMap[zoneName] ?? 0,
+          activeRiders: riderMap[zoneName] ?? 0,
+          riderStatus: 'normal',
+          avgDeliveryTime: formatDeliveryTime(avgDeliveryTimeSeconds),
+          slaStatus: 'on_track',
+          stores: collectStoresForZone(storesForCity, z).map((s) => ({
+            storeId: s._id?.toString() || s.code || s.name,
+            storeName: s.name,
+            status: 'offline',
+            capacityPercent: 0,
+            activeOrders: 0,
+          })),
+        });
+        continue;
       }
 
-      const capacityPercent = Math.min(100, Math.round(activeOrders * 2 + (activeRiders === 0 && activeOrders > 0 ? 50 : 0)));
-      const riderStatus = activeRiders < activeOrders / 3 ? 'overload' : activeRiders > activeOrders ? 'normal' : 'normal';
-      const slaStatus = slaBreachCount > 0 ? 'breach' : capacityPercent >= 85 ? 'warning' : 'on_track';
-      let status = 'normal';
-      if (capacityPercent >= 95 || slaBreachCount > 2) status = 'critical';
-      else if (capacityPercent >= 80 || slaBreachCount > 0) status = 'warning';
-      else if (zoneMultipliers[zoneId] > 1) status = 'surge';
+      const maxCap = Number(z.settings?.maxCapacity) || 100;
+      const baseCapacityPct =
+        activeOrders <= 0
+          ? 0
+          : Math.min(100, Math.round((activeOrders / Math.max(maxCap, 1)) * 100));
 
-      const stores = await Store.find({ zones: zoneName }).lean();
-      const zoneStores = stores.map((s) => ({
-        storeId: s._id?.toString() || s.name,
-        storeName: s.name,
-        status: s.serviceStatus === 'Full' ? 'active' : s.serviceStatus === 'Partial' ? 'limited' : 'offline',
-        capacityPercent: 70,
-        activeOrders: Math.floor(activeOrders / (stores.length || 1)),
-      }));
+      const riderStatus = computeRiderStatus(activeOrders, activeRiders);
+      const riderStress =
+        activeRiders === 0 && activeOrders >= 8
+          ? 40
+          : activeRiders === 0 && activeOrders > 0
+            ? 18
+            : 0;
+      const overloadStress = riderStatus === 'overload' ? 15 : 0;
+      const saturationPct = Math.min(100, baseCapacityPct + riderStress + overloadStress);
 
-      result.push({
+      const { status, slaStatus } = computeZoneOperationalStatus({
+        capacityPercent: saturationPct,
+        slaBreachCount,
+        avgDeliveryTimeSeconds,
+        targetSeconds,
+        zoneSurgeMultiplier: zoneMultipliers[zoneId],
+        globalSurgeOn,
+        globalMultiplier: globalMult,
+        zoneMetaSurgeMultiplier: z.settings?.surgeMultiplier,
+        riderStatus,
+      });
+
+      const stores = collectStoresForZone(storesForCity, z);
+
+      /** @type {'active'|'offline'|'limited'} */
+      const mapStoreOperational = (s) => {
+        if (s.status === 'inactive' || s.status === 'maintenance') return 'limited';
+        if (s.serviceStatus === 'Full' || (!s.serviceStatus && s.status === 'active')) return 'active';
+        if (s.serviceStatus === 'Partial') return 'limited';
+        return 'offline';
+      };
+
+      const totalStoreCap =
+        stores.length > 0
+          ? stores.reduce((acc, st) => acc + Math.max(Number(st.maxCapacity) || 1, 1), 0)
+          : 0;
+
+      const zoneStores = stores.map((s) => {
+        const smax = Math.max(Number(s.maxCapacity) || 1, 1);
+        const share = totalStoreCap ? Math.round(activeOrders * (smax / totalStoreCap)) : 0;
+        const rawLoadPct =
+          typeof s.currentLoad === 'number' ? Math.round((s.currentLoad / smax) * 100) : null;
+        return {
+          storeId: s._id?.toString() || s.code || s.name,
+          storeName: s.name,
+          status: mapStoreOperational(s),
+          capacityPercent: Math.min(100, rawLoadPct ?? (share >= 1 ? Math.round((share / smax) * 100) : 0)),
+          activeOrders: share,
+        };
+      });
+
+      const effMultRaw =
+        Number(zoneMultipliers[zoneId]) ||
+        Number(z.settings?.surgeMultiplier) ||
+        (globalSurgeOn ? globalMult : 1);
+
+      resultArr.push({
         id: zoneId,
         zoneNumber: i + 1,
         zoneName,
         status,
-        capacityPercent: capacityPercent || 20,
+        capacityPercent: saturationPct,
         activeOrders,
         activeRiders,
         riderStatus,
-        avgDeliveryTime: formatDeliveryTime(avgDeliveryTimeSeconds) || '12m 00s',
+        avgDeliveryTime: formatDeliveryTime(avgDeliveryTimeSeconds),
         slaStatus,
-        surgeMultiplier: zoneMultipliers[zoneId] || (surgeConfig?.active ? surgeConfig?.globalMultiplier : undefined),
+        surgeMultiplier: effMultRaw > 1 ? Math.round(effMultRaw * 100) / 100 : undefined,
         stores: zoneStores,
       });
     }
 
-    return result;
+    return resultArr;
   } catch (error) {
     logger.error('Citywide getZonesWithMetrics failed', { error: error.message });
     throw error;
@@ -260,6 +465,74 @@ async function getZoneOrderTrend(zoneId, cityId = DEFAULT_CITY_ID) {
     result.push({ time: label, orders: count });
   }
   return result;
+}
+
+/**
+ * Notify idle/online riders in a zone (and nearby pool) to cover overload / shortage.
+ */
+async function requestZoneRiders(zoneId, cityId = DEFAULT_CITY_ID, userId = 'unknown') {
+  const zone = await Zone.findById(zoneId).lean();
+  if (!zone) {
+    const err = new Error(`Zone not found: ${zoneId}`);
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const zoneName = zone.name;
+  const riderStatuses = ['online', 'idle', 'busy'];
+  const poolStatuses = ['online', 'idle'];
+
+  const [zoneRiders, poolRiders] = await Promise.all([
+    Rider.find({ zone: zoneName, status: { $in: riderStatuses } }).select('id name status zone').lean(),
+    Rider.find({
+      status: { $in: poolStatuses },
+      $or: [{ zone: { $exists: false } }, { zone: null }, { zone: '' }, { zone: { $ne: zoneName } }],
+    })
+      .limit(25)
+      .select('id name status zone')
+      .lean(),
+  ]);
+
+  const notifiedIds = new Set();
+  const notify = (rider) => {
+    if (!rider?.id || notifiedIds.has(rider.id)) return;
+    notifiedIds.add(rider.id);
+    websocketService.broadcastToUser(rider.id, 'zone:rider_request', {
+      zoneId,
+      zoneName,
+      cityId,
+      title: 'Additional riders needed',
+      body: `High demand in ${zoneName}. Please go online or shift to this zone if available.`,
+    });
+  };
+
+  zoneRiders.forEach(notify);
+  poolRiders.forEach(notify);
+
+  websocketService.broadcastToRole('rider', 'zone:rider_request', {
+    zoneId,
+    zoneName,
+    cityId,
+    title: 'Zone rider reinforcement',
+    body: `${zoneName} needs more rider capacity.`,
+  });
+
+  await appendDispatchLog(cityId, {
+    action: 'zone_rider_request',
+    message: `Rider reinforcement requested for ${zoneName} (${notifiedIds.size} notified)`,
+    status: 'running',
+    userId,
+  });
+
+  logger.info('Zone rider request sent', { zoneId, zoneName, notified: notifiedIds.size, userId });
+
+  return {
+    zoneId,
+    zoneName,
+    notified: notifiedIds.size,
+    zoneRiders: zoneRiders.length,
+    poolRiders: poolRiders.length,
+  };
 }
 
 /**
@@ -716,11 +989,16 @@ async function ensureZonesExist() {
   const count = await Zone.countDocuments({ isVisible: true });
   if (count > 0) return;
 
+  let blrCity = await City.findOne({ code: 'BLR' });
+  if (!blrCity) {
+    blrCity = await City.create({ code: 'BLR', name: 'Bangalore', state: 'Karnataka' });
+  }
+
   const defaultZones = [
-    { name: 'Indiranagar', type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#10B981' },
-    { name: 'Whitefield', type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#3B82F6' },
-    { name: 'Koramangala', type: 'premium', status: 'active', isVisible: true, city: 'Bangalore', color: '#8B5CF6' },
-    { name: 'HSR Layout', type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#F59E0B' },
+    { name: 'Indiranagar', cityId: blrCity._id, type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#10B981' },
+    { name: 'Whitefield', cityId: blrCity._id, type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#3B82F6' },
+    { name: 'Koramangala', cityId: blrCity._id, type: 'premium', status: 'active', isVisible: true, city: 'Bangalore', color: '#8B5CF6' },
+    { name: 'HSR Layout', cityId: blrCity._id, type: 'standard', status: 'active', isVisible: true, city: 'Bangalore', color: '#F59E0B' },
   ];
   await Zone.insertMany(defaultZones);
 }
@@ -793,6 +1071,7 @@ module.exports = {
   getZonesWithMetrics,
   getZoneDetail,
   getZoneOrderTrend,
+  requestZoneRiders,
   getIncidents,
   getIncidentById,
   updateIncident,

@@ -6,6 +6,15 @@ const { asyncHandler } = require('../../core/middleware');
  */
 const inboundController = {
   /**
+   * @route   GET /api/v1/warehouse/inbound/summary
+   * @desc    Inbound KPI summary (pending GRNs, dock utilization, putaway queue)
+   */
+  getInboundSummary: asyncHandler(async (req, res) => {
+    const summary = await inboundService.getInboundSummary(req.user.warehouseKey);
+    res.status(200).json({ success: true, data: summary });
+  }),
+
+  /**
    * @route   GET /api/v1/inbound/grns
    * @desc    List all GRNs
    */
@@ -50,8 +59,16 @@ const inboundController = {
    * @desc    Start counting for GRN
    */
   startGRNCounting: asyncHandler(async (req, res) => {
-    const grn = await inboundService.startCounting(req.user.warehouseKey, req.params.id);
-    res.status(200).json({ success: true, data: grn, meta: { message: 'Counting started' } });
+    const result = await inboundService.startCounting(
+      req.user.warehouseKey,
+      req.params.id,
+      req.body || {}
+    );
+    res.status(200).json({
+      success: true,
+      data: result,
+      meta: { message: 'GRN assigned to dock and counting started' },
+    });
   }),
 
   /**

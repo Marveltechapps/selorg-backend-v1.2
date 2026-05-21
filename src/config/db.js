@@ -48,10 +48,29 @@ const connectDB = async () => {
       error: err.message,
       stack: err.stack,
     });
-    logger.warn('Server will continue running, but DB features will be unavailable');
-    // We don't exit the process here so the server stays alive for other requests
+    if (process.env.NODE_ENV === 'test') {
+      logger.warn('Test mode: continuing without database');
+      return;
+    }
+    throw err;
   }
 };
+
+/**
+ * Ensure MongoDB is connected before running queries (avoids Mongoose buffer timeouts).
+ */
+async function ensureDbConnection(timeoutMs = 15000) {
+  if (isConnected()) return;
+  try {
+    await waitForConnection(timeoutMs);
+  } catch (err) {
+    const error = new Error(
+      'Database is not available. Please ensure MongoDB is running and MONGO_URI is correct.'
+    );
+    error.statusCode = 503;
+    throw error;
+  }
+}
 
 /**
  * Monitor connection pool statistics every 30 seconds
@@ -155,6 +174,7 @@ async function waitForConnection(timeoutMs = 10000) {
 module.exports = connectDB;
 module.exports.isConnected = isConnected;
 module.exports.waitForConnection = waitForConnection;
+module.exports.ensureDbConnection = ensureDbConnection;
 module.exports.mongoose = mongoose;
 module.exports.getConnectionPoolHealth = getConnectionPoolHealth;
 module.exports.getPoolStatistics = getPoolStatistics;

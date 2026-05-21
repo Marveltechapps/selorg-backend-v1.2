@@ -47,20 +47,32 @@ const auditLogsController = {
     if (severity) query.severity = severity;
 
     if (userEmailFilter && userEmailFilter.trim()) {
-      const u = await User.findOne({ email: new RegExp(`^${userEmailFilter.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }).select('_id').lean();
-      if (u) query.userId = u._id;
-      else return res.json({ success: true, data: [], meta: { total: 0, page: parseInt(page), limit: Math.min(parseInt(limit) || 50, 100), pages: 0 } });
+      const esc = userEmailFilter.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const users = await User.find({ email: new RegExp(esc, 'i') }).select('_id').lean();
+      if (users.length > 0) {
+        query.userId = { $in: users.map((u) => u._id) };
+      } else {
+        return res.json({
+          success: true,
+          data: [],
+          meta: { total: 0, page: parseInt(page), limit: Math.min(parseInt(limit) || 50, 100), pages: 0 }
+        });
+      }
     }
 
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
     }
 
     if (search && search.trim()) {
       const term = search.trim();
-      query.$or = [
+      const orFilters = [
         { module: { $regex: term, $options: 'i' } },
         { action: { $regex: term, $options: 'i' } },
         { entityType: { $regex: term, $options: 'i' } },
@@ -68,6 +80,16 @@ const auditLogsController = {
         { 'details.message': { $regex: term, $options: 'i' } },
         { 'details.description': { $regex: term, $options: 'i' } },
       ];
+      const matchedUsers = await User.find({
+        $or: [
+          { email: { $regex: term, $options: 'i' } },
+          { name: { $regex: term, $options: 'i' } },
+        ],
+      }).select('_id').lean();
+      if (matchedUsers.length > 0) {
+        orFilters.push({ userId: { $in: matchedUsers.map((u) => u._id) } });
+      }
+      query.$or = orFilters;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);

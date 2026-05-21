@@ -39,6 +39,24 @@ function coerceJsonObject(val) {
   return undefined;
 }
 
+function parseOptionalLatLng(body) {
+  const hasLat = body.latitude !== undefined && body.latitude !== null && String(body.latitude).trim() !== '';
+  const hasLng = body.longitude !== undefined && body.longitude !== null && String(body.longitude).trim() !== '';
+  if (!hasLat && !hasLng) return { latitude: undefined, longitude: undefined, clear: false };
+  if (hasLat !== hasLng) {
+    throw new ErrorResponse('Provide both latitude and longitude, or omit both', 400);
+  }
+  const lat = Number(body.latitude);
+  const lng = Number(body.longitude);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    throw new ErrorResponse('latitude must be between -90 and 90', 400);
+  }
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new ErrorResponse('longitude must be between -180 and 180', 400);
+  }
+  return { latitude: lat, longitude: lng, clear: false };
+}
+
 function parseCityMetadata(raw) {
   if (raw === undefined) return undefined;
   if (raw === null || raw === '') return null;
@@ -84,6 +102,8 @@ const listCities = asyncHandler(async (req, res) => {
       state: c.state,
       country: c.country,
       isActive: c.isActive,
+      latitude: c.latitude,
+      longitude: c.longitude,
       metadata: c.metadata,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
@@ -115,11 +135,13 @@ const createCity = asyncHandler(async (req, res) => {
   const existing = await City.findOne({ code: codeTrim });
   if (existing) throw new ErrorResponse('City code already exists', 409);
   const metadata = metadataRaw !== undefined ? parseCityMetadata(metadataRaw) : undefined;
+  const coords = parseOptionalLatLng(req.body);
   const city = await City.create({
     code: codeTrim,
     name: String(name).trim(),
     state: state ? String(state).trim() : undefined,
     country: country ? String(country).trim() : 'India',
+    ...(coords.latitude !== undefined ? { latitude: coords.latitude, longitude: coords.longitude } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
   });
   res.status(201).json({ success: true, data: { id: city._id.toString(), ...city.toObject() } });
@@ -143,6 +165,16 @@ const updateCity = asyncHandler(async (req, res) => {
   if (state !== undefined) city.state = state ? String(state).trim() : undefined;
   if (country !== undefined) city.country = country ? String(country).trim() : city.country;
   if (isActive !== undefined) city.isActive = isActive === true || isActive === 'true';
+  if (req.body.latitude !== undefined || req.body.longitude !== undefined) {
+    const coords = parseOptionalLatLng(req.body);
+    if (coords.latitude === undefined) {
+      city.latitude = undefined;
+      city.longitude = undefined;
+    } else {
+      city.latitude = coords.latitude;
+      city.longitude = coords.longitude;
+    }
+  }
   if (metadataRaw !== undefined) {
     city.metadata = parseCityMetadata(metadataRaw);
   }

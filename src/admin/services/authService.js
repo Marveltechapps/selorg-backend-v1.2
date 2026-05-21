@@ -1,5 +1,6 @@
 // Use the vendor User model (same as seed script) to ensure we can find seeded users
 const User = require('../../vendor/models/User');
+const { ensureDbConnection } = require('../../config/db');
 const Role = require('../models/Role');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -8,6 +9,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 
 async function registerUser(payload) {
+  await ensureDbConnection();
   const { email, password, name, role } = payload;
   const normalizedEmail = email ? email.toLowerCase().trim() : email;
   const existing = await User.findOne({ email: normalizedEmail });
@@ -20,6 +22,7 @@ async function registerUser(payload) {
 }
 
 async function authenticateUser(email, password, role) {
+  await ensureDbConnection();
   // Normalize email to lowercase for case-insensitive lookup
   const normalizedEmail = email ? email.toLowerCase().trim() : email;
   

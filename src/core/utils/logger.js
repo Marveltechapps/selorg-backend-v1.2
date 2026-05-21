@@ -7,6 +7,7 @@
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
+const { MemoryCircularTransport } = require('./memoryCircularLogTransport');
 
 // Ensure logs directory exists
 const logsDir = path.join(process.cwd(), 'logs');
@@ -32,12 +33,14 @@ const consoleFormat = winston.format.combine(
   })
 );
 
-// Define transports
+// Define transports — memory ring buffer first so admin System Logs mirrors this process
+const defaultLogLevel = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
 const transports = [
+  new MemoryCircularTransport({ level: defaultLogLevel }),
   // Console transport (always enabled)
   new winston.transports.Console({
     format: process.env.NODE_ENV === 'production' ? logFormat : consoleFormat,
-    level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+    level: defaultLogLevel,
   }),
 ];
 
@@ -90,7 +93,7 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_FILE_LOGGING ===
 
 // Create Winston logger instance
 const winstonLogger = winston.createLogger({
-  level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+  level: defaultLogLevel,
   format: logFormat,
   defaultMeta: {
     service: 'selorg-backend',

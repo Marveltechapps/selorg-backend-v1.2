@@ -1,5 +1,6 @@
 const workforceService = require('../services/workforceService');
 const { asyncHandler } = require('../../core/middleware');
+const { invalidateWarehouse } = require('../cacheInvalidation');
 
 /**
  * @desc Warehouse Workforce Controller
@@ -17,6 +18,7 @@ const workforceController = {
 
   addStaff: asyncHandler(async (req, res) => {
     const staff = await workforceService.addStaff(req.user.warehouseKey, req.body);
+    await invalidateWarehouse();
     res.status(201).json({ success: true, message: 'Staff added successfully', data: staff });
   }),
 

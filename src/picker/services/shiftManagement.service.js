@@ -47,6 +47,18 @@ function formatTimeRange(start, end, fallback) {
   return '—';
 }
 
+/** Parse YYYY-MM-DD as UTC midnight to avoid timezone drift in roster matching. */
+function parseDateOnly(dateStr) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+function formatDateOnly(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  return date.toISOString().split('T')[0];
+}
+
 /**
  * Create shift
  */
@@ -108,10 +120,10 @@ function toShiftDto(doc) {
  * @param {string} endDate - ISO date
  */
 async function getRoster(startDate, endDate) {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  start.setHours(0, 0, 0, 0);
-  end.setHours(23, 59, 59, 999);
+  const start = parseDateOnly(startDate);
+  const end = parseDateOnly(endDate);
+  if (!start || !end) return [];
+  end.setUTCHours(23, 59, 59, 999);
 
   const shifts = await PickerShift.find({}).sort({ startTime: 1 }).lean();
   const shiftIds = shifts.map((s) => s._id);
@@ -129,11 +141,11 @@ async function getRoster(startDate, endDate) {
   const roster = [];
   const d = new Date(start);
   while (d <= end) {
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = formatDateOnly(d);
     for (const shift of shifts) {
       const shiftAssignments = assignments.filter((a) => {
         const aDate = a.date instanceof Date ? a.date : new Date(a.date);
-        const aStr = aDate.toISOString().split('T')[0];
+        const aStr = formatDateOnly(aDate);
         return a.shiftId?.toString?.() === shift._id?.toString?.() && aStr === dateStr;
       });
       const assigned = shiftAssignments.map((a) => {
@@ -152,7 +164,7 @@ async function getRoster(startDate, endDate) {
         emptySlots,
       });
     }
-    d.setDate(d.getDate() + 1);
+    d.setUTCDate(d.getUTCDate() + 1);
   }
   return roster;
 }
@@ -166,8 +178,8 @@ async function assignPicker(shiftId, pickerId, date) {
   const picker = await PickerUser.findById(pickerId);
   if (!picker) return { success: false, error: 'Picker not found' };
 
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
+  const d = parseDateOnly(date);
+  if (!d) return { success: false, error: 'Valid date is required' };
 
   const existing = await ShiftAssignment.findOne({ shiftId, pickerId, date: d });
   if (existing) return { success: true, message: 'Already assigned' };
@@ -185,11 +197,39 @@ async function assignPicker(shiftId, pickerId, date) {
 }
 
 /**
+ * Reassign a shift slot from one picker to another for a date.
+ */
+async function reassignPicker(shiftId, previousPickerId, newPickerId, date) {
+  if (String(previousPickerId) === String(newPickerId)) {
+    return { success: true, message: 'No change' };
+  }
+
+  const shift = await PickerShift.findById(shiftId);
+  if (!shift) return { success: false, error: 'Shift not found' };
+
+  const newPicker = await PickerUser.findById(newPickerId);
+  if (!newPicker) return { success: false, error: 'Picker not found' };
+
+  const d = parseDateOnly(date);
+  if (!d) return { success: false, error: 'Valid date is required' };
+
+  const assignment = await ShiftAssignment.findOne({ shiftId, pickerId: previousPickerId, date: d });
+  if (!assignment) return { success: false, error: 'Assignment not found' };
+
+  const duplicate = await ShiftAssignment.findOne({ shiftId, pickerId: newPickerId, date: d });
+  if (duplicate) return { success: false, error: 'Picker already assigned to this shift' };
+
+  assignment.pickerId = newPickerId;
+  await assignment.save();
+  return { success: true };
+}
+
+/**
  * Remove picker from shift for a date (optional - for unassign)
  */
 async function unassignPicker(shiftId, pickerId, date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
+  const d = parseDateOnly(date);
+  if (!d) return { success: false, error: 'Valid date is required' };
   await ShiftAssignment.deleteOne({ shiftId, pickerId, date: d });
   return { success: true };
 }
@@ -209,6 +249,7 @@ module.exports = {
   updateShift,
   getRoster,
   assignPicker,
+  reassignPicker,
   unassignPicker,
   listActivePickers,
 };

@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const { ensureDbConnection } = require('../../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { resolveHubKeyFromUserDoc } = require('../constants/hubScope');
@@ -7,6 +8,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
 
 async function registerUser(payload) {
+  await ensureDbConnection();
   const { email, password, name, role } = payload;
   // Normalize email to lowercase for case-insensitive lookup
   const normalizedEmail = email ? email.toLowerCase().trim() : email;
@@ -20,6 +22,7 @@ async function registerUser(payload) {
 }
 
 async function authenticateUser(email, password, role) {
+  await ensureDbConnection();
   // Normalize email to lowercase for case-insensitive lookup
   const normalizedEmail = email ? email.toLowerCase().trim() : email;
   const user = await User.findOne({ email: normalizedEmail });

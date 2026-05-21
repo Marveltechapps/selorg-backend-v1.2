@@ -50,6 +50,21 @@ const getZoneOrderTrend = async (req, res, next) => {
   }
 };
 
+// POST /merch/citywide/zones/:id/request-riders
+const requestZoneRiders = async (req, res, next) => {
+  try {
+    const cityId = getCityId(req);
+    const userId = req.user?.id || req.user?.email || 'unknown';
+    const data = await citywideService.requestZoneRiders(req.params.id, cityId, userId);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    if (err.statusCode) {
+      return next(new ErrorResponse(err.message, err.statusCode));
+    }
+    next(err);
+  }
+};
+
 // GET /merch/citywide/incidents
 const getIncidents = async (req, res, next) => {
   try {
@@ -272,6 +287,7 @@ module.exports = {
   getZones,
   getZoneDetail,
   getZoneOrderTrend,
+  requestZoneRiders,
   restartDispatch,
   manualOverrideDispatch,
   getDispatchLogs,

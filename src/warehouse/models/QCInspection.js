@@ -16,5 +16,8 @@ const QCInspectionSchema = new mongoose.Schema({
 
 QCInspectionSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
-module.exports = mongoose.models.QCInspection || mongoose.model('QCInspection', QCInspectionSchema);
+// Unique model name — darkstore/production also register `QCInspection` on the shared connection.
+module.exports =
+  mongoose.models.WarehouseQCInspection ||
+  mongoose.model('WarehouseQCInspection', QCInspectionSchema);
 

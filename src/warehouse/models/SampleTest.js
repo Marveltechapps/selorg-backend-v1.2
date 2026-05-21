@@ -15,5 +15,8 @@ const SampleTestSchema = new mongoose.Schema({
 
 SampleTestSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
-module.exports = mongoose.models.SampleTest || mongoose.model('SampleTest', SampleTestSchema);
+// Unique model name — darkstore/production also register `SampleTest` on the shared connection.
+module.exports =
+  mongoose.models.WarehouseSampleTest ||
+  mongoose.model('WarehouseSampleTest', SampleTestSchema);
 

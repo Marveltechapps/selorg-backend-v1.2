@@ -28,6 +28,7 @@ const conditionalValidateReorderRequest = appConfig.nodeEnv === 'development'
 
 // Inventory Summary
 router.get('/summary', inventoryController.getInventorySummary);
+router.get('/meta', inventoryController.getInventoryMeta);
 
 // Inventory Items
 router.get('/items', inventoryController.listInventoryItems);

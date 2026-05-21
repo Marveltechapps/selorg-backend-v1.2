@@ -65,5 +65,8 @@ StockAlertSchema.index({ sku: 1, type: 1 });
 StockAlertSchema.index({ priority: 1, lastUpdated: -1 });
 
 
-module.exports = mongoose.models.StockAlert || mongoose.model('StockAlert', StockAlertSchema);
+// Unique model name — darkstore/production also register `StockAlert` on the shared connection.
+module.exports =
+  mongoose.models.WarehouseStockAlert ||
+  mongoose.model('WarehouseStockAlert', StockAlertSchema);
 

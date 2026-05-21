@@ -7,7 +7,8 @@ const DockSlotSchema = new mongoose.Schema({
   status: { type: String, enum: ['active', 'empty', 'offline'], default: 'empty' },
   truck: { type: String },
   vendor: { type: String },
-  eta: { type: String }
+  eta: { type: String },
+  grnId: { type: String, trim: true, index: true },
 }, { timestamps: true, collection: 'warehouse_dock_slots' });
 
 DockSlotSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });

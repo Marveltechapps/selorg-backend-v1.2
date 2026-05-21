@@ -15,5 +15,8 @@ const PicklistSchema = new mongoose.Schema({
 
 PicklistSchema.index({ warehouseKey: 1, id: 1 }, { unique: true });
 
-module.exports = mongoose.models.Picklist || mongoose.model('Picklist', PicklistSchema);
+// Unique model name — darkstore/production also register `Picklist` on the shared connection.
+module.exports =
+  mongoose.models.WarehousePicklist ||
+  mongoose.model('WarehousePicklist', PicklistSchema);
 

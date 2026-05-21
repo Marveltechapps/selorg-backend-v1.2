@@ -143,11 +143,22 @@ const inventoryController = {
   }),
 
   generateStockAlerts: asyncHandler(async (req, res) => {
-    res.status(200).json({ success: true, data: { message: 'Stock alerts generated' } });
+    const result = await inventoryService.syncStockAlerts(req.user.warehouseKey);
+    res.status(200).json({ success: true, data: result, meta: { message: 'Stock alerts synced from inventory' } });
   }),
 
   createReorderRequest: asyncHandler(async (req, res) => {
-    res.status(201).json({ success: true, data: { message: 'Reorder request created' } });
+    const reorder = await inventoryService.createReorderRequest(
+      req.user.warehouseKey,
+      { ...req.body, alertId: req.params.id || req.body.alertId },
+      req.user?.name || req.user?.email || 'System'
+    );
+    res.status(201).json({ success: true, data: reorder, meta: { message: 'Reorder request created' } });
+  }),
+
+  getInventoryMeta: asyncHandler(async (req, res) => {
+    const meta = await inventoryService.getInventoryMeta(req.user.warehouseKey);
+    res.status(200).json({ success: true, data: meta });
   }),
 
   exportInventory: asyncHandler(async (req, res) => {

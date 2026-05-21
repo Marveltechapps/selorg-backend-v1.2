@@ -132,8 +132,6 @@ if (process.env.NODE_ENV !== 'test') {
     process.exit(1);
   }
 
-  // Connect to database
-  connectDB();
   // Customer app startup (index creation); runs when DB is connected
   require('./customer-backend/startup').run();
   // Bootstrap logistics module (RabbitMQ + Redis); non-fatal on failure
@@ -415,6 +413,9 @@ if (process.env.NODE_ENV !== 'test') {
 // Bind to 0.0.0.0 so mobile devices on LAN (e.g. 192.168.x.x) can reach the API
 if (process.env.NODE_ENV !== 'test') {
   const HOST = process.env.HOST || '0.0.0.0';
+  const { waitForConnection } = require('./config/db');
+
+  const startListening = () => {
   httpServer.listen(PORT, HOST, () => {
     logger.info('Server started', {
       host: HOST,
@@ -469,6 +470,21 @@ if (process.env.NODE_ENV !== 'test') {
       process.exit(1);
     }
   });
+  };
+
+  (async () => {
+    try {
+      await connectDB();
+      await waitForConnection(30000);
+      startListening();
+    } catch (dbErr) {
+      logger.error('Cannot start server without database', {
+        error: dbErr.message,
+        hint: 'Check MONGO_URI in selorg-dashboard-backend-v1.1/.env and that MongoDB is reachable',
+      });
+      process.exit(1);
+    }
+  })();
 }
 
 // Handle unhandled promise rejections
