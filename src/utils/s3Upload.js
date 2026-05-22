@@ -131,11 +131,30 @@ async function uploadProductImage(base64Data) {
   return uploadBase64ImageToS3(base64Data, bucket, folder);
 }
 
+function getFinanceDocumentsBucket() {
+  return (
+    process.env.AWS_S3_BUCKET_FINANCE_DOCUMENTS ||
+    process.env.AWS_S3_BUCKET_COMPLIANCE ||
+    'selorg-finance-documents'
+  );
+}
+
+/**
+ * Upload vendor payment supporting document (invoice PDF, etc.)
+ */
+async function uploadVendorPaymentDocument(buffer, hubKey, paymentId, fileName, contentType) {
+  const bucket = getFinanceDocumentsBucket();
+  const folder = `vendor-payments/${hubKey || 'default'}/${paymentId}`;
+  return uploadBufferToS3(buffer, bucket, folder, fileName, contentType);
+}
+
 module.exports = {
   uploadBase64ImageToS3,
   uploadBufferToS3,
   uploadPickerProfileImage,
   uploadRiderProfileImage,
   uploadProductImage,
+  uploadVendorPaymentDocument,
+  getFinanceDocumentsBucket,
   s3Client,
 };

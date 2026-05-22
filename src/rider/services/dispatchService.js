@@ -1,5 +1,6 @@
 const Order = require('../../warehouse/models/Order');
 const Rider = require('../models/Rider');
+const { Rider: RiderV2 } = require('../../rider_v2_backend/src/models/Rider');
 const Cluster = require('../models/Cluster');
 const AutoAssignRule = require('../models/AutoAssignRule');
 const { calculateDistance } = require('../../utils/distanceCalculator');
@@ -201,7 +202,7 @@ const getMapData = async (filters = {}) => {
     // Get riders
     if (showRiders) {
       const riders = await Rider.find({}).lean();
-      result.riders = riders.map((rider) => ({
+      let ridersData = riders.map((rider) => ({
         id: rider.id,
         name: rider.name,
         status: rider.status,
@@ -212,9 +213,14 @@ const getMapData = async (filters = {}) => {
         avatarInitials: rider.avatarInitials,
       }));
 
+      ridersData = await mergeRidersWithV2Locations(ridersData);
+      result.riders = ridersData.filter((r) =>
+        isValidMapCoord(r.location?.lat, r.location?.lng)
+      );
+
       // Calculate rider status counts
       const riderStatusCounts = {};
-      riders.forEach((rider) => {
+      ridersData.forEach((rider) => {
         riderStatusCounts[rider.status] = (riderStatusCounts[rider.status] || 0) + 1;
       });
       result.statusCounts.riders = {
@@ -228,7 +234,9 @@ const getMapData = async (filters = {}) => {
 
     // Get orders
     if (showOrders) {
-      const orders = await Order.find({}).lean();
+      const orders = await Order.find({
+        status: { $nin: ['delivered', 'cancelled'] },
+      }).lean();
       result.orders = orders.map((order) => {
         // Extract coordinates from address (simplified - would need geocoding)
         const pickupCoords = extractCoordinates(order.pickupLocation);
@@ -297,6 +305,69 @@ const getMapData = async (filters = {}) => {
 /** Fallback when addresses are missing or not geocoded — must match dashboard default region so map toggles don’t jump to another continent */
 const DEFAULT_MAP_COORDS = { lat: 13.0827, lng: 80.2707 };
 
+function isValidMapCoord(lat, lng) {
+  return (
+    typeof lat === 'number' &&
+    typeof lng === 'number' &&
+    !Number.isNaN(lat) &&
+    !Number.isNaN(lng) &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+function mapV2AvailabilityToLegacy(availability, status) {
+  if (availability === 'busy') return 'busy';
+  if (availability === 'available') return 'idle';
+  if (status === 'active' || status === 'approved') return 'online';
+  return 'offline';
+}
+
+/**
+ * Overlay mobile-app GPS (RiderV2) onto legacy rider map rows and include v2-only riders.
+ */
+async function mergeRidersWithV2Locations(ridersData) {
+  const v2Riders = await RiderV2.find({
+    status: { $in: ['active', 'approved'] },
+    deletedAt: { $exists: false },
+  })
+    .select('riderId name currentLocation availability status')
+    .lean();
+
+  const byId = new Map(ridersData.map((r) => [r.id, { ...r }]));
+
+  for (const v2 of v2Riders) {
+    const lat = v2?.currentLocation?.lat;
+    const lng = v2?.currentLocation?.lng;
+    const hasGps = isValidMapCoord(lat, lng);
+    const legacyStatus = mapV2AvailabilityToLegacy(v2.availability, v2.status);
+    const existing = byId.get(v2.riderId);
+
+    if (existing) {
+      if (hasGps) {
+        existing.location = { lat, lng };
+      }
+      existing.name = v2.name || existing.name;
+      if (!existing.status || existing.status === 'offline') {
+        existing.status = legacyStatus;
+      }
+      byId.set(v2.riderId, existing);
+    } else if (hasGps) {
+      byId.set(v2.riderId, {
+        id: v2.riderId,
+        name: v2.name || v2.riderId,
+        status: legacyStatus,
+        location: { lat, lng },
+        zone: null,
+        capacity: { currentLoad: 0, maxLoad: 5 },
+        currentOrderId: null,
+        avatarInitials: (v2.name || 'R').slice(0, 2).toUpperCase(),
+      });
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
 /**
  * Extract coordinates from address string (simplified - would need geocoding service).
  * Handles missing/legacy orders where pickup/drop strings are absent.
@@ -346,7 +417,7 @@ const getMapRiders = async (filters = {}) => {
 
     const riders = await Rider.find(query).lean();
 
-    const ridersData = riders.map((rider) => ({
+    let ridersData = riders.map((rider) => ({
       id: rider.id,
       name: rider.name,
       status: rider.status,
@@ -357,14 +428,16 @@ const getMapRiders = async (filters = {}) => {
       avatarInitials: rider.avatarInitials,
     }));
 
+    ridersData = await mergeRidersWithV2Locations(ridersData);
+
     // Calculate status counts
     const statusCounts = {};
-    riders.forEach((rider) => {
+    ridersData.forEach((rider) => {
       statusCounts[rider.status] = (statusCounts[rider.status] || 0) + 1;
     });
 
     return {
-      riders: ridersData,
+      riders: ridersData.filter((r) => isValidMapCoord(r.location?.lat, r.location?.lng)),
       statusCounts: {
         online: statusCounts.online || 0,
         busy: statusCounts.busy || 0,

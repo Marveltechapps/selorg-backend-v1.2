@@ -30,6 +30,18 @@ const errorHandlerMiddleware = (err, req, res, next) => {
     details: null,
   };
 
+  // Mongoose buffered query timeout / disconnected DB (login, etc.)
+  const msg = String(err.message || '');
+  if (
+    msg.includes('buffering timed out') ||
+    msg.includes('before initial connection is complete') ||
+    (err.name === 'MongooseError' && msg.includes('Cannot call'))
+  ) {
+    error.message =
+      'Database is not available. Please ensure MongoDB is running and MONGO_URI is correct.';
+    error.statusCode = 503;
+  }
+
   // Handle specific error types
   if (err.name === 'ValidationError') {
     // Mongoose validation error

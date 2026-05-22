@@ -278,8 +278,10 @@ app.use('/api/v1/rider/auth', riderAuthRoutes);
 const riderHrRoutes = require('./rider/routes/hrRoutes');
 const riderKitRoutes = require('./rider/routes/kitRoutes');
 const riderLegalAdminRoutes = require('./rider/routes/admin/legalAdminRoutes');
+const riderLegalRoutes = require('./rider/routes/legalRoutes');
 app.use('/api/v1/rider/hr', riderHrRoutes);
 app.use('/api/v1/rider/kit', riderKitRoutes);
+app.use('/api/v1/rider/legal', riderLegalRoutes);
 app.use('/api/v1/rider/admin/legal', riderLegalAdminRoutes);
 
 // CRITICAL: Mount legacy rider orders (list, assign, alert) BEFORE main rider router.

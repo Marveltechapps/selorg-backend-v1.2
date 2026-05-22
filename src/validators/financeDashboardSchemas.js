@@ -143,13 +143,50 @@ const uploadInvoiceSchema = z.object({
 const createPaymentSchema = z.object({
   body: z.object({
     vendorId: z.string().min(1, 'Vendor ID is required'),
-    invoices: z.array(z.object({
-      invoiceId: z.string().min(1, 'Invoice ID is required'),
-      amount: z.number().min(0, 'Amount must be positive'),
-    })),
+    invoices: z.union([
+      z.array(z.object({
+        invoiceId: z.string().min(1, 'Invoice ID is required'),
+        amount: z.coerce.number().min(0, 'Amount must be positive'),
+      })),
+      z.string().min(1),
+    ]),
     paymentDate: z.string().date(),
     method: z.string().min(1, 'Payment method is required'),
     reference: z.string().min(1, 'Reference is required'),
+  }),
+});
+
+const listVendorPaymentsSchema = z.object({
+  query: z.object({
+    status: z.enum(['in_progress', 'completed', 'cancelled', 'all']).optional(),
+    vendorId: z.string().optional(),
+    page: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 1)),
+    pageSize: z.string().optional().transform((val) => (val ? parseInt(val, 10) : 20)),
+  }),
+});
+
+const getVendorPaymentSchema = z.object({
+  params: z.object({
+    paymentId: z.string().min(1, 'Payment ID is required'),
+  }),
+});
+
+const advancePaymentWorkflowSchema = z.object({
+  params: z.object({
+    paymentId: z.string().min(1, 'Payment ID is required'),
+    invoiceId: z.string().min(1, 'Invoice ID is required'),
+  }),
+  body: z.object({
+    notes: z.string().optional(),
+  }),
+});
+
+const cancelVendorPaymentSchema = z.object({
+  params: z.object({
+    paymentId: z.string().min(1, 'Payment ID is required'),
+  }),
+  body: z.object({
+    reason: z.string().optional(),
   }),
 });
 
@@ -446,6 +483,10 @@ module.exports = {
   markInvoicePaidSchema,
   uploadInvoiceSchema,
   createPaymentSchema,
+  listVendorPaymentsSchema,
+  getVendorPaymentSchema,
+  advancePaymentWorkflowSchema,
+  cancelVendorPaymentSchema,
   // Refunds
   getRefundQueueSchema,
   getRefundDetailsSchema,

@@ -1,6 +1,33 @@
 const mongoose = require('mongoose');
 const logger = require('../core/utils/logger');
 
+// Fail fast when DB is down instead of buffering queries for 10s (e.g. login User.findOne).
+mongoose.set('bufferCommands', false);
+
+let connectPromise = null;
+
+function buildConnectOptions(uri) {
+  const options = {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    maxPoolSize: 50,
+    minPoolSize: 10,
+    waitQueueTimeoutMS: 5000,
+    serverSelectionTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+    family: 4,
+    retryWrites: true,
+    w: 'majority',
+    connectTimeoutMS: 10000,
+    heartbeatFrequencyMS: 30000,
+  };
+  // authSource: admin breaks local/no-auth URIs; only set when credentials are present.
+  if (/@/.test(uri)) {
+    options.authSource = 'admin';
+  }
+  return options;
+}
+
 /**
  * Database Connection Configuration
  * CRITICAL FIX P0.4: Optimized connection pooling
@@ -14,22 +41,7 @@ const connectDB = async () => {
     const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/selorg-admin-ops';
 
     // ✅ FIX P0.4: Optimized pool configuration
-    const conn = await mongoose.connect(uri, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      // ===== CONNECTION POOLING CONFIG =====
-      maxPoolSize: 50,           // Maximum connections in pool
-      minPoolSize: 10,           // Minimum idle connections
-      waitQueueTimeoutMS: 5000,  // Timeout waiting for connection
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,    // Socket timeout
-      family: 4,                 // IPv4
-      retryWrites: true,
-      w: 'majority',
-      authSource: 'admin',
-      connectTimeoutMS: 10000,
-      heartbeatFrequencyMS: 30000,
-    });
+    const conn = await mongoose.connect(uri, buildConnectOptions(uri));
 
     logger.info('MongoDB Connected', {
       host: conn.connection.host,
@@ -61,6 +73,26 @@ const connectDB = async () => {
  */
 async function ensureDbConnection(timeoutMs = 15000) {
   if (isConnected()) return;
+
+  const state = mongoose.connection.readyState;
+  // 0 = disconnected, 3 = disconnecting — attempt (re)connect before waiting.
+  if (state === 0 || state === 3) {
+    if (!connectPromise) {
+      connectPromise = connectDB().finally(() => {
+        connectPromise = null;
+      });
+    }
+    try {
+      await connectPromise;
+    } catch (err) {
+      const error = new Error(
+        'Database is not available. Please ensure MongoDB is running and MONGO_URI is correct.'
+      );
+      error.statusCode = 503;
+      throw error;
+    }
+  }
+
   try {
     await waitForConnection(timeoutMs);
   } catch (err) {

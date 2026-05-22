@@ -1,6 +1,51 @@
 const RiderShift = require('../models/RiderShift');
 const RiderShiftAssignment = require('../models/RiderShiftAssignment');
 
+/** Parse YYYY-MM-DD in local calendar terms (avoids UTC date drift). */
+function parseDateOnly(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const match = dateStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const y = parseInt(match[1], 10);
+  const m = parseInt(match[2], 10) - 1;
+  const d = parseInt(match[3], 10);
+  const dt = new Date(y, m, d);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function formatDateOnly(value) {
+  if (!value) return null;
+  const dt = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function toShiftDto(shift, overrides = {}) {
+  if (!shift) return null;
+  return {
+    id: shift.id,
+    hubId: shift.hubId,
+    hubName: shift.hubName,
+    date: formatDateOnly(shift.date),
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+    durationMinutes: shift.durationMinutes,
+    capacity: shift.capacity,
+    bookedCount: shift.bookedCount ?? 0,
+    status: shift.status,
+    isPeak: !!shift.isPeak,
+    basePay: shift.basePay ?? 0,
+    bonus: shift.bonus ?? 0,
+    currency: shift.currency ?? 'INR',
+    breakMinutes: shift.breakMinutes ?? 0,
+    walkInBufferMinutes: shift.walkInBufferMinutes ?? 15,
+    ...overrides,
+  };
+}
+
 function parseTimeToMinutes(time) {
   if (!time || typeof time !== 'string') return null;
   const [hours, minutes] = time.split(':').map((v) => parseInt(v, 10));
@@ -74,8 +119,8 @@ async function listShifts(filters = {}, options = {}) {
   const query = {};
 
   if (filters.date) {
-    const date = new Date(filters.date);
-    const start = new Date(date);
+    const day = parseDateOnly(filters.date) ?? new Date(filters.date);
+    const start = new Date(day);
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
@@ -141,36 +186,34 @@ async function getAvailableForRider(riderId, { date }) {
   const base = await listShifts({ date, status: 'published' }, { limit: 200 });
   if (!base.items.length) return [];
 
-  const shiftIds = base.items.map((s) => s._id);
-  const assignments = await RiderShiftAssignment.find({
-    shiftId: { $in: shiftIds },
-    status: { $in: ['selected', 'started'] },
-  });
+  const shiftObjectIds = base.items.map((s) => s._id);
+  const [allAssignments, riderAssignments] = await Promise.all([
+    RiderShiftAssignment.find({
+      shiftId: { $in: shiftObjectIds },
+      status: { $in: ['selected', 'started'] },
+    }),
+    RiderShiftAssignment.find({
+      riderId,
+      shiftId: { $in: shiftObjectIds },
+      status: { $in: ['selected', 'started', 'completed'] },
+    }).select('shiftId'),
+  ]);
 
-  const countsByShiftId = assignments.reduce((acc, a) => {
+  const countsByShiftId = allAssignments.reduce((acc, a) => {
     const key = String(a.shiftId);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
 
+  const riderBookedShiftIds = new Set(riderAssignments.map((a) => String(a.shiftId)));
+
   return base.items
-    .map((shift) => ({
-      id: shift.id,
-      hubId: shift.hubId,
-      hubName: shift.hubName,
-      date: shift.date,
-      startTime: shift.startTime,
-      endTime: shift.endTime,
-      durationMinutes: shift.durationMinutes,
-      capacity: shift.capacity,
-      bookedCount: countsByShiftId[String(shift._id)] || 0,
-      isPeak: shift.isPeak,
-      basePay: shift.basePay,
-      bonus: shift.bonus,
-      currency: shift.currency,
-      breakMinutes: shift.breakMinutes,
-      walkInBufferMinutes: shift.walkInBufferMinutes,
-    }));
+    .filter((shift) => !riderBookedShiftIds.has(String(shift._id)))
+    .map((shift) =>
+      toShiftDto(shift, {
+        bookedCount: countsByShiftId[String(shift._id)] || 0,
+      })
+    );
 }
 
 async function selectShifts(riderId, shiftIds = []) {
@@ -401,8 +444,8 @@ async function listRiderShifts(riderId, { date, status } = {}) {
   console.log('[ShiftService] listRiderShifts', { riderId, date, status });
 
   if (date) {
-    const d = new Date(date);
-    const start = new Date(d);
+    const day = parseDateOnly(date) ?? new Date(date);
+    const start = new Date(day);
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(end.getDate() + 1);
@@ -411,6 +454,8 @@ async function listRiderShifts(riderId, { date, status } = {}) {
 
   if (status) {
     query.status = Array.isArray(status) ? { $in: status } : status;
+  } else {
+    query.status = { $in: ['selected', 'started', 'completed'] };
   }
 
   const assignments = await RiderShiftAssignment.find(query).populate('shiftId').sort({ date: 1 });
@@ -491,23 +536,9 @@ async function listRiderShifts(riderId, { date, status } = {}) {
         }
       }
 
-      return {
-        id: s.id,
-        hubId: s.hubId,
-        hubName: s.hubName,
-        date: s.date,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        durationMinutes: s.durationMinutes,
-        capacity: s.capacity,
+      return toShiftDto(s, {
         bookedCount: s.bookedCount,
         status: a.status,
-        isPeak: s.isPeak,
-        basePay: s.basePay,
-        bonus: s.bonus,
-        currency: s.currency,
-        breakMinutes: s.breakMinutes,
-        walkInBufferMinutes: s.walkInBufferMinutes,
         assignmentId: a._id,
         assignmentStatus: a.status,
         startedAt: a.startedAt,
@@ -515,7 +546,7 @@ async function listRiderShifts(riderId, { date, status } = {}) {
         attendanceMinutes: attendedMinutes,
         attendancePercentage,
         completionStatus,
-      };
+      });
     });
 }
 

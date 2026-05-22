@@ -2,6 +2,25 @@ const FinanceSummary = require('../models/FinanceSummary');
 const LiveTransaction = require('../models/LiveTransaction');
 const logger = require('../../utils/logger');
 
+function roundPct(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function isCodTransaction(txn) {
+  const method = String(txn.methodDisplay || '').toLowerCase();
+  const gateway = String(txn.gateway || '').toLowerCase();
+  return (
+    method.includes('cod') ||
+    method.includes('cash') ||
+    gateway === 'cod' ||
+    gateway.includes('cod')
+  );
+}
+
+function isOnlineGatewayTransaction(txn) {
+  return !isCodTransaction(txn);
+}
+
 class FinanceDashboardService {
   async getFinanceSummary(entityId, date) {
     try {
@@ -60,6 +79,56 @@ class FinanceDashboardService {
       const failedCount = todaysTxns.filter(t => t.status === 'failed').length;
       const failedPaymentsRatePercent = totalCount > 0 ? (failedCount / totalCount) * 100 : 0;
 
+      const successTxns = todaysTxns.filter(t => t.status === 'success');
+
+      const RefundRequest = require('../models/RefundRequest');
+      const refundsToday = await RefundRequest.find({
+        requestedAt: { $gte: startDate, $lte: endDate },
+        status: { $in: ['completed', 'processed', 'approved'] },
+      }).lean();
+      const refundsTodayAmount = refundsToday.reduce((s, r) => s + (r.amount || 0), 0);
+      const netRevenueToday = Math.max(0, totalReceivedToday - refundsTodayAmount);
+
+      const orderIds = new Set();
+      successTxns.forEach(t => orderIds.add(t.orderId || t.txnId));
+      const successfulOrderCount = orderIds.size || successTxns.length;
+      const averageOrderValue =
+        successfulOrderCount > 0 ? totalReceivedToday / successfulOrderCount : 0;
+
+      const refundRatePercent =
+        totalReceivedToday > 0
+          ? roundPct((refundsTodayAmount / totalReceivedToday) * 100)
+          : 0;
+
+      const codSuccessTxns = successTxns.filter(isCodTransaction);
+      const codSuccessAmount = codSuccessTxns.reduce((s, t) => s + (t.amount || 0), 0);
+      const codPercent =
+        totalReceivedToday > 0
+          ? roundPct((codSuccessAmount / totalReceivedToday) * 100)
+          : 0;
+
+      const gatewayTxns = todaysTxns.filter(isOnlineGatewayTransaction);
+      const gatewaySuccessCount = gatewayTxns.filter(t => t.status === 'success').length;
+      const gatewayFailedCount = gatewayTxns.filter(t => t.status === 'failed').length;
+      const gatewayTerminalCount = gatewaySuccessCount + gatewayFailedCount;
+      const gatewaySuccessRatePercent =
+        gatewayTerminalCount > 0
+          ? roundPct((gatewaySuccessCount / gatewayTerminalCount) * 100)
+          : 100;
+
+      const paymentsToday = await CustomerPayment.find({
+        entityId,
+        createdAt: { $gte: startDate, $lte: endDate },
+        status: { $in: ['captured', 'authorized', 'declined', 'pending'] },
+      }).lean();
+      const settledPayments = paymentsToday.filter(p =>
+        ['captured', 'authorized'].includes(p.status)
+      );
+      const settlementSuccessRatePercent =
+        paymentsToday.length > 0
+          ? roundPct((settledPayments.length / paymentsToday.length) * 100)
+          : 100;
+
       return {
         entityId,
         date: startDate.toISOString(),
@@ -72,6 +141,20 @@ class FinanceDashboardService {
         failedPaymentsRatePercent,
         failedPaymentsCount: failedCount,
         failedPaymentsThresholdPercent: 1.0,
+        netRevenueToday,
+        refundsTodayAmount,
+        refundsTodayCount: refundsToday.length,
+        settlementSuccessRatePercent,
+        settledPaymentsCount: settledPayments.length,
+        settlementAttemptsCount: paymentsToday.length,
+        averageOrderValue,
+        successfulOrderCount,
+        refundRatePercent,
+        codPercent,
+        codTxnCount: codSuccessTxns.length,
+        gatewaySuccessRatePercent,
+        gatewaySuccessCount,
+        gatewayTerminalCount,
       };
     } catch (error) {
       logger.error('Error fetching finance summary:', error);
@@ -267,6 +350,49 @@ class FinanceDashboardService {
       return result;
     } catch (error) {
       logger.error('Error fetching hourly trends:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Aggregate customer + picker wallet balances (platform liability).
+   */
+  async getWalletLiability() {
+    try {
+      const { CustomerWallet } = require('../../customer-backend/models/CustomerWallet');
+      const PickerWallet = require('../../picker/models/wallet.model');
+
+      const [customerAgg, pickerAgg] = await Promise.all([
+        CustomerWallet.aggregate([
+          { $group: { _id: null, total: { $sum: { $ifNull: ['$balance', 0] } } } },
+        ]),
+        PickerWallet.aggregate([
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: {
+                  $add: [
+                    { $ifNull: ['$availableBalance', 0] },
+                    { $ifNull: ['$pendingBalance', 0] },
+                  ],
+                },
+              },
+            },
+          },
+        ]),
+      ]);
+
+      const customerWalletBalance = customerAgg[0]?.total ?? 0;
+      const pickerWalletBalance = pickerAgg[0]?.total ?? 0;
+
+      return {
+        totalBalance: customerWalletBalance + pickerWalletBalance,
+        customerWalletBalance,
+        pickerWalletBalance,
+      };
+    } catch (error) {
+      logger.error('Error fetching wallet liability:', error);
       throw error;
     }
   }

@@ -28,7 +28,7 @@ router.use('/public', publicVendorRoutes);
 
 // All other routes require JWT and role: vendor, admin, super_admin; cache GET responses
 const protectedRouter = express.Router();
-protectedRouter.use(authenticateToken, requireRole('vendor', 'admin', 'super_admin'));
+protectedRouter.use(authenticateToken, requireRole('vendor', 'admin', 'super_admin', 'finance'));
 protectedRouter.use(bindVendorHubContext);
 protectedRouter.use(
   cacheMiddleware(appConfig.cache.vendor, { cacheKeyExtra: (req) => (req.vendorHubKey ? `:${req.vendorHubKey}` : '') })

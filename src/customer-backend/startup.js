@@ -71,6 +71,57 @@ function run() {
         });
         logger.info('Customer legal: seeded default privacy document');
       }
+
+      const riderConfigCount = await LegalConfig.countDocuments({ key: 'rider_login_legal' });
+      if (riderConfigCount === 0) {
+        await LegalConfig.create({
+          key: 'rider_login_legal',
+          loginLegal: {
+            preamble: 'By continuing, you agree to our ',
+            terms: { label: 'Terms & Conditions', type: 'in_app', url: null },
+            privacy: { label: 'Privacy Policy', type: 'in_app', url: null },
+            connector: ' and ',
+          },
+        });
+        logger.info('Rider legal: seeded default login legal config');
+      }
+      const riderTermsCount = await LegalDocument.countDocuments({ type: 'terms', appTarget: 'rider' });
+      if (riderTermsCount === 0) {
+        await LegalDocument.create({
+          type: 'terms',
+          version: '1',
+          title: 'Terms & Conditions',
+          effectiveDate: new Date().toISOString().slice(0, 10),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          contentFormat: 'plain',
+          content:
+            'Welcome to SelOrg QuickRider. By registering as a delivery partner, you agree to these Terms & Conditions. ' +
+            'You must be at least 18 years old, hold valid ID and driving license, and maintain valid vehicle registration and insurance. ' +
+            'You are an independent contractor and may accept or decline delivery requests at your discretion. ' +
+            'Earnings are based on completed deliveries; payments are processed per the payout schedule in the app.',
+          isCurrent: true,
+          appTarget: 'rider',
+        });
+        logger.info('Rider legal: seeded default terms document');
+      }
+      const riderPrivacyCount = await LegalDocument.countDocuments({ type: 'privacy', appTarget: 'rider' });
+      if (riderPrivacyCount === 0) {
+        await LegalDocument.create({
+          type: 'privacy',
+          version: '1',
+          title: 'Privacy Policy',
+          effectiveDate: new Date().toISOString().slice(0, 10),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          contentFormat: 'plain',
+          content:
+            'SelOrg collects personal details, identity and vehicle documents, location data during active deliveries, ' +
+            'and payment information to verify eligibility, assign orders, process payouts, and comply with law. ' +
+            'We do not sell your personal information. Contact support through the app for access or deletion requests.',
+          isCurrent: true,
+          appTarget: 'rider',
+        });
+        logger.info('Rider legal: seeded default privacy document');
+      }
     } catch (err) {
       logger.warn('Customer legal seed failed', { error: err.message });
     }

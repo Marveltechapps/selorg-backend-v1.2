@@ -50,6 +50,11 @@ class FinanceDashboardController {
     const result = await financeDashboardService.exportFinanceReport(req.body);
     res.json({ success: true, data: result });
   });
+
+  getWalletLiability = asyncHandler(async (_req, res) => {
+    const data = await financeDashboardService.getWalletLiability();
+    res.json({ success: true, data });
+  });
 }
 
 module.exports = new FinanceDashboardController();

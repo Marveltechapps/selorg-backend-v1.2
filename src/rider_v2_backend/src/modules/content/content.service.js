@@ -28,6 +28,7 @@ async function getContentByKey(key, locale = "en") {
   if (normalizedKey === "terms" || normalizedKey === "privacy") {
     const legalDoc = await LegalDocument.findOne({
       type: normalizedKey,
+      appTarget: "rider",
       isCurrent: true,
     }).lean();
 

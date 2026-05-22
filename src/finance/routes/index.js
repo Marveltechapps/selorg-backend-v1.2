@@ -15,6 +15,7 @@ const pickerWithdrawalsController = require('../controllers/pickerWithdrawalsCon
 const { authenticateToken, requireRole, requirePermission, cacheMiddleware } = require('../../core/middleware');
 const { PERMISSIONS } = require('../../config/permissions');
 const { bindFinanceHubContext } = require('../middleware/financeHubContext');
+const { vendorPaymentUpload } = require('../middleware/vendorPaymentUpload');
 const { validateRequest } = require('../../middleware/zodValidator');
 const appConfig = require('../../config/app');
 const {
@@ -36,6 +37,10 @@ const {
   markInvoicePaidSchema,
   uploadInvoiceSchema,
   createPaymentSchema,
+  listVendorPaymentsSchema,
+  getVendorPaymentSchema,
+  advancePaymentWorkflowSchema,
+  cancelVendorPaymentSchema,
   getRefundQueueSchema,
   getRefundDetailsSchema,
   approveRefundSchema,
@@ -104,6 +109,7 @@ router.get('/live-transactions', ...financeAuth, cacheMiddleware(appConfig.cache
 router.get('/daily-metrics', ...financeAuth, cacheMiddleware(appConfig.cache.finance.summary), validateRequest(getDailyMetricsSchema), financeDashboardController.getDailyMetrics);
 router.get('/gateway-status', ...financeAuth, cacheMiddleware(appConfig.cache.finance.payments), validateRequest(getGatewayStatusSchema), financeDashboardController.getGatewayStatus);
 router.get('/hourly-trends', ...financeAuth, cacheMiddleware(appConfig.cache.finance.summary), validateRequest(getHourlyTrendsSchema), financeDashboardController.getHourlyTrends);
+router.get('/wallet-liability', ...financeAuth, cacheMiddleware(appConfig.cache.finance.summary), financeDashboardController.getWalletLiability);
 router.post('/export', ...financeAuth, validateRequest(exportFinanceReportSchema), financeDashboardController.exportFinanceReport);
 
 // Customer Payments routes
@@ -120,8 +126,40 @@ router.get('/vendor-payments/invoices/:id', ...vendorPaymentsAuth, vendorPayment
 router.post('/vendor-payments/invoices/:id/approve', ...vendorPaymentsAuth, validateRequest(approveInvoiceSchema), vendorPaymentsController.approveInvoice);
 router.post('/vendor-payments/invoices/:id/reject', ...vendorPaymentsAuth, validateRequest(rejectInvoiceSchema), vendorPaymentsController.rejectInvoice);
 router.post('/vendor-payments/invoices/:id/mark-paid', ...vendorPaymentsAuth, validateRequest(markInvoicePaidSchema), vendorPaymentsController.markInvoicePaid);
-router.post('/vendor-payments/payments', ...vendorPaymentsAuth, validateRequest(createPaymentSchema), vendorPaymentsController.createPayment);
-router.get('/vendor-payments/vendors', ...vendorPaymentsAuth, vendorPaymentsCache(appConfig.cache.finance.payments), vendorPaymentsController.getVendors);
+router.post(
+  '/vendor-payments/payments',
+  ...vendorPaymentsAuth,
+  vendorPaymentUpload,
+  validateRequest(createPaymentSchema),
+  vendorPaymentsController.createPayment
+);
+router.get(
+  '/vendor-payments/payments',
+  ...vendorPaymentsAuth,
+  vendorPaymentsCache(appConfig.cache.finance.payments),
+  validateRequest(listVendorPaymentsSchema),
+  vendorPaymentsController.listPayments
+);
+router.get(
+  '/vendor-payments/payments/:paymentId',
+  ...vendorPaymentsAuth,
+  vendorPaymentsCache(appConfig.cache.finance.payments),
+  validateRequest(getVendorPaymentSchema),
+  vendorPaymentsController.getPayment
+);
+router.post(
+  '/vendor-payments/payments/:paymentId/invoices/:invoiceId/workflow/advance',
+  ...vendorPaymentsAuth,
+  validateRequest(advancePaymentWorkflowSchema),
+  vendorPaymentsController.advanceWorkflowStep
+);
+router.post(
+  '/vendor-payments/payments/:paymentId/cancel',
+  ...vendorPaymentsAuth,
+  validateRequest(cancelVendorPaymentSchema),
+  vendorPaymentsController.cancelPayment
+);
+router.get('/vendor-payments/vendors', ...vendorPaymentsAuth, vendorPaymentsController.getVendors);
 
 // Picker Withdrawals routes (Finance Picker Payouts)
 router.get('/picker-withdrawals', ...financeAuth, pickerWithdrawalsController.list);

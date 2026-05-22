@@ -65,13 +65,63 @@ class VendorPaymentsController {
   });
 
   createPayment = asyncHandler(async (req, res) => {
-    const result = await vendorPaymentsService.createPayment(req.body);
+    let invoices = req.body.invoices;
+    if (typeof invoices === 'string') {
+      try {
+        invoices = JSON.parse(invoices);
+      } catch {
+        return res.status(400).json({ success: false, message: 'Invalid invoices JSON' });
+      }
+    }
+    const payload = {
+      vendorId: req.body.vendorId,
+      invoices,
+      paymentDate: req.body.paymentDate,
+      method: req.body.method,
+      reference: req.body.reference,
+    };
+    const createdBy = req.user?.email || req.user?.userId || 'System';
+    const result = await vendorPaymentsService.createPayment(payload, req.file, createdBy);
     await cacheInvalidation.invalidateFinance().catch(() => {});
     res.status(201).json({ success: true, data: result });
   });
 
+  listPayments = asyncHandler(async (req, res) => {
+    const result = await vendorPaymentsService.listPayments(req.query);
+    res.json({ success: true, data: result });
+  });
+
+  getPayment = asyncHandler(async (req, res) => {
+    const { paymentId } = req.params;
+    const payment = await vendorPaymentsService.getPaymentByPaymentId(paymentId);
+    res.json({ success: true, data: payment });
+  });
+
+  advanceWorkflowStep = asyncHandler(async (req, res) => {
+    const { paymentId, invoiceId } = req.params;
+    const { notes } = req.body || {};
+    const completedBy = req.user?.email || req.user?.userId || 'System';
+    const payment = await vendorPaymentsService.advanceInvoiceWorkflowStep(
+      paymentId,
+      invoiceId,
+      { notes },
+      completedBy
+    );
+    await cacheInvalidation.invalidateFinance().catch(() => {});
+    res.json({ success: true, data: payment });
+  });
+
+  cancelPayment = asyncHandler(async (req, res) => {
+    const { paymentId } = req.params;
+    const { reason } = req.body || {};
+    const cancelledBy = req.user?.email || req.user?.userId || 'System';
+    const payment = await vendorPaymentsService.cancelPayment(paymentId, { reason }, cancelledBy);
+    await cacheInvalidation.invalidateFinance().catch(() => {});
+    res.json({ success: true, data: payment });
+  });
+
   getVendors = asyncHandler(async (req, res) => {
-    const vendors = await vendorPaymentsService.getVendors();
+    const vendors = await vendorPaymentsService.getVendors(req.vendorHubKey);
     res.json({ success: true, data: vendors });
   });
 }
