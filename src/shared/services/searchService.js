@@ -7,6 +7,11 @@ const InventoryItem = require('../../warehouse/models/InventoryItem');
 const RecentSearch = require('../models/RecentSearch');
 const logger = require('../../core/utils/logger');
 const { mergeWarehouseFilter, warehouseKeyMatch } = require('../../warehouse/constants/warehouseScope');
+const PurchaseOrder = require('../../vendor/models/PurchaseOrder');
+const { resolveHubKeyFromUserDoc, mergeHubFilterForKey } = require('../../vendor/constants/hubScope');
+const CustomerPayment = require('../../finance/models/CustomerPayment');
+const VendorInvoice = require('../../finance/models/VendorInvoice');
+const Invoice = require('../../finance/models/Invoice');
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -14,9 +19,11 @@ function escapeRegex(s) {
 
 function normalizeDashboard(dashboard) {
   const d = String(dashboard || '').toLowerCase();
-  if (d === 'admin' || d === 'warehouse') return d;
+  if (d === 'admin' || d === 'warehouse' || d === 'vendor' || d === 'finance') return d;
   return '';
 }
+
+const FINANCE_DASHBOARD_KEYS = new Set(['admin', 'warehouse', 'vendor', 'finance']);
 
 function warehouseStoreScope(user) {
   if (!user || typeof user !== 'object') return null;
@@ -62,6 +69,7 @@ class GlobalSearchService {
     const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
     const d = normalizeDashboard(dashboard);
     const storeScope = d === 'warehouse' ? warehouseStoreScope(user) : null;
+    const vendorHubKey = d === 'vendor' ? resolveHubKeyFromUserDoc(user) : null;
 
     const results = {
       orders: [],
@@ -73,12 +81,132 @@ class GlobalSearchService {
     };
 
     const want = (mod) => type === 'all' || type === mod;
-    const wantUsers = want('users') && d !== 'warehouse';
+    const wantUsers = want('users') && d !== 'warehouse' && d !== 'vendor' && d !== 'finance';
+    const financeHubKey = d === 'finance' ? resolveHubKeyFromUserDoc(user) : null;
 
     try {
       const searchPromises = [];
 
-      if (want('orders')) {
+      if (d === 'finance') {
+        if (want('orders')) {
+          searchPromises.push(
+            CustomerPayment.find({
+              $or: [
+                { orderId: searchRegex },
+                { customerName: searchRegex },
+                { customerEmail: searchRegex },
+                { gatewayRef: searchRegex },
+              ],
+            })
+              .limit(limit)
+              .lean()
+              .then((rows) => {
+                results.orders = rows.map((row) => {
+                  const id = String(row._id);
+                  return {
+                    id,
+                    type: 'customer_payment',
+                    title: `Payment ${row.orderId}`,
+                    subtitle: row.customerName || row.customerEmail || '',
+                    status: row.status || '',
+                    metadata: {
+                      amount: row.amount,
+                      financeTab: 'customer-payments',
+                      href: `/finance/customer-payments?highlight=${encodeURIComponent(id)}`,
+                    },
+                  };
+                });
+              })
+          );
+        }
+
+        if (want('vendors')) {
+          const invBase = {
+            $or: [
+              { invoiceNumber: searchRegex },
+              { vendorName: searchRegex },
+              { vendorId: searchRegex },
+            ],
+          };
+          const invFilter =
+            financeHubKey ? mergeHubFilterForKey(invBase, financeHubKey) : invBase;
+          searchPromises.push(
+            VendorInvoice.find(invFilter)
+              .limit(limit)
+              .lean()
+              .then((rows) => {
+                results.vendors = rows.map((row) => {
+                  const id = String(row._id);
+                  return {
+                    id,
+                    type: 'vendor_invoice',
+                    title: `Invoice ${row.invoiceNumber}`,
+                    subtitle: row.vendorName || row.vendorId || '',
+                    status: row.status || '',
+                    metadata: {
+                      amount: row.amount,
+                      financeTab: 'vendor-payments',
+                      href: `/finance/vendor-payments?highlight=${encodeURIComponent(id)}`,
+                    },
+                  };
+                });
+              })
+          );
+        }
+
+        if (want('products')) {
+          searchPromises.push(
+            Invoice.find({
+              $or: [
+                { invoiceNumber: searchRegex },
+                { customerName: searchRegex },
+                { customerEmail: searchRegex },
+              ],
+            })
+              .limit(limit)
+              .lean()
+              .then((rows) => {
+                results.products = rows.map((row) => {
+                  const id = String(row._id);
+                  return {
+                    id,
+                    type: 'billing_invoice',
+                    title: `Invoice ${row.invoiceNumber}`,
+                    subtitle: row.customerName || row.customerEmail || '',
+                    status: row.status || '',
+                    metadata: {
+                      amount: row.amount,
+                      financeTab: 'billing',
+                      href: `/finance/billing?highlight=${encodeURIComponent(id)}`,
+                    },
+                  };
+                });
+              })
+          );
+        }
+
+        await Promise.all(searchPromises);
+
+        const total =
+          results.orders.length +
+          results.products.length +
+          results.vendors.length;
+
+        const took = Date.now() - startTime;
+
+        if (userId && total > 0) {
+          await this.saveRecentSearch(userId, query, total, d);
+        }
+
+        return {
+          query,
+          results,
+          total,
+          took,
+        };
+      }
+
+      if (want('orders') && d !== 'vendor') {
         let orderFilter = {
           $or: [
             { order_id: searchRegex },
@@ -114,7 +242,7 @@ class GlobalSearchService {
         );
       }
 
-      if (want('products')) {
+      if (want('products') && d !== 'vendor') {
         searchPromises.push(
           SKU.find({
             $or: [
@@ -174,36 +302,46 @@ class GlobalSearchService {
       }
 
       if (want('vendors')) {
+        const vendorBase = {
+          $or: [
+            { vendorName: searchRegex },
+            { name: searchRegex },
+            { vendorCode: searchRegex },
+            { code: searchRegex },
+            { 'contact.email': searchRegex },
+            { 'contact.phone': searchRegex },
+          ],
+        };
+        const vendorFilter =
+          d === 'vendor' && vendorHubKey
+            ? mergeHubFilterForKey(vendorBase, vendorHubKey)
+            : vendorBase;
         searchPromises.push(
-          Vendor.find({
-            $or: [
-              { vendorName: searchRegex },
-              { name: searchRegex },
-              { vendorCode: searchRegex },
-              { code: searchRegex },
-              { 'contact.email': searchRegex },
-              { 'contact.phone': searchRegex },
-            ],
-          })
+          Vendor.find(vendorFilter)
             .limit(limit)
             .lean()
             .then((vendors) => {
-              results.vendors = vendors.map((vendor) => ({
-                id: vendor.vendorCode || vendor.code || String(vendor._id),
-                type: 'vendor',
-                title: vendor.vendorName || vendor.name || 'Vendor',
-                subtitle: vendor.vendorCode || vendor.code || '',
-                status: vendor.status,
-                metadata: {
-                  contact: vendor.contact?.email || vendor.contact?.phone || '',
-                  stage: vendor.stage,
-                },
-              }));
+              results.vendors = vendors.map((vendor) => {
+                const id = vendor.vendorCode || vendor.code || String(vendor._id);
+                return {
+                  id,
+                  type: 'vendor',
+                  title: vendor.vendorName || vendor.name || 'Vendor',
+                  subtitle: vendor.vendorCode || vendor.code || '',
+                  status: vendor.status,
+                  metadata: {
+                    contact: vendor.contact?.email || vendor.contact?.phone || '',
+                    stage: vendor.stage,
+                    vendorTab: 'vendor-list',
+                    href: `/vendor/vendor-list?highlight=${encodeURIComponent(id)}`,
+                  },
+                };
+              });
             })
         );
       }
 
-      if (want('riders')) {
+      if (want('riders') && d !== 'vendor') {
         searchPromises.push(
           Rider.find({
             $or: [
@@ -231,7 +369,7 @@ class GlobalSearchService {
         );
       }
 
-      if (want('inventory')) {
+      if (want('inventory') && d !== 'vendor') {
         searchPromises.push(
           InventoryItem.find({
             $or: [
@@ -258,6 +396,44 @@ class GlobalSearchService {
                   lastUpdated: row.lastUpdated,
                 },
               }));
+            })
+        );
+      }
+
+      if (d === 'vendor') {
+        const poBase = {
+          archived: { $ne: true },
+          $or: [
+            { reference: searchRegex },
+            { externalReference: searchRegex },
+            { vendorId: searchRegex },
+            { 'items.sku': searchRegex },
+            { 'items.description': searchRegex },
+          ],
+        };
+        const poFilter = vendorHubKey ? mergeHubFilterForKey(poBase, vendorHubKey) : poBase;
+        searchPromises.push(
+          PurchaseOrder.find(poFilter)
+            .limit(limit)
+            .lean()
+            .then((pos) => {
+              results.orders = pos.map((po) => {
+                const id = String(po._id);
+                const label =
+                  po.reference || po.externalReference || (id ? `PO-${id.slice(-8)}` : 'PO');
+                return {
+                  id,
+                  type: 'purchase_order',
+                  title: label,
+                  subtitle: po.vendorId ? `Vendor ${po.vendorId}` : '',
+                  status: po.status || '',
+                  metadata: {
+                    vendorTab: 'po',
+                    vendorId: po.vendorId,
+                    href: `/vendor/po?highlight=${encodeURIComponent(id)}`,
+                  },
+                };
+              });
             })
         );
       }
@@ -304,51 +480,108 @@ class GlobalSearchService {
     const cap = Math.max(1, Math.min(20, limit));
     const storeScope = d === 'warehouse' ? warehouseStoreScope(user) : null;
     const warehouseKey = d === 'warehouse' ? user?.warehouseKey : null;
+    const vendorHubKey = d === 'vendor' ? resolveHubKeyFromUserDoc(user) : null;
+    const financeHubKey = d === 'finance' ? resolveHubKeyFromUserDoc(user) : null;
 
     try {
       const suggestions = [];
 
-      let orderQuery = { order_id: prefix };
-      if (storeScope) {
-        orderQuery = { $and: [storeScope, orderQuery] };
+      if (d === 'finance') {
+        const payments = await CustomerPayment.find({
+          $or: [{ orderId: prefix }, { gatewayRef: prefix }, { customerEmail: prefix }],
+        })
+          .limit(cap)
+          .select('orderId gatewayRef customerEmail')
+          .lean();
+        payments.forEach((p) => {
+          suggestions.push({
+            text: p.orderId || p.gatewayRef || p.customerEmail,
+            type: 'customer_payment',
+            category: 'Customer Payments',
+          });
+        });
+
+        const invBase = {
+          $or: [{ invoiceNumber: prefix }, { vendorName: prefix }, { vendorId: prefix }],
+        };
+        const invFilter = financeHubKey ? mergeHubFilterForKey(invBase, financeHubKey) : invBase;
+        const vendorInvoices = await VendorInvoice.find(invFilter)
+          .limit(cap)
+          .select('invoiceNumber vendorName vendorId')
+          .lean();
+        vendorInvoices.forEach((row) => {
+          suggestions.push({
+            text: row.invoiceNumber || row.vendorName || row.vendorId,
+            type: 'vendor_invoice',
+            category: 'Vendor Invoices',
+          });
+        });
+
+        const billing = await Invoice.find({
+          $or: [{ invoiceNumber: prefix }, { customerName: prefix }, { customerEmail: prefix }],
+        })
+          .limit(cap)
+          .select('invoiceNumber customerName customerEmail')
+          .lean();
+        billing.forEach((row) => {
+          suggestions.push({
+            text: row.invoiceNumber || row.customerName || row.customerEmail,
+            type: 'billing_invoice',
+            category: 'Billing Invoices',
+          });
+        });
+
+        return suggestions.slice(0, cap * 2);
       }
-      const orders = await Order.find(orderQuery)
-        .limit(cap)
-        .select('order_id customer_name')
-        .lean();
 
-      orders.forEach((order) => {
-        suggestions.push({
-          text: order.order_id,
-          type: 'order',
-          category: 'Orders',
+      if (d !== 'vendor') {
+        let orderQuery = { order_id: prefix };
+        if (storeScope) {
+          orderQuery = { $and: [storeScope, orderQuery] };
+        }
+        const orders = await Order.find(orderQuery)
+          .limit(cap)
+          .select('order_id customer_name')
+          .lean();
+
+        orders.forEach((order) => {
+          suggestions.push({
+            text: order.order_id,
+            type: 'order',
+            category: 'Orders',
+          });
         });
-      });
 
-      const products = await SKU.find({
-        $or: [{ name: prefix }, { code: prefix }],
-      })
-        .limit(cap)
-        .select('name code')
-        .lean();
+        const products = await SKU.find({
+          $or: [{ name: prefix }, { code: prefix }],
+        })
+          .limit(cap)
+          .select('name code')
+          .lean();
 
-      products.forEach((product) => {
-        suggestions.push({
-          text: product.name || product.code,
-          type: 'product',
-          category: 'Products',
+        products.forEach((product) => {
+          suggestions.push({
+            text: product.name || product.code,
+            type: 'product',
+            category: 'Products',
+          });
         });
-      });
+      }
 
       if (d !== 'warehouse') {
-        const vendors = await Vendor.find({
+        const vendorBase = {
           $or: [
             { vendorName: prefix },
             { name: prefix },
             { vendorCode: prefix },
             { code: prefix },
           ],
-        })
+        };
+        const vendorFilter =
+          d === 'vendor' && vendorHubKey
+            ? mergeHubFilterForKey(vendorBase, vendorHubKey)
+            : vendorBase;
+        const vendors = await Vendor.find(vendorFilter)
           .limit(cap)
           .select('vendorName name vendorCode code')
           .lean();
@@ -361,35 +594,63 @@ class GlobalSearchService {
           });
         });
 
-        const riders = await Rider.find({
-          $or: [{ name: prefix }, { id: prefix }],
-        })
-          .limit(cap)
-          .select('name id')
-          .lean();
-
-        riders.forEach((r) => {
-          suggestions.push({
-            text: r.id || r.name,
-            type: 'rider',
-            category: 'Riders',
+        if (d === 'vendor') {
+          const poBase = {
+            archived: { $ne: true },
+            $or: [
+              { reference: prefix },
+              { externalReference: prefix },
+              { vendorId: prefix },
+              { 'items.sku': prefix },
+            ],
+          };
+          const poFilter = vendorHubKey ? mergeHubFilterForKey(poBase, vendorHubKey) : poBase;
+          const pos = await PurchaseOrder.find(poFilter)
+            .limit(cap)
+            .select('reference externalReference vendorId')
+            .lean();
+          pos.forEach((po) => {
+            const label =
+              po.reference || po.externalReference || (po.vendorId ? String(po.vendorId) : 'PO');
+            suggestions.push({
+              text: label,
+              type: 'purchase_order',
+              category: 'Purchase Orders',
+            });
           });
-        });
+        }
 
-        const users = await AdminUser.find({
-          $or: [{ name: prefix }, { email: prefix }],
-        })
-          .select('name email')
-          .limit(cap)
-          .lean();
+        if (d !== 'vendor') {
+          const riders = await Rider.find({
+            $or: [{ name: prefix }, { id: prefix }],
+          })
+            .limit(cap)
+            .select('name id')
+            .lean();
 
-        users.forEach((u) => {
-          suggestions.push({
-            text: u.email || u.name,
-            type: 'user',
-            category: 'Users',
+          riders.forEach((r) => {
+            suggestions.push({
+              text: r.id || r.name,
+              type: 'rider',
+              category: 'Riders',
+            });
           });
-        });
+
+          const users = await AdminUser.find({
+            $or: [{ name: prefix }, { email: prefix }],
+          })
+            .select('name email')
+            .limit(cap)
+            .lean();
+
+          users.forEach((u) => {
+            suggestions.push({
+              text: u.email || u.name,
+              type: 'user',
+              category: 'Users',
+            });
+          });
+        }
       }
 
       if (d === 'warehouse' || d === 'admin' || d === '') {
@@ -427,7 +688,7 @@ class GlobalSearchService {
       const uid = userId != null ? String(userId) : '';
       if (!uid) return;
       const d = normalizeDashboard(dashboard);
-      const dashKey = d === 'admin' || d === 'warehouse' ? d : '';
+      const dashKey = FINANCE_DASHBOARD_KEYS.has(d) ? d : '';
       await RecentSearch.findOneAndUpdate(
         { userId: uid, dashboard: dashKey, query: query.trim() },
         { $set: { resultCount, updatedAt: new Date() } },
@@ -443,7 +704,7 @@ class GlobalSearchService {
       const uid = userId != null ? String(userId) : '';
       if (!uid) return [];
       const d = normalizeDashboard(dashboard);
-      const dashKey = d === 'admin' || d === 'warehouse' ? d : '';
+      const dashKey = FINANCE_DASHBOARD_KEYS.has(d) ? d : '';
 
       const rows = await RecentSearch.find({ userId: uid, dashboard: dashKey })
         .sort({ updatedAt: -1 })

@@ -3,6 +3,11 @@ const { asyncHandler } = require('../../core/middleware');
 const cacheInvalidation = require('../cacheInvalidation');
 
 class ReconciliationController {
+  getAvailableGateways = asyncHandler(async (req, res) => {
+    const gateways = await reconciliationService.getAvailableGateways();
+    res.json({ success: true, data: gateways });
+  });
+
   getReconSummary = asyncHandler(async (req, res) => {
     const { date } = req.query;
     const summary = await reconciliationService.getReconSummary(date);
@@ -45,7 +50,8 @@ class ReconciliationController {
 
   getGatewayDetails = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const gateway = await reconciliationService.getGatewayDetails(id);
+    const { date } = req.query;
+    const gateway = await reconciliationService.getGatewayDetails(id, date);
     res.json({ success: true, data: gateway });
   });
 }

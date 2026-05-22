@@ -4,9 +4,6 @@ const criteriaSchema = new mongoose.Schema({
   maxRadiusKm: { type: Number, default: 5, min: 0.5, max: 50 },
   maxOrdersPerRider: { type: Number, default: 3, min: 1, max: 10 },
   preferSameZone: { type: Boolean, default: true },
-  priorityWeight: { type: Number, default: 5, min: 0, max: 10 },
-  distanceWeight: { type: Number, default: 5, min: 0, max: 10 },
-  etaWeight: { type: Number, default: 5, min: 0, max: 10 },
 }, { _id: false });
 
 const AutoAssignRuleSchema = new mongoose.Schema({

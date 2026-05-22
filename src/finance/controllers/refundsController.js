@@ -40,6 +40,12 @@ class RefundsController {
     res.json({ success: true, data: chargebacks });
   });
 
+  getWalletTransactions = asyncHandler(async (req, res) => {
+    const limit = req.query.limit ? parseInt(req.query.limit, 10) : 100;
+    const data = await refundsService.getWalletTransactions(limit);
+    res.json({ success: true, data });
+  });
+
   markCompleted = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { transactionId, notes } = req.body;

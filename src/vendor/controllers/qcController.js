@@ -44,5 +44,14 @@ async function overview(req, res, next) {
   }
 }
 
-module.exports = { listQCChecks, createQCCheck, getQCCheck, patchQCCheck, overview };
+async function deleteQCCheck(req, res, next) {
+  try {
+    await qcService.deleteQCCheck(req.params.qcId);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { listQCChecks, createQCCheck, getQCCheck, patchQCCheck, deleteQCCheck, overview };
 

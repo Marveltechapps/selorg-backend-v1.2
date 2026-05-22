@@ -3,7 +3,15 @@ const mongoose = require('mongoose');
 const AlertSchema = new mongoose.Schema(
   {
     vendorId: String,
+    alertId: String,
+    title: String,
+    productName: String,
+    batchId: String,
     type: String,
+    expiryDate: Date,
+    quantity: Number,
+    unit: { type: String, default: 'units' },
+    value: { type: Number, default: 0 },
     severity: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'low' },
     status: { type: String, enum: ['open', 'acknowledged', 'resolved'], default: 'open' },
     message: String,
@@ -15,5 +23,5 @@ const AlertSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.models.Alert || mongoose.model('Alert', AlertSchema);
+module.exports = mongoose.models.VendorAlert || mongoose.model('VendorAlert', AlertSchema, 'vendor_alerts');
 

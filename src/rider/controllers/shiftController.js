@@ -25,12 +25,48 @@ function handleError(res, err) {
 
 async function list(req, res) {
   try {
-    const { date, hubId, status, page, limit } = req.query;
+    const {
+      date,
+      dateFrom,
+      dateTo,
+      hubId,
+      hubName,
+      status,
+      search,
+      q,
+      isPeak,
+      availability,
+      sortBy,
+      sortOrder,
+      page,
+      limit,
+    } = req.query;
     const result = await shiftService.listShifts(
-      { date, hubId, status },
+      {
+        date,
+        dateFrom,
+        dateTo,
+        hubId,
+        hubName,
+        status,
+        search: search || q,
+        isPeak,
+        availability,
+        sortBy,
+        sortOrder,
+      },
       { page: page ? Number(page) : undefined, limit: limit ? Number(limit) : undefined }
     );
     res.json({ success: true, data: result });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+async function filterOptions(req, res) {
+  try {
+    const options = await shiftService.getShiftFilterOptions();
+    res.json({ success: true, data: options });
   } catch (err) {
     handleError(res, err);
   }
@@ -178,6 +214,7 @@ async function myShifts(req, res) {
 
 module.exports = {
   list,
+  filterOptions,
   create,
   getById,
   update,

@@ -304,6 +304,12 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
           customerName,
         });
         liveTxnId = liveTxn._id.toString();
+        try {
+          const { invalidateFinance } = require('../../finance/cacheInvalidation');
+          await invalidateFinance();
+        } catch {
+          /* non-blocking */
+        }
       } catch (err) {
         console.warn('LiveTransaction create failed (non-blocking):', err.message);
       }

@@ -13,5 +13,5 @@ const ShipmentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.models.Shipment || mongoose.model('Shipment', ShipmentSchema);
+module.exports = mongoose.models.VendorShipment || mongoose.model('VendorShipment', ShipmentSchema, 'vendor_shipments');
 

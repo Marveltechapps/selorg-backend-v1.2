@@ -177,8 +177,8 @@ const getProductPerformance = asyncHandler(async (req, res) => {
         unitsSold: 1,
         revenue: { $round: ['$revenue', 2] },
         stock: { $ifNull: [{ $arrayElemAt: ['$inventory.quantity', 0] }, 0] },
-        trend: 'stable', // Would need historical comparison
-        growthRate: 0, // Would need historical comparison
+        trend: { $literal: 'stable' },
+        growthRate: { $literal: 0 },
         _id: 0,
       }
     }

@@ -3,6 +3,12 @@ const { asyncHandler } = require('../../core/middleware');
 const cacheInvalidation = require('../cacheInvalidation');
 
 class AccountingController {
+  syncLedger = asyncHandler(async (req, res) => {
+    const stats = await accountingService.syncLedger(req.body || {});
+    await cacheInvalidation.invalidateFinance().catch(() => {});
+    res.json({ success: true, data: stats });
+  });
+
   getAccountingSummary = asyncHandler(async (req, res) => {
     const summary = await accountingService.getAccountingSummary();
     res.json({ success: true, data: summary });

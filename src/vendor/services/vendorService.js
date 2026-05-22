@@ -3,7 +3,8 @@ const Job = require('../models/Job');
 const { v4: uuidv4 } = require('uuid');
 const cacheService = require('../../core/services/cache.service');
 const { sendVendorNotification } = require('./vendorEmailService');
-const { mergeHubFilter, getDefaultHubKey, hubFieldsForCreate } = require('../constants/hubScope');
+const { mergeHubFilter, getDefaultHubKey, hubFieldsForCreate, getEffectiveHubKey } = require('../constants/hubScope');
+const vendorDashboardNotificationService = require('./vendorDashboardNotificationService');
 
 const PAYMENT_TERMS = Vendor.PAYMENT_TERMS || ['30 days', '45 days', '60 days'];
 
@@ -167,6 +168,17 @@ async function createVendor(payload) {
 
   await vendor.save();
   await invalidateVendorCaches();
+  try {
+    await vendorDashboardNotificationService.createEntry(getEffectiveHubKey(), {
+      title: `Vendor ${n.vendorName} created`,
+      body: `Vendor code ${n.vendorCode} is now active in the hub.`,
+      category: 'onboarding',
+      refType: 'vendor',
+      refId: String(vendor._id),
+    });
+  } catch (_) {
+    /* non-fatal */
+  }
   return vendor.toObject();
 }
 
@@ -243,6 +255,17 @@ async function updateVendor(vendorId, payload) {
   if (payload.vendorCode != null && payload.code == null) vendor.code = payload.vendorCode;
   await vendor.save();
   await invalidateVendorCaches();
+  try {
+    await vendorDashboardNotificationService.createEntry(getEffectiveHubKey(), {
+      title: `Vendor ${n.vendorName} created`,
+      body: `Vendor code ${n.vendorCode} is now active in the hub.`,
+      category: 'onboarding',
+      refType: 'vendor',
+      refId: String(vendor._id),
+    });
+  } catch (_) {
+    /* non-fatal */
+  }
   return vendor.toObject();
 }
 

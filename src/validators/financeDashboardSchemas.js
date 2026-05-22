@@ -193,10 +193,24 @@ const cancelVendorPaymentSchema = z.object({
 // Refunds Schemas
 const getRefundQueueSchema = z.object({
   query: z.object({
-    status: z.enum(['pending', 'approved', 'rejected', 'processed', 'escalated', 'all']).optional(),
-    reason: z.enum(['item_damaged', 'expired', 'late_delivery', 'wrong_item', 'customer_cancelled', 'other', 'all']).optional(),
-    dateFrom: z.string().datetime().optional(),
-    dateTo: z.string().datetime().optional(),
+    status: z.enum(['pending', 'approved', 'rejected', 'processed', 'completed', 'escalated', 'open', 'all']).optional(),
+    reason: z
+      .enum([
+        'item_damaged',
+        'expired',
+        'late_delivery',
+        'wrong_item',
+        'customer_cancelled',
+        'item_not_available',
+        'quality_issue',
+        'partial_delivery',
+        'other',
+        'all',
+      ])
+      .optional(),
+    query: z.string().max(200).optional(),
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
     page: z.string().optional().transform(val => val ? parseInt(val) : 1),
     pageSize: z.string().optional().transform(val => val ? parseInt(val) : 20),
   }),
@@ -257,7 +271,7 @@ const getExceptionsSchema = z.object({
 const runReconciliationSchema = z.object({
   body: z.object({
     date: z.string().date(),
-    gateways: z.array(z.string()).min(1, 'At least one gateway is required'),
+    gateways: z.array(z.string().min(1)).min(1, 'At least one gateway is required'),
   }),
 });
 
@@ -339,15 +353,21 @@ const createInvoiceSchema = z.object({
     customerId: z.string().optional(),
     customerName: z.string().min(1, 'Customer name is required'),
     customerEmail: z.string().email('Invalid email format'),
-    issueDate: z.string().datetime(),
-    dueDate: z.string().datetime(),
-    items: z.array(z.object({
-      description: z.string().min(1, 'Description is required'),
-      quantity: z.number().min(1, 'Quantity must be at least 1'),
-      unitPrice: z.number().min(0, 'Unit price must be non-negative'),
-      taxPercent: z.number().min(0).max(100, 'Tax percent must be between 0 and 100'),
-    })).min(1, 'At least one item is required'),
+    issueDate: z.string().min(1, 'Issue date is required'),
+    dueDate: z.string().min(1, 'Due date is required'),
+    items: z
+      .array(
+        z.object({
+          description: z.string().min(1, 'Description is required'),
+          quantity: z.coerce.number().min(1, 'Quantity must be at least 1'),
+          unitPrice: z.coerce.number().min(0, 'Unit price must be non-negative'),
+          taxPercent: z.coerce.number().min(0).max(100, 'Tax percent must be between 0 and 100'),
+        })
+      )
+      .min(1, 'At least one item is required'),
     notes: z.string().optional(),
+    asDraft: z.coerce.boolean().optional().default(false),
+    currency: z.string().optional(),
   }),
 });
 
@@ -433,6 +453,7 @@ const exportAnalyticsReportSchema = z.object({
     to: z.string().date(),
     format: z.enum(['pdf', 'xlsx']),
     details: z.enum(['summary', 'detailed']).optional(),
+    entityId: z.string().optional(),
   }),
 });
 

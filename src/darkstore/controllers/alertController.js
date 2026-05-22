@@ -5,6 +5,24 @@ const CustomerCall = require('../models/CustomerCall');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
 
+const DEFAULT_ALERT_STORE_ID = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+
+function resolveAlertStoreId(raw) {
+  const value = raw != null ? String(raw).trim() : '';
+  return value || DEFAULT_ALERT_STORE_ID;
+}
+
+function parseAlertIdsParam(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.map((id) => String(id).trim()).filter(Boolean);
+  }
+  return String(raw)
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
 /**
  * Get Alerts List
  * GET /api/darkstore/alerts
@@ -12,7 +30,7 @@ const logger = require('../../core/utils/logger');
 const getAlerts = async (req, res) => {
   try {
     logger.info(`[Get Alerts] Request received - storeId: ${req.query.storeId}, status: ${req.query.status || 'all'}`);
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const storeId = resolveAlertStoreId(req.query.storeId);
     const status = req.query.status || 'all';
     const priority = req.query.priority || 'all';
     const type = req.query.type || 'all';
@@ -355,28 +373,29 @@ const performAlertAction = async (req, res) => {
  */
 const clearResolvedAlerts = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
-    const archive = req.query.archive !== 'false';
+    const storeId = resolveAlertStoreId(req.query.storeId || req.body?.storeId);
+    const ids = parseAlertIdsParam(req.body?.ids ?? req.query.ids);
 
-    const query = {
-      store_id: storeId,
-      status: { $in: ['resolved', 'dismissed'] },
-    };
-
-    const count = await Alert.countDocuments(query);
-
-    if (archive) {
-      // In a real implementation, you would move to archive table
-      // For now, we'll just delete them
-      await Alert.deleteMany(query);
+    let query;
+    if (ids.length > 0) {
+      // Delete exactly what the client asked to clear (visible resolved rows)
+      query = { alert_id: { $in: ids } };
     } else {
-      await Alert.deleteMany(query);
+      query = {
+        store_id: storeId,
+        status: { $in: ['resolved', 'dismissed'] },
+      };
     }
+
+    const deleteResult = await Alert.deleteMany(query);
 
     res.status(200).json({
       success: true,
-      deleted_count: count,
-      message: 'Resolved alerts cleared successfully',
+      deleted_count: deleteResult.deletedCount ?? 0,
+      message:
+        deleteResult.deletedCount > 0
+          ? `Cleared ${deleteResult.deletedCount} resolved alert(s)`
+          : 'No resolved alerts matched the clear request',
     });
   } catch (error) {
     logger.error('Clear resolved alerts error:', error);

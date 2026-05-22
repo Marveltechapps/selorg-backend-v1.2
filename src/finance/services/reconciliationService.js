@@ -1,57 +1,26 @@
 const ReconciliationException = require('../models/ReconciliationException');
 const ReconciliationRun = require('../models/ReconciliationRun');
-const LiveTransaction = require('../models/LiveTransaction');
+const {
+  buildSummaryForDate,
+  executeReconciliationRun,
+  analyzeGateway,
+  mapExceptionDto,
+  mapRunDto,
+  listGatewayKeys,
+  gatewayLabel,
+} = require('./reconciliationEngine');
+const { buildDayRange } = require('../utils/financeEntityScope');
+const { normalizeGatewayKey } = require('../utils/reconciliationGateways');
 const logger = require('../../utils/logger');
 
 class ReconciliationService {
+  async getAvailableGateways() {
+    return listGatewayKeys().map((id) => ({ id, label: gatewayLabel(id) }));
+  }
+
   async getReconSummary(date) {
     try {
-      const targetDate = date ? new Date(date) : new Date();
-      const startDate = new Date(targetDate);
-      startDate.setHours(0, 0, 0, 0);
-      const endDate = new Date(targetDate);
-      endDate.setHours(23, 59, 59, 999);
-
-      const gateways = await LiveTransaction.distinct('gateway');
-
-      const summary = await Promise.all(
-        gateways.map(async (gateway) => {
-          const transactions = await LiveTransaction.find({
-            gateway,
-            createdAt: { $gte: startDate, $lte: endDate },
-            status: 'success',
-          }).lean();
-
-          const matchedAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
-          const pendingTransactions = await LiveTransaction.countDocuments({
-            gateway,
-            createdAt: { $gte: startDate, $lte: endDate },
-            status: 'pending',
-          });
-          const pendingAmount = pendingTransactions * 100; // Mock calculation
-
-          const exceptions = await ReconciliationException.countDocuments({
-            gateway,
-            status: { $in: ['open', 'in_review'] },
-          });
-          const mismatchAmount = exceptions * 50; // Mock calculation
-
-          const total = matchedAmount + pendingAmount;
-          const matchPercent = total > 0 ? (matchedAmount / total) * 100 : 100;
-
-          return {
-            id: gateway.toLowerCase().replace(/\s+/g, '_'),
-            gateway,
-            matchedAmount,
-            pendingAmount,
-            mismatchAmount,
-            status: matchPercent >= 99 ? 'matched' : matchPercent >= 95 ? 'pending' : 'mismatch',
-            matchPercent: Math.round(matchPercent * 100) / 100,
-            lastRunAt: new Date().toISOString(),
-          };
-        })
-      );
-
+      const summary = await buildSummaryForDate(date);
       return summary;
     } catch (error) {
       logger.error('Error fetching reconciliation summary:', error);
@@ -61,19 +30,17 @@ class ReconciliationService {
 
   async getExceptions(status = 'open') {
     try {
-      const query = status === 'all' ? {} : { status };
-      if (status === 'open') {
-        query.status = { $in: ['open', 'in_review'] };
+      const query = {};
+      if (status && status !== 'all') {
+        query.status = status === 'open' ? { $in: ['open', 'in_review'] } : status;
       }
 
       const exceptions = await ReconciliationException.find(query)
         .sort({ createdAt: -1 })
+        .limit(200)
         .lean();
 
-      return exceptions.map(ex => ({
-        id: ex._id.toString(),
-        ...ex,
-      }));
+      return exceptions.map(mapExceptionDto);
     } catch (error) {
       logger.error('Error fetching exceptions:', error);
       throw error;
@@ -82,32 +49,7 @@ class ReconciliationService {
 
   async runReconciliation(date, gateways) {
     try {
-      const run = new ReconciliationRun({
-        startedAt: new Date(),
-        status: 'running',
-        period: {
-          from: new Date(date),
-          to: new Date(date),
-        },
-        gateways,
-      });
-      await run.save();
-
-      // In a real implementation, this would trigger an async job
-      // For now, we'll simulate it completing immediately
-      setTimeout(async () => {
-        run.status = 'success';
-        run.finishedAt = new Date();
-        await run.save();
-      }, 1000);
-
-      return {
-        id: run._id.toString(),
-        startedAt: run.startedAt,
-        status: run.status,
-        period: run.period,
-        gateways: run.gateways,
-      };
+      return await executeReconciliationRun(date, gateways);
     } catch (error) {
       logger.error('Error running reconciliation:', error);
       throw error;
@@ -117,13 +59,8 @@ class ReconciliationService {
   async getRunStatus(id) {
     try {
       const run = await ReconciliationRun.findById(id).lean();
-      if (!run) {
-        throw new Error('Reconciliation run not found');
-      }
-      return {
-        id: run._id.toString(),
-        ...run,
-      };
+      if (!run) throw new Error('Reconciliation run not found');
+      return mapRunDto(run);
     } catch (error) {
       logger.error('Error fetching run status:', error);
       throw error;
@@ -138,14 +75,8 @@ class ReconciliationService {
         { new: true, runValidators: true }
       ).lean();
 
-      if (!exception) {
-        throw new Error('Exception not found');
-      }
-
-      return {
-        id: exception._id.toString(),
-        ...exception,
-      };
+      if (!exception) throw new Error('Exception not found');
+      return mapExceptionDto(exception);
     } catch (error) {
       logger.error('Error investigating exception:', error);
       throw error;
@@ -154,42 +85,59 @@ class ReconciliationService {
 
   async resolveException(id, resolutionType, note) {
     try {
-      const updateData = { status: 'resolved' };
-      if (note) {
-        const exception = await ReconciliationException.findById(id).lean();
-        updateData.details = exception
-          ? `${exception.details || ''}\nResolution Note: ${note}`
-          : note;
-      }
+      const existing = await ReconciliationException.findById(id).lean();
+      if (!existing) throw new Error('Exception not found');
+
+      const details = [
+        existing.details || '',
+        `Resolution: ${resolutionType}`,
+        note ? `Note: ${note}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       const exception = await ReconciliationException.findByIdAndUpdate(
         id,
-        { $set: updateData },
+        {
+          $set: {
+            status: resolutionType === 'ignored' ? 'ignored' : 'resolved',
+            details,
+            suggestedAction: resolutionType,
+          },
+        },
         { new: true, runValidators: true }
       ).lean();
 
-      if (!exception) {
-        throw new Error('Exception not found');
-      }
-
-      return {
-        id: exception._id.toString(),
-        ...exception,
-      };
+      return mapExceptionDto(exception);
     } catch (error) {
       logger.error('Error resolving exception:', error);
       throw error;
     }
   }
 
-  async getGatewayDetails(gatewayId) {
+  async getGatewayDetails(gatewayId, date) {
     try {
-      const summary = await this.getReconSummary();
-      const gateway = summary.find(s => s.id === gatewayId);
-      if (!gateway) {
-        throw new Error('Gateway not found');
-      }
-      return gateway;
+      const key = normalizeGatewayKey(gatewayId);
+      const { startDate, endDate } = buildDayRange(date);
+      const analysis = await analyzeGateway(key, startDate, endDate, { createExceptions: false });
+      const lastRun = await ReconciliationRun.findOne({
+        gateways: key,
+        status: 'success',
+      })
+        .sort({ finishedAt: -1 })
+        .lean();
+
+      return {
+        id: key,
+        gateway: analysis.gateway,
+        matchedAmount: analysis.matchedAmount,
+        pendingAmount: analysis.pendingAmount,
+        mismatchAmount: analysis.mismatchAmount,
+        status: analysis.status,
+        matchPercent: analysis.matchPercent,
+        lastRunAt: lastRun?.finishedAt?.toISOString?.() || new Date().toISOString(),
+        transactionsChecked: analysis.transactionsChecked,
+      };
     } catch (error) {
       logger.error('Error fetching gateway details:', error);
       throw error;
@@ -198,4 +146,3 @@ class ReconciliationService {
 }
 
 module.exports = new ReconciliationService();
-

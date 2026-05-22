@@ -11,6 +11,12 @@ const GRNItemSchema = new mongoose.Schema({
 const GRNSchema = new mongoose.Schema(
   {
     vendorId: { type: String, required: true },
+    grnNumber: String,
+    shipmentId: String,
+    warehouse: { type: String, default: 'Hub' },
+    exceptionType: { type: String, default: 'No Issue' },
+    qualityChecked: { type: Boolean, default: false },
+    documentsComplete: { type: Boolean, default: false },
     poNumber: String,
     status: { type: String, default: 'PENDING' },
     receivedAt: Date,
@@ -23,5 +29,5 @@ const GRNSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.models.GRN || mongoose.model('GRN', GRNSchema);
+module.exports = mongoose.models.VendorGRN || mongoose.model('VendorGRN', GRNSchema, 'vendor_grns');
 

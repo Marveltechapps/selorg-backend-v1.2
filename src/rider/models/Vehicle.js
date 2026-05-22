@@ -65,7 +65,7 @@ const VehicleSchema = new mongoose.Schema({
   conditionLabel: {
     type: String,
     required: true,
-    enum: ['New', 'Excellent', 'Good', 'Needs Service'],
+    enum: ['New', 'Excellent', 'Good', 'Fair', 'Needs Service'],
     default: 'New',
   },
   lastServiceDate: {
@@ -114,6 +114,14 @@ const VehicleSchema = new mongoose.Schema({
 }, {
   timestamps: true,
   collection: 'vehicles',
+});
+
+// Normalize legacy labels before validation
+VehicleSchema.pre('validate', function(next) {
+  if (this.conditionLabel === 'Fair') {
+    this.conditionLabel = 'Good';
+  }
+  next();
 });
 
 // Auto-update conditionLabel based on conditionScore

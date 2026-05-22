@@ -22,6 +22,12 @@ class FinanceAnalyticsController {
 
   exportAnalyticsReport = asyncHandler(async (req, res) => {
     const result = await financeAnalyticsService.exportAnalyticsReport(req.body);
+    if (result?.fileContent != null) {
+      const filename = result.filename || 'P&L_Report.csv';
+      res.setHeader('Content-Type', result.contentType || 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(result.fileContent);
+    }
     res.json({ success: true, data: result });
   });
 }

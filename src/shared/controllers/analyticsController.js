@@ -16,7 +16,7 @@ const getRiderPerformance = async (req, res, next) => {
       endDate: req.query.endDate,
     };
 
-    const cacheKey = `analytics:rider-performance:${hashForKey(params)}`;
+    const cacheKey = `analytics:v2:rider-performance:${hashForKey(params)}`;
     const { value: result } = await getCachedOrCompute(
       cacheKey,
       appConfig.cache.analytics,
@@ -41,7 +41,7 @@ const getSlaAdherence = async (req, res, next) => {
       endDate: req.query.endDate,
     };
 
-    const cacheKey = `analytics:sla-adherence:${hashForKey(params)}`;
+    const cacheKey = `analytics:v2:sla-adherence:${hashForKey(params)}`;
     const { value: result } = await getCachedOrCompute(
       cacheKey,
       appConfig.cache.analytics,
@@ -66,7 +66,7 @@ const getFleetUtilization = async (req, res, next) => {
       endDate: req.query.endDate,
     };
 
-    const cacheKey = `analytics:fleet-utilization:${hashForKey(params)}`;
+    const cacheKey = `analytics:v2:fleet-utilization:${hashForKey(params)}`;
     const { value: result } = await getCachedOrCompute(
       cacheKey,
       appConfig.cache.analytics,

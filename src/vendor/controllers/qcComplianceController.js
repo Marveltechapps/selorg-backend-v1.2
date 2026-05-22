@@ -28,11 +28,21 @@ const getAudits = asyncHandler(async (req, res) => {
     .sort({ date: -1 })
     .lean();
 
+  const vendorIds = [...new Set(audits.map((a) => String(a.vendorId)).filter(Boolean))];
+  const vendors = await Vendor.find(mergeHubFilter({ _id: { $in: vendorIds } }))
+    .select('name vendorName')
+    .lean();
+  const nameById = Object.fromEntries(
+    vendors.map((v) => [String(v._id), v.vendorName || v.name || String(v._id)])
+  );
+
   res.json({
     success: true,
     data: audits.map(audit => ({
       ...audit,
       id: audit._id.toString(),
+      vendor: nameById[audit.vendorId] || audit.vendorName || audit.vendorId,
+      vendorName: nameById[audit.vendorId] || audit.vendorName,
       date: audit.date ? new Date(audit.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : null,
     })),
     meta: {
@@ -110,11 +120,21 @@ const getTemperatureCompliance = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .lean();
 
+  const vendorIds = [...new Set(temps.map((x) => String(x.vendorId)).filter(Boolean))];
+  const vendors = await Vendor.find(mergeHubFilter({ _id: { $in: vendorIds } }))
+    .select('name vendorName')
+    .lean();
+  const nameById = Object.fromEntries(
+    vendors.map((v) => [String(v._id), v.vendorName || v.name || String(v._id)])
+  );
+
   res.json({
     success: true,
     data: temps.map(temp => ({
       ...temp,
       id: temp._id.toString(),
+      vendor: nameById[temp.vendorId] || temp.vendorName || temp.vendorId,
+      vendorName: nameById[temp.vendorId] || temp.vendorName,
     })),
     meta: {
       requestId: req.id,
@@ -326,6 +346,131 @@ const recalculateVendorRating = asyncHandler(async (req, res) => {
   });
 });
 
+
+
+const getHubCertificates = asyncHandler(async (req, res) => {
+  const certs = await Certificate.find(mergeHubFilter({}))
+    .sort({ expiresAt: 1 })
+    .lean();
+  const vendorIds = [...new Set(certs.map((c) => String(c.vendorId)).filter(Boolean))];
+  const vendors = await Vendor.find(mergeHubFilter({ _id: { $in: vendorIds } }))
+    .select('name vendorName')
+    .lean();
+  const nameById = Object.fromEntries(
+    vendors.map((v) => [String(v._id), v.vendorName || v.name || String(v._id)])
+  );
+
+  res.json({
+    success: true,
+    data: certs.map((c) => {
+      const daysToExpiry = c.expiresAt
+        ? Math.ceil((new Date(c.expiresAt).getTime() - Date.now()) / (86400000))
+        : 0;
+      let status = c.status || 'valid';
+      if (status === 'valid' && daysToExpiry <= 30 && daysToExpiry > 0) status = 'expiring_soon';
+      if (daysToExpiry <= 0 && c.expiresAt) status = 'expired';
+      return {
+        ...c,
+        id: c._id.toString(),
+        vendor: nameById[c.vendorId] || c.vendorId,
+        vendorName: nameById[c.vendorId] || c.vendorId,
+        certificateType: c.type || c.certificateType,
+        daysToExpiry,
+        status,
+      };
+    }),
+    meta: { requestId: req.id, timestamp: new Date().toISOString() },
+  });
+});
+
+
+
+
+const updateAudit = asyncHandler(async (req, res) => {
+  const audit = await Audit.findOneAndUpdate(
+    mergeHubFilter({ _id: req.params.id }),
+    { $set: req.body },
+    { new: true }
+  ).lean();
+  if (!audit) {
+    return res.status(404).json({ success: false, message: 'Audit not found' });
+  }
+  res.json({
+    success: true,
+    data: { ...audit, id: audit._id.toString() },
+  });
+});
+
+const deleteAudit = asyncHandler(async (req, res) => {
+  const removed = await Audit.findOneAndDelete(mergeHubFilter({ _id: req.params.id }));
+  if (!removed) {
+    return res.status(404).json({ success: false, message: 'Audit not found' });
+  }
+  res.json({ success: true });
+});
+
+const deleteTemperatureCompliance = asyncHandler(async (req, res) => {
+  const removed = await TemperatureCompliance.findOneAndDelete(
+    mergeHubFilter({ _id: req.params.tempId })
+  );
+  if (!removed) {
+    return res.status(404).json({ success: false, message: 'Temperature record not found' });
+  }
+  res.json({ success: true });
+});
+
+const createHubCertificate = asyncHandler(async (req, res) => {
+  const certificateService = require('../services/certificateService');
+  const { vendorId, ...rest } = req.body;
+  if (!vendorId) {
+    return res.status(400).json({ success: false, message: 'vendorId is required' });
+  }
+  const created = await certificateService.createCertificate(vendorId, rest);
+  res.status(201).json({ success: true, data: { ...created, id: String(created._id) } });
+});
+
+const updateHubCertificate = asyncHandler(async (req, res) => {
+  const certificateService = require('../services/certificateService');
+  const updated = await certificateService.updateCertificate(req.params.certId, req.body);
+  res.json({ success: true, data: { ...updated, id: String(updated._id) } });
+});
+
+const deleteHubCertificate = asyncHandler(async (req, res) => {
+  const certificateService = require('../services/certificateService');
+  await certificateService.deleteCertificate(req.params.certId);
+  res.json({ success: true });
+});
+
+const updateVendorRating = asyncHandler(async (req, res) => {
+  const { vendorId } = req.params;
+  const vendor = await Vendor.findOne(mergeHubFilter({ _id: vendorId })).lean();
+  const payload = {
+    vendorId,
+    vendorName: vendor?.name || vendor?.vendorName,
+    overallRating: req.body.overallRating,
+    qcPassRate: req.body.qcPassRate,
+    complianceScore: req.body.complianceScore,
+    auditScore: req.body.auditScore,
+    trend: req.body.trend || 'stable',
+    calculatedAt: new Date(),
+  };
+  const rating = await VendorRating.findOneAndUpdate(
+    mergeHubFilter({ vendorId }),
+    { $set: payload, $setOnInsert: hubFieldsForCreate() },
+    { new: true, upsert: true }
+  ).lean();
+  res.json({
+    success: true,
+    data: { ...rating, id: rating._id ? String(rating._id) : vendorId, vendor: rating.vendorName },
+  });
+});
+
+const deleteVendorRating = asyncHandler(async (req, res) => {
+  await VendorRating.findOneAndDelete(mergeHubFilter({ vendorId: req.params.vendorId }));
+  res.json({ success: true });
+});
+
+
 module.exports = {
   getAudits,
   getAuditById,
@@ -335,4 +480,13 @@ module.exports = {
   patchTemperatureCompliance,
   getVendorRatings,
   recalculateVendorRating,
+  getHubCertificates,
+  updateAudit,
+  deleteAudit,
+  deleteTemperatureCompliance,
+  createHubCertificate,
+  updateHubCertificate,
+  deleteHubCertificate,
+  updateVendorRating,
+  deleteVendorRating,
 };

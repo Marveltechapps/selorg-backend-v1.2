@@ -9,12 +9,18 @@ const InventoryItemSchema = new mongoose.Schema(
     reserved: { type: Number, default: 0 },
     available: { type: Number, default: 0 },
     location: String,
+    batchId: String,
+    unit: { type: String, default: 'units' },
+    unitPrice: { type: Number, default: 0 },
+    physicalQty: Number,
+    expiryDate: Date,
     agingDays: { type: Number, default: 0 },
+    remarks: String,
     lastUpdated: Date,
     hubKey: { type: String, trim: true, index: true },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.models.InventoryItem || mongoose.model('InventoryItem', InventoryItemSchema);
+module.exports = mongoose.models.VendorInventoryItem || mongoose.model('VendorInventoryItem', InventoryItemSchema, 'vendor_inventory_items');
 

@@ -1,37 +1,44 @@
 const LiveTransaction = require('../models/LiveTransaction');
+const VendorInvoice = require('../models/VendorInvoice');
+const { buildEntityFilter, isReceivedTxn } = require('../utils/financeEntityScope');
+const { exportPnLReport } = require('./pnlExportService');
 const logger = require('../../utils/logger');
 
 class FinanceAnalyticsService {
   async getRevenueGrowth(from, to, granularity = 'month') {
     try {
-      const startDate = from ? new Date(from) : new Date();
-      startDate.setMonth(startDate.getMonth() - 12);
-      const endDate = to ? new Date(to) : new Date();
+      const start = from ? new Date(from) : new Date();
+      start.setHours(0, 0, 0, 0);
+      if (!to) start.setMonth(start.getMonth() - 12);
+      const end = to ? new Date(to) : new Date();
+      end.setHours(23, 59, 59, 999);
 
       const transactions = await LiveTransaction.find({
-        createdAt: { $gte: startDate, $lte: endDate },
-        status: 'success',
+        createdAt: { $gte: start, $lte: end },
+        status: { $in: ['success', 'pending'] },
       }).lean();
 
       const dataMap = {};
-      transactions.forEach(txn => {
+      transactions.forEach((txn) => {
         const dateKey = this.getDateKey(txn.createdAt, granularity);
         if (!dataMap[dateKey]) {
           dataMap[dateKey] = { totalRevenue: 0, newRevenue: 0, churnAmount: 0 };
         }
-        dataMap[dateKey].totalRevenue += txn.amount;
-        dataMap[dateKey].newRevenue += txn.amount * 0.3; // Mock calculation
+        if (isReceivedTxn(txn)) {
+          dataMap[dateKey].totalRevenue += txn.amount || 0;
+          dataMap[dateKey].newRevenue += txn.amount || 0;
+        }
       });
 
-      const result = Object.entries(dataMap).map(([date, data]) => ({
-        date,
-        totalRevenue: Math.round(data.totalRevenue),
-        recurringRevenue: Math.round(data.totalRevenue - data.newRevenue),
-        newRevenue: Math.round(data.newRevenue),
-        churnAmount: Math.round(data.churnAmount || data.totalRevenue * 0.02),
-      })).sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      return result;
+      return Object.entries(dataMap)
+        .map(([date, data]) => ({
+          date,
+          totalRevenue: Math.round(data.totalRevenue),
+          recurringRevenue: Math.round(Math.max(0, data.totalRevenue - data.newRevenue * 0.7)),
+          newRevenue: Math.round(data.newRevenue),
+          churnAmount: Math.round(data.churnAmount),
+        }))
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
     } catch (error) {
       logger.error('Error fetching revenue growth:', error);
       throw error;
@@ -40,36 +47,47 @@ class FinanceAnalyticsService {
 
   async getCashFlow(from, to, granularity = 'month') {
     try {
-      const startDate = from ? new Date(from) : new Date();
-      startDate.setMonth(startDate.getMonth() - 12);
-      const endDate = to ? new Date(to) : new Date();
+      const start = from ? new Date(from) : new Date();
+      start.setHours(0, 0, 0, 0);
+      if (!to) start.setMonth(start.getMonth() - 12);
+      const end = to ? new Date(to) : new Date();
+      end.setHours(23, 59, 59, 999);
 
-      const transactions = await LiveTransaction.find({
-        createdAt: { $gte: startDate, $lte: endDate },
-      }).lean();
+      const RefundRequest = require('../models/RefundRequest');
+      const [transactions, refunds] = await Promise.all([
+        LiveTransaction.find({ createdAt: { $gte: start, $lte: end } }).lean(),
+        RefundRequest.find({
+          status: { $in: ['processed', 'completed'] },
+          $or: [
+            { processedAt: { $gte: start, $lte: end } },
+            { completedAt: { $gte: start, $lte: end } },
+          ],
+        }).lean(),
+      ]);
 
       const dataMap = {};
-      transactions.forEach(txn => {
+      transactions.forEach((txn) => {
         const dateKey = this.getDateKey(txn.createdAt, granularity);
-        if (!dataMap[dateKey]) {
-          dataMap[dateKey] = { inflow: 0, outflow: 0 };
-        }
-        if (txn.status === 'success') {
-          dataMap[dateKey].inflow += txn.amount;
-        } else {
-          dataMap[dateKey].outflow += txn.amount;
-        }
+        if (!dataMap[dateKey]) dataMap[dateKey] = { inflow: 0, outflow: 0 };
+        if (isReceivedTxn(txn)) dataMap[dateKey].inflow += txn.amount || 0;
+        else if (txn.status === 'failed') dataMap[dateKey].outflow += txn.amount || 0;
       });
 
-      const result = Object.entries(dataMap).map(([date, data], idx) => ({
-        date,
-        inflow: Math.round(data.inflow),
-        outflow: Math.round(data.outflow),
-        net: Math.round(data.inflow - data.outflow),
-        projected: idx >= 10 ? Math.round((data.inflow - data.outflow) * 1.1) : undefined,
-      })).sort((a, b) => new Date(a.date) - new Date(b.date));
+      refunds.forEach((r) => {
+        const d = r.processedAt || r.completedAt || r.updatedAt;
+        const dateKey = this.getDateKey(d, granularity);
+        if (!dataMap[dateKey]) dataMap[dateKey] = { inflow: 0, outflow: 0 };
+        dataMap[dateKey].outflow += r.amount || 0;
+      });
 
-      return result;
+      return Object.entries(dataMap)
+        .map(([date, data]) => ({
+          date,
+          inflow: Math.round(data.inflow),
+          outflow: Math.round(data.outflow),
+          net: Math.round(data.inflow - data.outflow),
+        }))
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
     } catch (error) {
       logger.error('Error fetching cash flow:', error);
       throw error;
@@ -78,36 +96,37 @@ class FinanceAnalyticsService {
 
   async getExpenseBreakdown(from, to, granularity = 'month') {
     try {
-      const startDate = from ? new Date(from) : new Date();
-      startDate.setMonth(startDate.getMonth() - 12);
-      const endDate = to ? new Date(to) : new Date();
+      const start = from ? new Date(from) : new Date();
+      start.setHours(0, 0, 0, 0);
+      if (!to) start.setMonth(start.getMonth() - 12);
+      const end = to ? new Date(to) : new Date();
+      end.setHours(23, 59, 59, 999);
 
-      const categories = [
-        { name: 'Vendor Payments', color: '#3B82F6' },
-        { name: 'Operations', color: '#10B981' },
-        { name: 'Payroll', color: '#F59E0B' },
-        { name: 'Marketing', color: '#8B5CF6' },
-        { name: 'Overheads', color: '#6B7280' },
-      ];
+      const invoices = await VendorInvoice.find({
+        status: { $in: ['approved', 'scheduled', 'paid'] },
+        invoiceDate: { $gte: start, $lte: end },
+      }).lean();
 
+      const colors = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#6B7280', '#EF4444'];
       const dataMap = {};
-      for (let i = 0; i < 12; i++) {
-        const date = new Date(startDate);
-        date.setMonth(date.getMonth() + i);
-        const dateKey = this.getDateKey(date, granularity);
-        dataMap[dateKey] = categories.map(cat => ({
-          name: cat.name,
-          amount: Math.round(10000 + Math.random() * 15000),
-          color: cat.color,
-        }));
-      }
 
-      const result = Object.entries(dataMap).map(([date, categories]) => ({
-        date,
-        categories,
-      })).sort((a, b) => new Date(a.date) - new Date(b.date));
+      invoices.forEach((inv) => {
+        const dateKey = this.getDateKey(inv.invoiceDate || inv.createdAt, granularity);
+        if (!dataMap[dateKey]) dataMap[dateKey] = {};
+        const vendor = inv.vendorName || 'Other Vendors';
+        dataMap[dateKey][vendor] = (dataMap[dateKey][vendor] || 0) + (inv.amount || 0);
+      });
 
-      return result;
+      return Object.entries(dataMap)
+        .map(([date, vendorAmounts]) => {
+          const categories = Object.entries(vendorAmounts).map(([name, amount], idx) => ({
+            name,
+            amount: Math.round(amount),
+            color: colors[idx % colors.length],
+          }));
+          return { date, categories };
+        })
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
     } catch (error) {
       logger.error('Error fetching expense breakdown:', error);
       throw error;
@@ -116,8 +135,10 @@ class FinanceAnalyticsService {
 
   async exportAnalyticsReport(request) {
     try {
-      const reportUrl = `https://reports.example.com/analytics/${request.metric}-${Date.now()}.${request.format}`;
-      return { url: reportUrl };
+      if (request.metric === 'pnl') {
+        return exportPnLReport(request);
+      }
+      throw new Error(`Export not supported for metric: ${request.metric}`);
     } catch (error) {
       logger.error('Error exporting analytics report:', error);
       throw error;
@@ -125,14 +146,13 @@ class FinanceAnalyticsService {
   }
 
   getDateKey(date, granularity) {
+    const d = new Date(date);
     if (granularity === 'month') {
-      return date.toLocaleString('default', { month: 'short', year: 'numeric' });
-    } else {
-      const quarter = Math.floor(date.getMonth() / 3) + 1;
-      return `Q${quarter} ${date.getFullYear()}`;
+      return d.toLocaleString('default', { month: 'short', year: 'numeric' });
     }
+    const quarter = Math.floor(d.getMonth() / 3) + 1;
+    return `Q${quarter} ${d.getFullYear()}`;
   }
 }
 
 module.exports = new FinanceAnalyticsService();
-

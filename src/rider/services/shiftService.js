@@ -83,6 +83,109 @@ function shiftsOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildListQuery(filters = {}) {
+  const query = {};
+
+  if (filters.dateFrom || filters.dateTo) {
+    const range = {};
+    if (filters.dateFrom) {
+      const start = parseDateOnly(filters.dateFrom);
+      if (start) {
+        start.setHours(0, 0, 0, 0);
+        range.$gte = start;
+      }
+    }
+    if (filters.dateTo) {
+      const end = parseDateOnly(filters.dateTo);
+      if (end) {
+        end.setHours(23, 59, 59, 999);
+        range.$lte = end;
+      }
+    }
+    if (Object.keys(range).length) query.date = range;
+  } else if (filters.date) {
+    const day = parseDateOnly(filters.date) ?? new Date(filters.date);
+    const start = new Date(day);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    query.date = { $gte: start, $lt: end };
+  }
+
+  if (filters.hubId) {
+    query.hubId = filters.hubId;
+  }
+
+  if (filters.hubName) {
+    query.hubName = new RegExp(escapeRegex(filters.hubName), 'i');
+  }
+
+  if (filters.status) {
+    query.status = filters.status;
+  }
+
+  if (filters.isPeak === true || filters.isPeak === 'true') {
+    query.isPeak = true;
+  } else if (filters.isPeak === false || filters.isPeak === 'false') {
+    query.isPeak = false;
+  }
+
+  const availability = filters.availability;
+  const extraClauses = [];
+  if (availability === 'full') {
+    extraClauses.push({ $expr: { $gte: ['$bookedCount', '$capacity'] } });
+  } else if (availability === 'available') {
+    extraClauses.push({ $expr: { $lt: ['$bookedCount', '$capacity'] } });
+  } else if (availability === 'empty') {
+    extraClauses.push({
+      $or: [{ bookedCount: { $lte: 0 } }, { bookedCount: { $exists: false } }],
+    });
+  }
+
+  const search = typeof filters.search === 'string' ? filters.search.trim() : '';
+  if (search) {
+    const pattern = new RegExp(escapeRegex(search), 'i');
+    extraClauses.push({
+      $or: [
+        { id: pattern },
+        { hubName: pattern },
+        { hubId: pattern },
+        { startTime: pattern },
+        { endTime: pattern },
+        { status: pattern },
+      ],
+    });
+  }
+
+  if (extraClauses.length === 1) {
+    Object.assign(query, extraClauses[0]);
+  } else if (extraClauses.length > 1) {
+    query.$and = [...(query.$and || []), ...extraClauses];
+  }
+
+  return query;
+}
+
+function buildListSort(filters = {}) {
+  const order = filters.sortOrder === 'desc' ? -1 : 1;
+  switch (filters.sortBy) {
+    case 'startTime':
+      return { date: order, startTime: order };
+    case 'capacity':
+      return { capacity: order, date: 1, startTime: 1 };
+    case 'booked':
+      return { bookedCount: order, date: 1, startTime: 1 };
+    case 'hub':
+      return { hubName: order, date: 1, startTime: 1 };
+    default:
+      return { date: order, startTime: order };
+  }
+}
+
 function computeShiftStartDateTime(shift) {
   const shiftStart = new Date(shift.date);
   const [h, m] = String(shift.startTime || '').split(':').map((v) => parseInt(v, 10));
@@ -116,42 +219,85 @@ async function getShiftById(id) {
 }
 
 async function listShifts(filters = {}, options = {}) {
-  const query = {};
-
-  if (filters.date) {
-    const day = parseDateOnly(filters.date) ?? new Date(filters.date);
-    const start = new Date(day);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    query.date = { $gte: start, $lt: end };
-  }
-
-  if (filters.hubId) {
-    query.hubId = filters.hubId;
-  }
-
-  if (filters.status) {
-    query.status = filters.status;
-  }
+  const query = buildListQuery(filters);
+  const summaryQuery = buildListQuery({
+    date: filters.date,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    hubId: filters.hubId,
+    hubName: filters.hubName,
+    search: filters.search,
+    isPeak: filters.isPeak,
+  });
+  const sort = buildListSort(filters);
 
   const limit = Math.min(options.limit || 50, 200);
   const page = Math.max(options.page || 1, 1);
   const skip = (page - 1) * limit;
 
-  const [items, total] = await Promise.all([
-    RiderShift.find(query).sort({ date: 1, startTime: 1 }).skip(skip).limit(limit),
+  const [items, total, statusCounts, peakCount, summaryTotal] = await Promise.all([
+    RiderShift.find(query).sort(sort).skip(skip).limit(limit).lean(),
     RiderShift.countDocuments(query),
+    RiderShift.aggregate([
+      { $match: summaryQuery },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
+    RiderShift.countDocuments({ ...summaryQuery, isPeak: true }),
+    RiderShift.countDocuments(summaryQuery),
   ]);
 
+  const summary = {
+    draft: 0,
+    published: 0,
+    cancelled: 0,
+  };
+  statusCounts.forEach((row) => {
+    if (row._id && summary[row._id] !== undefined) {
+      summary[row._id] = row.count;
+    }
+  });
+
   return {
-    items,
+    items: items.map((s) => toShiftDto(s)),
     total,
     page,
     limit,
     pageSize: limit,
-    totalPages: Math.ceil(total / limit),
+    totalPages: Math.ceil(total / limit) || 0,
+    summary: {
+      ...summary,
+      peak: peakCount,
+      all: summaryTotal,
+    },
   };
+}
+
+async function getShiftFilterOptions() {
+  const hubRows = await RiderShift.aggregate([
+    {
+      $match: {
+        $or: [
+          { hubName: { $exists: true, $nin: [null, ''] } },
+          { hubId: { $exists: true, $nin: [null, ''] } },
+        ],
+      },
+    },
+    {
+      $group: {
+        _id: { hubName: '$hubName', hubId: '$hubId' },
+      },
+    },
+    { $sort: { '_id.hubName': 1 } },
+  ]);
+
+  const hubs = hubRows
+    .map((row) => ({
+      hubName: row._id.hubName || 'Unknown Hub',
+      hubId: row._id.hubId || '',
+    }))
+    .filter((h) => h.hubName);
+
+  return { hubs };
 }
 
 async function updateShift(id, updates) {
@@ -186,7 +332,10 @@ async function getAvailableForRider(riderId, { date }) {
   const base = await listShifts({ date, status: 'published' }, { limit: 200 });
   if (!base.items.length) return [];
 
-  const shiftObjectIds = base.items.map((s) => s._id);
+  const shiftDocs = await RiderShift.find({ id: { $in: base.items.map((s) => s.id) } })
+    .select('_id id')
+    .lean();
+  const shiftObjectIds = shiftDocs.map((s) => s._id);
   const [allAssignments, riderAssignments] = await Promise.all([
     RiderShiftAssignment.find({
       shiftId: { $in: shiftObjectIds },
@@ -554,6 +703,7 @@ module.exports = {
   createShift,
   getShiftById,
   listShifts,
+  getShiftFilterOptions,
   updateShift,
   deleteShift,
   getAvailableForRider,

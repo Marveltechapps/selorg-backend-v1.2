@@ -103,12 +103,18 @@ class InvoicingService {
 
       const invoiceNumber = `INV-${new Date().getFullYear()}-${Date.now()}`;
 
+      const issueDate = parseFinanceDate(payload.issueDate);
+      const dueDate = parseFinanceDate(payload.dueDate);
+      if (dueDate.getTime() < issueDate.getTime()) {
+        throw new Error('Due date must be on or after issue date');
+      }
+
       const invoice = new Invoice({
         customerId: payload.customerId || uuidv4(),
-        customerName: payload.customerName,
-        customerEmail: payload.customerEmail,
-        issueDate: new Date(payload.issueDate),
-        dueDate: new Date(payload.dueDate),
+        customerName: String(payload.customerName).trim(),
+        customerEmail: String(payload.customerEmail).trim().toLowerCase(),
+        issueDate,
+        dueDate,
         invoiceNumber,
         amount,
         currency: payload.currency || 'INR',
@@ -124,9 +130,13 @@ class InvoicingService {
       });
       await invoice.save();
 
+      const obj = invoice.toObject();
       return {
         id: invoice._id.toString(),
-        ...invoice.toObject(),
+        ...obj,
+        issueDate: obj.issueDate?.toISOString?.() || obj.issueDate,
+        dueDate: obj.dueDate?.toISOString?.() || obj.dueDate,
+        createdAt: obj.createdAt?.toISOString?.() || obj.createdAt,
       };
     } catch (error) {
       logger.error('Error creating invoice:', error);
@@ -195,6 +205,18 @@ class InvoicingService {
       throw error;
     }
   }
+}
+
+function parseFinanceDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('Invalid date');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-').map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0, 0);
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) throw new Error('Invalid date');
+  return parsed;
 }
 
 module.exports = new InvoicingService();

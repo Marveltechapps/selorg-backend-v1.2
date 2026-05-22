@@ -171,6 +171,7 @@ router.get('/picker-transactions', ...financeAuth, financeController.listAllPick
 router.get('/picker-attendance', ...financeAuth, financeController.getPickerAttendance);
 
 // Refunds routes
+router.get('/wallet-transactions', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), refundsController.getWalletTransactions);
 router.get('/refunds/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), refundsController.getRefundsSummary);
 router.get('/refunds/queue', ...financeAuth, cacheMiddleware(appConfig.cache.finance.refunds), validateRequest(getRefundQueueSchema), refundsController.getRefundQueue);
 // Place specific routes before parameterized routes to avoid accidental param matching (e.g. "chargebacks" being treated as :id)
@@ -204,6 +205,7 @@ router.get('/rider-cash/cod-reconciliation', ...financeAuth, riderCashController
 router.get('/rider-cash/riders/:riderId/payment-details', ...financeAuth, validateRequest(getRiderPaymentDetailsSchema), riderCashController.getRiderPaymentDetails);
 
 // Reconciliation routes
+router.get('/reconciliation/gateways', ...financeAuth, cacheMiddleware(appConfig.cache.finance.reconciliation), reconciliationController.getAvailableGateways);
 router.get('/reconciliation/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.reconciliation), validateRequest(getReconSummarySchema), reconciliationController.getReconSummary);
 router.get('/reconciliation/exceptions', ...financeAuth, cacheMiddleware(appConfig.cache.finance.reconciliation), validateRequest(getExceptionsSchema), reconciliationController.getExceptions);
 router.post('/reconciliation/run', ...financeAuth, validateRequest(runReconciliationSchema), reconciliationController.runReconciliation);
@@ -213,6 +215,7 @@ router.post('/reconciliation/exceptions/:id/resolve', ...financeAuth, validateRe
 router.get('/reconciliation/gateways/:id', ...financeAuth, cacheMiddleware(appConfig.cache.finance.reconciliation), validateRequest(getGatewayDetailsSchema), reconciliationController.getGatewayDetails);
 
 // Ledger routes
+router.post('/ledger/sync', ...financeAuth, accountingController.syncLedger);
 router.get('/ledger/summary', ...financeAuth, cacheMiddleware(appConfig.cache.finance.ledger), accountingController.getAccountingSummary);
 router.get('/ledger/entries', ...financeAuth, cacheMiddleware(appConfig.cache.finance.ledger), validateRequest(getLedgerEntriesSchema), accountingController.getLedgerEntries);
 router.get('/ledger/accounts', ...financeAuth, cacheMiddleware(appConfig.cache.finance.ledger), accountingController.getAccounts);

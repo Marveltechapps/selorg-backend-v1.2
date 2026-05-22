@@ -91,12 +91,41 @@ class VendorPaymentsService {
 
       const overdueVendors = new Set(overdue.map((i) => i.vendorId.toString())).size;
 
+      const paid = await VendorInvoice.find(mergeHubFilter({ status: 'paid' })).lean();
+      const rejected = await VendorInvoice.find(mergeHubFilter({ status: 'rejected' })).lean();
+
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+
+      const paidThisMonth = paid
+        .filter((inv) => {
+          const settledAt = inv.updatedAt || inv.invoiceDate;
+          return settledAt && new Date(settledAt) >= monthStart;
+        })
+        .reduce((sum, inv) => sum + (Number(inv.amount) || 0), 0);
+
+      const cycleDays = paid
+        .filter((inv) => inv.invoiceDate && inv.updatedAt)
+        .map((inv) => {
+          const start = new Date(inv.invoiceDate).getTime();
+          const end = new Date(inv.updatedAt).getTime();
+          return Math.max(0, Math.round((end - start) / (1000 * 60 * 60 * 24)));
+        });
+      const avgPaymentCycle =
+        cycleDays.length > 0
+          ? Math.round(cycleDays.reduce((a, b) => a + b, 0) / cycleDays.length)
+          : 0;
+
       return {
         outstandingPayablesAmount: outstanding.reduce((sum, inv) => sum + inv.amount, 0),
         outstandingHorizonText: 'Due next 30 days',
         pendingApprovalCount: pending.length,
         overdueAmount: overdue.reduce((sum, inv) => sum + inv.amount, 0),
         overdueVendorsCount: overdueVendors,
+        paidThisMonth,
+        disputedAmount: rejected.reduce((sum, inv) => sum + (Number(inv.amount) || 0), 0),
+        avgPaymentCycle,
       };
     } catch (error) {
       logger.error('Error fetching payables summary:', error);

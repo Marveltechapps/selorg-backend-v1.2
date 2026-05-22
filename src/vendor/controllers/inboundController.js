@@ -10,7 +10,6 @@ async function getOverview(req, res, next) {
     start.setHours(0, 0, 0, 0);
     const end = new Date();
     end.setHours(23, 59, 59, 999);
-
     const createdToday = { createdAt: { $gte: start, $lte: end } };
 
     const [
@@ -21,31 +20,24 @@ async function getOverview(req, res, next) {
       inTransitShipments,
       exceptions,
     ] = await Promise.all([
-      GRN.countDocuments(mergeHubFilter(createdToday)),
+      GRN.countDocuments(mergeHubFilter({ ...createdToday, status: { $ne: 'ARCHIVED' } })),
       GRN.countDocuments(mergeHubFilter({ status: 'PENDING' })),
-      GRN.countDocuments(
-        mergeHubFilter({ status: { $in: ['APPROVED', 'approved', 'Approved'] } })
-      ),
-      GRN.countDocuments(
-        mergeHubFilter({ status: { $in: ['REJECTED', 'rejected', 'Rejected'] } })
-      ),
+      GRN.countDocuments(mergeHubFilter({ status: 'APPROVED' })),
+      GRN.countDocuments(mergeHubFilter({ status: 'REJECTED' })),
       Shipment.countDocuments(
-        mergeHubFilter({
-          status: { $in: ['IN_TRANSIT', 'in_transit', 'In Transit', 'IN TRANSIT'] },
-        })
+        mergeHubFilter({ status: { $in: ['IN_TRANSIT', 'IN TRANSIT'] } })
       ),
-      Exception.countDocuments(mergeHubFilter({})),
+      Exception.countDocuments(mergeHubFilter({ status: 'OPEN' })),
     ]);
 
-    const overview = {
+    res.json({
       totalGRNsToday,
       pendingApproval,
       approvedGRNs,
       rejectedGRNs,
       inTransitShipments,
       exceptions,
-    };
-    res.json(overview);
+    });
   } catch (err) {
     next(err);
   }
@@ -98,7 +90,7 @@ async function patchGRNStatus(req, res, next) {
 
 async function approveGRN(req, res, next) {
   try {
-    const grn = await inboundService.approveGRN(req.params.grnId);
+    const grn = await inboundService.approveGRN(req.params.grnId, req.body || {});
     res.json(grn);
   } catch (err) {
     next(err);
@@ -107,12 +99,17 @@ async function approveGRN(req, res, next) {
 
 async function rejectGRN(req, res, next) {
   try {
-    // Accept reason from multiple possible fields to be tolerant of client payloads
-    const reason = (req.body && (req.body.reason || req.body.rejectionReason || req.body.note)) || req.query.reason;
+    const reason =
+      (req.body &&
+        (req.body.reason ||
+          req.body.description ||
+          req.body.rejectionReason ||
+          req.body.note)) ||
+      req.query.reason;
     if (!reason || (typeof reason === 'string' && reason.trim() === '')) {
       const err = new Error('Reason required for rejection');
       err.status = 400;
-      throw err;
+      return next(err);
     }
     const result = await inboundService.rejectGRN(req.params.grnId, reason);
     res.json(result);
@@ -121,10 +118,18 @@ async function rejectGRN(req, res, next) {
   }
 }
 
+async function archiveGRN(req, res, next) {
+  try {
+    const grn = await inboundService.archiveGRN(req.params.grnId);
+    res.json(grn);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listShipments(req, res, next) {
   try {
-    // simple passthrough
-    const data = await require('../models/Shipment').find(mergeHubFilter({})).lean();
+    const data = await Shipment.find(mergeHubFilter({})).sort({ createdAt: -1 }).lean();
     res.json({ data, pagination: { page: 1, limit: data.length, total: data.length, pages: 1 } });
   } catch (err) {
     next(err);
@@ -169,8 +174,35 @@ async function createException(req, res, next) {
 
 async function resolveException(req, res, next) {
   try {
-    const ex = await inboundService.resolveException(req.params.exceptionId, req.body);
+    const ex = await inboundService.resolveException(req.params.exceptionId);
     res.json(ex);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listRTVs(req, res, next) {
+  try {
+    const list = await inboundService.listRTVs();
+    res.json(list);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createRTV(req, res, next) {
+  try {
+    const rtv = await inboundService.createRTV(req.body);
+    res.status(201).json(rtv);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function patchRTVStatus(req, res, next) {
+  try {
+    const rtv = await inboundService.updateRTVStatus(req.params.rtvId, req.body);
+    res.json(rtv);
   } catch (err) {
     next(err);
   }
@@ -185,6 +217,26 @@ async function createImportJob(req, res, next) {
   }
 }
 
+async function getImportJobStatus(req, res, next) {
+  try {
+    const job = await inboundService.getImportJobStatus(req.params.jobId);
+    res.json(job);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function exportReport(req, res, next) {
+  try {
+    const csv = await inboundService.exportGrnReport();
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="vendor-inbound-grns.csv"');
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getOverview,
   listGRNs,
@@ -194,12 +246,17 @@ module.exports = {
   patchGRNStatus,
   approveGRN,
   rejectGRN,
+  archiveGRN,
   listShipments,
   createShipment,
   patchShipmentStatus,
   listExceptions,
   createException,
   resolveException,
+  listRTVs,
+  createRTV,
+  patchRTVStatus,
   createImportJob,
+  getImportJobStatus,
+  exportReport,
 };
-

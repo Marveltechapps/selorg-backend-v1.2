@@ -5,6 +5,11 @@
  */
 
 const Shift = require('../../warehouse/models/Shift');
+const {
+  ensureStaffShiftsForDate,
+  dayBounds,
+} = require('../services/staffShiftSyncService');
+
 function getRiderModel() {
   try {
     return require('../../rider/models/Rider');
@@ -41,10 +46,8 @@ const toRiderShift = (s) => ({
 const getSummary = async (req, res, next) => {
   try {
     const dateStr = req.query.date || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(dateStr);
-    endOfDay.setHours(23, 59, 59, 999);
+    await ensureStaffShiftsForDate(dateStr);
+    const { startOfDay, endOfDay } = dayBounds(dateStr);
 
     const shifts = await Shift.find({
       date: { $gte: startOfDay, $lte: endOfDay },
@@ -58,6 +61,7 @@ const getSummary = async (req, res, next) => {
     ).length;
 
     res.status(200).json({
+      success: true,
       date: dateStr,
       checkedInCount,
       scheduledTodayCount: shifts.length,
@@ -76,10 +80,8 @@ const getSummary = async (req, res, next) => {
 const listShifts = async (req, res, next) => {
   try {
     const dateStr = req.query.date || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(dateStr);
-    endOfDay.setHours(23, 59, 59, 999);
+    await ensureStaffShiftsForDate(dateStr);
+    const { startOfDay, endOfDay } = dayBounds(dateStr);
 
     const filter = (req.query.filter || 'all').toLowerCase();
     const query = {
@@ -95,7 +97,10 @@ const listShifts = async (req, res, next) => {
       .sort({ startTime: 1 })
       .lean();
 
-    res.status(200).json(shifts.map(toRiderShift));
+    res.status(200).json({
+      success: true,
+      data: shifts.map(toRiderShift),
+    });
   } catch (error) {
     logger.error('Staff listShifts error:', error);
     next(error);
@@ -217,10 +222,7 @@ const listRiders = async (req, res, next) => {
     }
     const riders = await Rider.find({}).select('id name zone').lean();
     const dateStr = req.query.date || new Date().toISOString().split('T')[0];
-    const startOfDay = new Date(dateStr);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(dateStr);
-    endOfDay.setHours(23, 59, 59, 999);
+    const { startOfDay, endOfDay } = dayBounds(dateStr);
 
     const shifts = await Shift.find({
       date: { $gte: startOfDay, $lte: endOfDay },

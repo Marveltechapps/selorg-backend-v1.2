@@ -1,4 +1,5 @@
 const dispatchService = require('../services/dispatchService');
+const orderService = require('../../warehouse/services/orderService');
 const riderDashboardNotificationService = require('../services/riderDashboardNotificationService');
 const cache = require('../../utils/cache');
 const logger = require('../../core/utils/logger');
@@ -151,8 +152,8 @@ const assignOrder = async (req, res, next) => {
       });
     }
 
-    const result = await dispatchService.assignOrder(orderId, riderId, overrideSla || false);
-    
+    const order = await orderService.assignOrder(orderId, riderId, overrideSla || false);
+
     // Invalidate all related cache entries
     await cache.delByPattern('orders:*');
     await cache.delByPattern('riders:*');
@@ -163,15 +164,22 @@ const assignOrder = async (req, res, next) => {
 
     riderDashboardNotificationService
       .notifyOrderAssigned(req, {
-        orderId: result.orderId,
-        riderName: result.riderName,
+        orderId: order.id,
+        riderName: order.rider?.name,
       })
       .catch((err) => logger.warn('Rider dashboard notification (dispatch assign) failed', { err: err.message }));
 
-    res.status(200).json(result);
+    res.status(200).json({
+      orderId: order.id,
+      riderId: order.riderId,
+      riderName: order.rider?.name,
+      status: order.status,
+      etaMinutes: order.etaMinutes,
+      message: 'Order assigned successfully',
+    });
   } catch (error) {
     logger.error('Error in assignOrder controller:', error);
-    if (error.message === 'Order not found' || error.message === 'Rider not found') {
+    if (error.statusCode === 404 || error.message?.includes('not found')) {
       return res.status(404).json({
         error: 'Not Found',
         message: error.message,
@@ -179,10 +187,12 @@ const assignOrder = async (req, res, next) => {
       });
     }
     if (
+      error.statusCode === 400 ||
       error.message === 'Order is not pending' ||
+      error.message?.includes('cannot be assigned') ||
       error.message === 'Rider is at capacity' ||
       error.message === 'Rider is not available for assignment' ||
-      error.message === 'Assignment would violate SLA deadline'
+      error.message?.includes('violate SLA')
     ) {
       return res.status(400).json({
         error: 'Bad Request',
@@ -310,14 +320,65 @@ const updateAutoAssignRule = async (req, res, next) => {
 const groupOrders = async (req, res, next) => {
   try {
     const filters = {
-      status: req.query.status, // Can be 'all', 'pending', etc.
+      status: req.query.status,
+      zone: req.query.zone,
+      search: req.query.search,
       radius: parseFloat(req.query.radius) || 2,
-      minSize: parseInt(req.query.minSize) || 2,
-      maxSize: parseInt(req.query.maxSize) || 10,
+      minSize: parseInt(req.query.minSize, 10) || 2,
+      maxSize: parseInt(req.query.maxSize, 10) || 10,
     };
 
     const result = await dispatchService.groupOrders(filters);
-    res.status(200).json(result);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const listGroupDeliveryOrders = async (req, res, next) => {
+  try {
+    const result = await dispatchService.listGroupDeliveryOrders({
+      status: req.query.status,
+      zone: req.query.zone,
+      search: req.query.search,
+    });
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getGroupDeliveryFilterOptions = async (req, res, next) => {
+  try {
+    const result = await dispatchService.getGroupDeliveryFilterOptions();
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const computeClusterMetrics = async (req, res, next) => {
+  try {
+    const orderIds = req.body?.orderIds;
+    if (!Array.isArray(orderIds)) {
+      return res.status(400).json({ error: 'orderIds array is required' });
+    }
+    const result = await dispatchService.computeClusterMetrics(orderIds);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const updateClusterOrders = async (req, res, next) => {
+  try {
+    const { clusterId } = req.params;
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds)) {
+      return res.status(400).json({ error: 'orderIds array is required' });
+    }
+    const result = await dispatchService.updateClusterOrders(clusterId, orderIds);
+    res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
@@ -334,7 +395,15 @@ const saveClusters = async (req, res, next) => {
     }
     
     const result = await dispatchService.saveClusters(clusters);
-    res.status(201).json(result);
+    res.status(201).json({
+      success: true,
+      data: result.map((c) => ({
+        clusterId: c.clusterId,
+        orderIds: c.orderIds,
+        status: c.status,
+        color: c.color,
+      })),
+    });
   } catch (error) {
     next(error);
   }
@@ -351,7 +420,7 @@ const listClusters = async (req, res, next) => {
     };
     
     const result = await dispatchService.listClusters(filters);
-    res.status(200).json(result);
+    res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
@@ -381,14 +450,16 @@ const deleteCluster = async (req, res, next) => {
 const assignCluster = async (req, res, next) => {
   try {
     const { clusterId } = req.params;
-    const { riderId } = req.body;
-    
+    const { riderId, overrideSla } = req.body;
+
     if (!riderId) {
       return res.status(400).json({ error: 'riderId is required' });
     }
-    
-    const result = await dispatchService.assignClusterToRider(clusterId, riderId);
-    res.status(200).json(result);
+
+    const result = await dispatchService.assignClusterToRider(clusterId, riderId, {
+      overrideSla: !!overrideSla,
+    });
+    res.status(200).json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
@@ -409,6 +480,10 @@ module.exports = {
   getAutoAssignRules,
   updateAutoAssignRule,
   groupOrders,
+  listGroupDeliveryOrders,
+  getGroupDeliveryFilterOptions,
+  computeClusterMetrics,
+  updateClusterOrders,
   saveClusters,
   listClusters,
   deleteCluster,

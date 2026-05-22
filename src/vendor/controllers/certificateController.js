@@ -31,10 +31,20 @@ async function getCertificate(req, res, next) {
   }
 }
 
+
+async function patchCertificate(req, res, next) {
+  try {
+    const updated = await certificateService.updateCertificate(req.params.certificateId, req.body);
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deleteCertificate(req, res, next) {
   try {
-    await certificateService.revokeCertificate(req.params.certificateId);
-    res.status(204).send();
+    await certificateService.deleteCertificate(req.params.certificateId);
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -44,6 +54,7 @@ module.exports = {
   listVendorCertificates,
   createVendorCertificate,
   getCertificate,
+  patchCertificate,
   deleteCertificate,
 };
 

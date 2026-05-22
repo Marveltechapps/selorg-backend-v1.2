@@ -7,6 +7,7 @@ router.post('/', qcController.createQCCheck);
 router.get('/overview', qcController.overview);
 router.get('/:qcId', qcController.getQCCheck);
 router.patch('/:qcId', qcController.patchQCCheck);
+router.delete('/:qcId', qcController.deleteQCCheck);
 
 module.exports = router;
 

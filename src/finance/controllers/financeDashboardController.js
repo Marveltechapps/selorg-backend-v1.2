@@ -48,6 +48,11 @@ class FinanceDashboardController {
 
   exportFinanceReport = asyncHandler(async (req, res) => {
     const result = await financeDashboardService.exportFinanceReport(req.body);
+    if (result?.fileContent != null) {
+      res.setHeader('Content-Type', result.contentType || 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${result.filename || 'finance-report.csv'}"`);
+      return res.send(result.fileContent);
+    }
     res.json({ success: true, data: result });
   });
 

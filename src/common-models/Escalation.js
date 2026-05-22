@@ -34,6 +34,20 @@ const escalationSchema = new mongoose.Schema(
     assignedStoreName: { type: String },
     storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store' },
     riderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Rider' },
+    /** Denormalized display id e.g. ORD-20260312-00072 */
+    orderDisplayId: { type: String, trim: true, default: null },
+    riderName: { type: String, trim: true, default: null },
+    attemptLogs: {
+      type: [
+        {
+          attempt: { type: Number },
+          timestamp: { type: Date },
+          outcome: { type: String, default: '' },
+          notes: { type: String, default: '' },
+        },
+      ],
+      default: [],
+    },
     description: { type: String, required: true },
     resolutionNotes: { type: String, default: '' },
     resolvedAt: { type: Date },

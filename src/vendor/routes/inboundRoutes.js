@@ -11,6 +11,7 @@ router.put('/grns/:grnId', inboundController.putGRN);
 router.patch('/grns/:grnId/status', inboundController.patchGRNStatus);
 router.post('/grns/:grnId/approve', inboundController.approveGRN);
 router.post('/grns/:grnId/reject', inboundController.rejectGRN);
+router.post('/grns/:grnId/archive', inboundController.archiveGRN);
 
 router.get('/shipments', inboundController.listShipments);
 router.post('/shipments', inboundController.createShipment);
@@ -20,13 +21,12 @@ router.get('/exceptions', inboundController.listExceptions);
 router.post('/exceptions', inboundController.createException);
 router.post('/exceptions/:exceptionId/resolve', inboundController.resolveException);
 
-router.post('/bulk-import', requireAuth, inboundController.createImportJob);
-router.get('/bulk-import/:jobId', async (req, res) => res.json({ id: req.params.jobId, status: 'PROCESSING' }));
+router.get('/rtvs', inboundController.listRTVs);
+router.post('/rtvs', inboundController.createRTV);
+router.patch('/rtvs/:rtvId/status', inboundController.patchRTVStatus);
 
-router.get('/report', async (req, res) => {
-  res.setHeader('Content-Type', 'text/csv');
-  res.send('id,example\n1,report');
-});
+router.post('/bulk-import', requireAuth, inboundController.createImportJob);
+router.get('/bulk-import/:jobId', inboundController.getImportJobStatus);
+router.get('/report', inboundController.exportReport);
 
 module.exports = router;
-

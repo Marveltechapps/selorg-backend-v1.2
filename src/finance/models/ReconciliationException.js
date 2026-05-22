@@ -18,6 +18,9 @@ const reconciliationExceptionSchema = new mongoose.Schema({
     index: true 
   },
   reasonCode: { type: String, required: true },
+  orderId: { type: String, index: true },
+  txnId: { type: String, index: true },
+  runId: { type: mongoose.Schema.Types.ObjectId, ref: 'ReconciliationRun', index: true },
   details: { type: String },
   suggestedAction: { 
     type: String, 
@@ -29,6 +32,7 @@ const reconciliationExceptionSchema = new mongoose.Schema({
 });
 
 reconciliationExceptionSchema.index({ status: 1, createdAt: -1 });
+reconciliationExceptionSchema.index({ gateway: 1, orderId: 1, reasonCode: 1, status: 1 });
 
 module.exports = mongoose.models.ReconciliationException || mongoose.model('ReconciliationException', reconciliationExceptionSchema);
 

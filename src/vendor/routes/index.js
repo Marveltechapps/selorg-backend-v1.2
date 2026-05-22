@@ -18,6 +18,7 @@ const reportsRoutes = require('./reportsRoutes');
 const qcComplianceRoutes = require('./qcComplianceRoutes');
 const procurementApprovalsRoutes = require('./procurementApprovalsRoutes');
 const utilitiesRoutes = require('./utilitiesRoutes');
+const notificationsRoutes = require('./notificationsRoutes');
 const vendorController = require('../controllers/vendorController2');
 
 // Auth (login only) - no JWT required
@@ -52,6 +53,7 @@ protectedRouter.use('/reports', reportsRoutes);
 protectedRouter.use('/qc-compliance', qcComplianceRoutes);
 protectedRouter.use('/approvals', procurementApprovalsRoutes);
 protectedRouter.use('/utilities', utilitiesRoutes);
+protectedRouter.use('/notifications', notificationsRoutes);
 protectedRouter.use('/system-gateway', require('./systemGatewayRoutes'));
 router.use(protectedRouter);
 

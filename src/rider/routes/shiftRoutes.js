@@ -12,6 +12,7 @@ router.post('/start', shiftController.start);
 router.post('/end', shiftController.end);
 
 // Admin/dashboard CRUD (can be wrapped with auth middleware at mount site if needed)
+router.get('/filter-options', shiftController.filterOptions);
 router.get('/', shiftController.list);
 router.post('/', shiftController.create);
 router.get('/:id', shiftController.getById);

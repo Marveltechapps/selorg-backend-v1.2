@@ -13,6 +13,9 @@ router.get('/', getAlerts);
 // DELETE /api/darkstore/alerts/resolved (must be before /:alertId to avoid route conflict)
 router.delete('/resolved', clearResolvedAlerts);
 
+// POST /api/darkstore/alerts/resolved/clear — preferred (body: { ids?, storeId? })
+router.post('/resolved/clear', clearResolvedAlerts);
+
 // GET /api/darkstore/alerts/debug/ids - Debug endpoint to list all alert IDs (must be before /:alertId)
 router.get('/debug/ids', async (req, res) => {
   try {

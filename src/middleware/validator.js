@@ -13,19 +13,25 @@ const validate = (req, res, next) => {
   next();
 };
 
+/** ORD- prefix + smoke/test IDs (e.g. ORD-SMOKE-RIDER-1778925568552) and numeric legacy IDs */
+const ORDER_ID_REGEX = /^ORD-[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/i;
+
+/** Legacy RIDER-0001 and RiderV2 RDR-* profiles */
+const RIDER_ID_REGEX = /^(RIDER-[A-Za-z0-9][A-Za-z0-9._-]*|RDR-[A-Za-z0-9][A-Za-z0-9._-]*)$/i;
+
 // Rider ID validation
 const validateRiderId = [
   param('riderId')
-    .matches(/^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/)
-    .withMessage('Rider ID must match format RIDER-{number} or RDR-{STORE}-{YYMM}-{SEQ}'),
+    .matches(RIDER_ID_REGEX)
+    .withMessage('Rider ID must match format RIDER-{id} or RDR-{profile-id}'),
   validate,
 ];
 
 // Order ID validation
 const validateOrderId = [
   param('orderId')
-    .matches(/^ORD-\d+$/)
-    .withMessage('Order ID must match format ORD-{number}'),
+    .matches(ORDER_ID_REGEX)
+    .withMessage('Order ID must start with ORD- followed by a valid identifier'),
   validate,
 ];
 
@@ -97,8 +103,9 @@ const validateUpdateRider = [
 // Assign Order validation
 const validateAssignOrder = [
   body('riderId')
-    .matches(/^(RIDER-\d+|RDR-[A-Z0-9]+-\d{4}-\d+)$/)
-    .withMessage('Rider ID must match format RIDER-{number} or RDR-{STORE}-{YYMM}-{SEQ}'),
+    .trim()
+    .matches(RIDER_ID_REGEX)
+    .withMessage('Rider ID must match format RIDER-{id} or RDR-{profile-id}'),
   body('overrideSla')
     .optional()
     .isBoolean()
@@ -123,8 +130,8 @@ const validateAutoAssign = [
     .withMessage('orderIds must be an array'),
   body('orderIds.*')
     .optional()
-    .matches(/^ORD-\d+$/)
-    .withMessage('Each order ID must match format ORD-{number}'),
+    .matches(ORDER_ID_REGEX)
+    .withMessage('Each order ID must start with ORD- followed by a valid identifier'),
   validate,
 ];
 

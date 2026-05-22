@@ -69,12 +69,34 @@ function hubFieldsForCreate() {
   return { hubKey: getEffectiveHubKey() };
 }
 
+/**
+ * Hub filter for an explicit key (e.g. shared search outside vendor ALS).
+ */
+function hubKeyMatchForKey(hubKey) {
+  const k = hubKey && String(hubKey).trim() ? String(hubKey).trim() : DEFAULT_HUB_KEY;
+  if (k === DEFAULT_HUB_KEY) {
+    return {
+      $or: [{ hubKey: DEFAULT_HUB_KEY }, { hubKey: { $exists: false } }, { hubKey: null }],
+    };
+  }
+  return { hubKey: k };
+}
+
+function mergeHubFilterForKey(baseFilter, hubKey) {
+  const base = baseFilter && typeof baseFilter === 'object' ? { ...baseFilter } : {};
+  const hub = hubKeyMatchForKey(hubKey);
+  if (Object.keys(base).length === 0) return hub;
+  return { $and: [base, hub] };
+}
+
 module.exports = {
   getDefaultHubKey,
   getEffectiveHubKey,
   resolveHubKeyFromUserDoc,
   runWithVendorHub,
   mergeHubFilter,
+  mergeHubFilterForKey,
+  hubKeyMatchForKey,
   hubFieldsForCreate,
   hubKeyMatch,
 };

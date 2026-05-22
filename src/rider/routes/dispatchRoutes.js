@@ -14,10 +14,14 @@ const conditionalValidateAutoAssign = appConfig.nodeEnv === 'development'
 router.get('/unassigned-orders', dispatchController.listUnassignedOrders);
 router.get('/unassigned-orders/count', dispatchController.getUnassignedOrdersCount);
 router.get('/group-delivery', dispatchController.groupOrders);
+router.get('/group-delivery/orders', dispatchController.listGroupDeliveryOrders);
+router.get('/group-delivery/filter-options', dispatchController.getGroupDeliveryFilterOptions);
+router.post('/clusters/compute-metrics', dispatchController.computeClusterMetrics);
 
 // Cluster Management
 router.get('/clusters', dispatchController.listClusters);
 router.post('/clusters', dispatchController.saveClusters);
+router.patch('/clusters/:clusterId/orders', dispatchController.updateClusterOrders);
 router.delete('/clusters/:clusterId', dispatchController.deleteCluster);
 router.post('/clusters/:clusterId/assign', dispatchController.assignCluster);
 
