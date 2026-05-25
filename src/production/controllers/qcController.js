@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const QCFailure = require('../models/QCFailure');
 const WatchlistItem = require('../models/WatchlistItem');
 const QCCheckLog = require('../models/QCCheckLog');
@@ -20,6 +21,42 @@ const safeCreateAuditLog = async (payload) => {
     console.warn('QC audit log write failed:', error.message);
   }
 };
+
+function getStoreId(req) {
+  return (
+    req.query?.storeId ||
+    req.query?.factoryId ||
+    req.body?.storeId ||
+    req.body?.factoryId ||
+    process.env.DASHBOARD_HUB_KEY ||
+    process.env.DEFAULT_STORE_ID ||
+    'chennai-hub'
+  );
+}
+
+async function findQCInspection(storeId, id) {
+  const byCode = await QCInspection.findOne({ store_id: storeId, inspection_id: id });
+  if (byCode) return byCode;
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    return QCInspection.findOne({ store_id: storeId, _id: id });
+  }
+  return null;
+}
+
+async function findSampleTest(storeId, sampleId) {
+  const bySampleId = await SampleTest.findOne({ sample_id: sampleId });
+  if (!bySampleId) return null;
+  if (storeId && bySampleId.store_id && bySampleId.store_id !== storeId) {
+    return null;
+  }
+  return bySampleId;
+}
+
+function mapInspectionResultToStatus(result) {
+  if (result === 'pass') return 'passed';
+  if (result === 'fail') return 'failed';
+  return 'pending';
+}
 
 const getQCSummary = async (req, res) => {
   try {
@@ -83,7 +120,7 @@ const getQCSummary = async (req, res) => {
 // QC Inspections
 const getQCInspections = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'PROD-001';
+    const storeId = getStoreId(req);
     const inspections = await QCInspection.find({ store_id: storeId }).sort({ createdAt: -1 });
     res.json({ success: true, inspections });
   } catch (error) {
@@ -93,7 +130,7 @@ const getQCInspections = async (req, res) => {
 
 const createQCInspection = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'PROD-001';
+    const storeId = getStoreId(req);
     const {
       batchId,
       productName,
@@ -172,6 +209,97 @@ const createQCInspection = async (req, res) => {
     });
 
     res.status(201).json({ success: true, inspection });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const updateQCInspection = async (req, res) => {
+  try {
+    const storeId = getStoreId(req);
+    const { id } = req.params;
+    const { batch, checkType, result, inspector, notes } = req.body || {};
+
+    const inspection = await findQCInspection(storeId, id);
+    if (!inspection) {
+      return res.status(404).json({ success: false, error: 'Inspection not found' });
+    }
+
+    if (batch !== undefined) {
+      if (!String(batch).trim()) {
+        return res.status(400).json({ success: false, error: 'batch cannot be empty' });
+      }
+      inspection.batch_id = String(batch).trim();
+    }
+    if (checkType !== undefined) {
+      if (!String(checkType).trim()) {
+        return res.status(400).json({ success: false, error: 'checkType cannot be empty' });
+      }
+      inspection.product_name = String(checkType).trim();
+      inspection.check_type = String(checkType).trim();
+    }
+    if (inspector !== undefined) {
+      if (!String(inspector).trim()) {
+        return res.status(400).json({ success: false, error: 'inspector cannot be empty' });
+      }
+      inspection.inspector = String(inspector).trim();
+    }
+    if (notes !== undefined) {
+      inspection.notes = notes?.trim() || undefined;
+    }
+    if (result !== undefined) {
+      if (!['pass', 'fail', 'pending'].includes(result)) {
+        return res.status(400).json({ success: false, error: 'result must be pass, fail, or pending' });
+      }
+      inspection.status = mapInspectionResultToStatus(result);
+      inspection.items_inspected = 1;
+      inspection.defects_found = result === 'fail' ? 1 : 0;
+      inspection.score = result === 'pass' ? 100 : result === 'fail' ? 0 : 50;
+    }
+
+    await inspection.save();
+
+    await safeCreateAuditLog({
+      id: generateId('AUD'),
+      timestamp: new Date().toISOString(),
+      action_type: 'update',
+      module: 'qc',
+      user: inspection.inspector || 'system',
+      action: 'UPDATE_INSPECTION',
+      details: inspection.toObject(),
+      store_id: storeId,
+    });
+
+    res.json({ success: true, inspection });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const deleteQCInspection = async (req, res) => {
+  try {
+    const storeId = getStoreId(req);
+    const { id } = req.params;
+
+    const inspection = await findQCInspection(storeId, id);
+    if (!inspection) {
+      return res.status(404).json({ success: false, error: 'Inspection not found' });
+    }
+
+    await QCInspection.deleteOne({ _id: inspection._id });
+
+    await safeCreateAuditLog({
+      id: generateId('AUD'),
+      timestamp: new Date().toISOString(),
+      action_type: 'delete',
+      module: 'qc',
+      user: inspection.inspector || 'system',
+      action: 'DELETE_INSPECTION',
+      details: { inspection_id: inspection.inspection_id },
+      store_id: storeId,
+    });
+
+    res.json({ success: true, message: 'Inspection deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -294,7 +422,7 @@ const getComplianceDocs = async (req, res) => {
 // Sample Testing
 const getSampleTests = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'PROD-001';
+    const storeId = getStoreId(req);
     const samples = await SampleTest.find({ store_id: storeId }).sort({ createdAt: -1 });
     res.json({ success: true, samples });
   } catch (error) {
@@ -304,7 +432,7 @@ const getSampleTests = async (req, res) => {
 
 const createSampleTest = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'PROD-001';
+    const storeId = getStoreId(req);
     const { batchId, productName, product, testType, testedBy, source, priority } = req.body;
     const productNameVal = productName || product;
     const batchIdVal = batchId || source;
@@ -325,19 +453,18 @@ const createSampleTest = async (req, res) => {
 
     await sample.save();
 
-    // Log Action History
-    await AuditLog.create({
+    await safeCreateAuditLog({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'create',
       module: 'qc',
       user: testedBy || 'system',
       action: 'CREATE_SAMPLE_TEST',
-      details: sample,
-      store_id: storeId
+      details: sample.toObject(),
+      store_id: storeId,
     });
 
-    res.status(201).json({ success: true, sample });
+    res.status(201).json({ success: true, sample: sample.toObject() });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -345,40 +472,106 @@ const createSampleTest = async (req, res) => {
 
 const updateSampleResult = async (req, res) => {
   try {
+    const storeId = getStoreId(req);
     const { sampleId } = req.params;
-    const { result, result_notes, testedBy, status } = req.body;
-    const update = { tested_by: testedBy };
-    if (result) update.result = result;
-    if (result_notes !== undefined) update.result_notes = result_notes;
-    if (status) update.status = status;
-    if (status === 'completed' || status === 'in-progress') {
-      update.status = status;
+    const {
+      result,
+      result_notes,
+      testedBy,
+      status,
+      product,
+      productName,
+      source,
+      batchId,
+      testType,
+      priority,
+    } = req.body;
+
+    const sample = await findSampleTest(storeId, sampleId);
+    if (!sample) {
+      return res.status(404).json({ success: false, error: 'Sample not found' });
+    }
+
+    if (product !== undefined || productName !== undefined) {
+      const name = productName ?? product;
+      if (!String(name).trim()) {
+        return res.status(400).json({ success: false, error: 'product cannot be empty' });
+      }
+      sample.product_name = String(name).trim();
+    }
+    if (source !== undefined || batchId !== undefined) {
+      const src = source ?? batchId;
+      sample.batch_id = String(src ?? '').trim() || sample.batch_id;
+      sample.source = String(src ?? '').trim() || sample.source;
+    }
+    if (testType !== undefined) {
+      if (!String(testType).trim()) {
+        return res.status(400).json({ success: false, error: 'testType cannot be empty' });
+      }
+      sample.test_type = String(testType).trim();
+    }
+    if (priority !== undefined) {
+      if (!['low', 'normal', 'high'].includes(priority)) {
+        return res.status(400).json({ success: false, error: 'invalid priority' });
+      }
+      sample.priority = priority;
+    }
+    if (testedBy) sample.tested_by = testedBy;
+    if (result) sample.result = result;
+    if (result_notes !== undefined) sample.result_notes = result_notes;
+    if (status) {
+      sample.status = status;
       if (status === 'completed') {
-        update.completed_date = new Date().toISOString().split('T')[0];
+        sample.completed_date = new Date().toISOString().split('T')[0];
+        if (!sample.result || sample.result === 'pending') {
+          sample.result = 'pass';
+        }
       }
     }
-    
-    const sample = await SampleTest.findOneAndUpdate(
-      { sample_id: sampleId },
-      update,
-      { new: true }
-    );
 
-    if (!sample) return res.status(404).json({ success: false, error: 'Sample not found' });
+    await sample.save();
 
-    // Log Action History
-    await AuditLog.create({
+    await safeCreateAuditLog({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'update',
       module: 'qc',
-      user: testedBy || 'system',
+      user: testedBy || sample.tested_by || 'system',
       action: 'UPDATE_SAMPLE_RESULT',
-      details: sample,
-      store_id: sample.store_id
+      details: sample.toObject(),
+      store_id: sample.store_id,
     });
 
-    res.json({ success: true, sample });
+    res.json({ success: true, sample: sample.toObject() });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const deleteSampleTest = async (req, res) => {
+  try {
+    const storeId = getStoreId(req);
+    const { sampleId } = req.params;
+
+    const sample = await findSampleTest(storeId, sampleId);
+    if (!sample) {
+      return res.status(404).json({ success: false, error: 'Sample not found' });
+    }
+
+    await SampleTest.deleteOne({ _id: sample._id });
+
+    await safeCreateAuditLog({
+      id: generateId('AUD'),
+      timestamp: new Date().toISOString(),
+      action_type: 'delete',
+      module: 'qc',
+      user: sample.tested_by || 'system',
+      action: 'DELETE_SAMPLE_TEST',
+      details: { sample_id: sample.sample_id },
+      store_id: storeId,
+    });
+
+    res.json({ success: true, message: 'Lab test deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -869,6 +1062,8 @@ module.exports = {
   getQCSummary,
   getQCInspections,
   createQCInspection,
+  updateQCInspection,
+  deleteQCInspection,
   getTemperatureLogs,
   createTemperatureLog,
   getComplianceChecks,
@@ -877,6 +1072,7 @@ module.exports = {
   getSampleTests,
   createSampleTest,
   updateSampleResult,
+  deleteSampleTest,
   getRejections,
   createRejection,
   getQCFailures,

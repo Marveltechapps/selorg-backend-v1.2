@@ -14,6 +14,12 @@ const { Escalation } = require('../../common-models/Escalation');
 const RefundRequest = require('../../finance/models/RefundRequest');
 const { Order } = require('../../customer-backend/models/Order');
 const dispatchService = require('../../rider/services/dispatchService');
+const { CustomerUser } = require('../../customer-backend/models/CustomerUser');
+const {
+  resolveCustomerIdentity,
+  isGenericCustomerName,
+  formatPhoneForDisplay,
+} = require('../../customer-backend/utils/customerDisplay');
 
 let ticketCounter = 0;
 
@@ -319,16 +325,32 @@ async function createTicket(data, agentId, agentName) {
     tags: data.tags || [],
   });
 
-  const note = await AdminSupportTicketNote.create({
-    ticketId: doc._id,
-    authorId: agentId,
-    authorName: agentName,
-    type: 'customer_reply',
-    content: data.description || data.subject,
-    isInternal: false,
-  });
+  let notes;
+  if (data.channel === 'chat') {
+    const welcomeNote = await AdminSupportTicketNote.create({
+      ticketId: doc._id,
+      authorId: agentId || 'system',
+      authorName: agentName || 'Support',
+      type: 'agent_reply',
+      content:
+        data.welcomeMessage ||
+        'Hi! How can we help you today? Send a message and our team will respond shortly.',
+      isInternal: false,
+    });
+    notes = [welcomeNote];
+  } else {
+    const note = await AdminSupportTicketNote.create({
+      ticketId: doc._id,
+      authorId: agentId,
+      authorName: agentName,
+      type: 'customer_reply',
+      content: data.description || data.subject,
+      isInternal: false,
+    });
+    notes = [note];
+  }
 
-  return mapTicketToResponse(doc.toObject(), [note]);
+  return mapTicketToResponse(doc.toObject(), notes);
 }
 
 async function updateTicket(id, data) {
@@ -630,6 +652,13 @@ async function getSLAMetrics() {
   };
 }
 
+function isGhostChatNote(note, ticket) {
+  const content = String(note.content || '').trim();
+  const subject = String(ticket.subject || '').trim();
+  if (note.type !== 'customer_reply' || !subject || !content) return false;
+  return content === subject;
+}
+
 async function listLiveChats() {
   const tickets = await AdminSupportTicket.find({
     channel: 'chat',
@@ -652,31 +681,77 @@ async function listLiveChats() {
     notesByTicket[key].push(n);
   });
 
-  return tickets.map((ticket) => {
-    const ticketNotes = notesByTicket[String(ticket._id)] || [];
-    const startedAt = ticket.createdAt || new Date().toISOString();
-    return {
-      id: String(ticket._id),
-      customerId: ticket.customerId || '',
-      customerName: ticket.customerName || 'Customer',
-      agentId: ticket.assignedTo ? String(ticket.assignedTo) : undefined,
-      agentName: ticket.assignedToName || undefined,
-      status: ticket.status === 'in_progress' ? 'active' : 'waiting',
-      startedAt,
-      endedAt: ticket.status === 'closed' ? ticket.updatedAt : undefined,
-      waitTime: Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)),
-      messages: ticketNotes.map((n) => ({
-        id: String(n._id),
-        chatId: String(ticket._id),
-        senderId: n.authorId || '',
-        senderName: n.authorName || 'Unknown',
-        senderType: n.type === 'customer_reply' ? 'customer' : 'agent',
-        message: n.content || '',
-        timestamp: n.createdAt,
-        isRead: true,
-      })),
-    };
-  });
+  const customerIds = [
+    ...new Set(
+      tickets
+        .map((t) => t.customerId)
+        .filter((id) => id && mongoose.Types.ObjectId.isValid(String(id))),
+    ),
+  ];
+  const users = customerIds.length
+    ? await CustomerUser.find({ _id: { $in: customerIds } })
+        .select('name phoneNumber savedCheckoutContact')
+        .lean()
+    : [];
+  const userById = Object.fromEntries(users.map((u) => [String(u._id), u]));
+
+  return Promise.all(
+    tickets.map(async (ticket) => {
+      const ticketNotes = notesByTicket[String(ticket._id)] || [];
+      const startedAt = ticket.createdAt || new Date().toISOString();
+      const user = userById[String(ticket.customerId)];
+      const identity = resolveCustomerIdentity({ user, ticket });
+
+      if (
+        user &&
+        (isGenericCustomerName(ticket.customerName) || !ticket.customerPhone) &&
+        !isGenericCustomerName(identity.customerName)
+      ) {
+        AdminSupportTicket.findByIdAndUpdate(ticket._id, {
+          $set: {
+            customerName: identity.customerName,
+            customerPhone: identity.customerPhone || ticket.customerPhone || '',
+          },
+        }).catch(() => {});
+      }
+
+      const customerLabel = identity.displayName;
+      const visibleNotes = ticketNotes
+        .filter((n) => n.type === 'customer_reply' || n.type === 'agent_reply')
+        .filter((n) => !isGhostChatNote(n, ticket));
+
+      return {
+        id: String(ticket._id),
+        customerId: ticket.customerId || '',
+        customerName: identity.customerName,
+        displayName: customerLabel,
+        customerPhone: identity.customerPhone
+          ? formatPhoneForDisplay(identity.customerPhone)
+          : '',
+        subject: ticket.subject || '',
+        orderNumber: ticket.orderNumber || '',
+        agentId: ticket.assignedTo ? String(ticket.assignedTo) : undefined,
+        agentName: ticket.assignedToName || undefined,
+        status: ticket.status === 'in_progress' ? 'active' : 'waiting',
+        startedAt,
+        endedAt: ticket.status === 'closed' ? ticket.updatedAt : undefined,
+        waitTime: Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)),
+        messages: visibleNotes.map((n) => {
+          const isCustomer = n.type === 'customer_reply';
+          return {
+            id: String(n._id),
+            chatId: String(ticket._id),
+            senderId: n.authorId || '',
+            senderName: isCustomer ? customerLabel : n.authorName || 'Support',
+            senderType: isCustomer ? 'customer' : 'agent',
+            message: n.content || '',
+            timestamp: n.createdAt,
+            isRead: true,
+          };
+        }),
+      };
+    }),
+  );
 }
 
 async function acceptLiveChat(ticketId, agentId, agentName) {

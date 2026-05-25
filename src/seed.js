@@ -88,6 +88,9 @@ const seed = async () => {
         password: hashedPassword,
         name: 'Merch User',
         role: 'merch',
+        hubKey: 'chennai-hub',
+        primaryStoreId: 'chennai-hub',
+        assignedStores: ['chennai-hub'],
       },
     ];
     

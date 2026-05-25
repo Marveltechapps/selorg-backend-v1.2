@@ -8,6 +8,7 @@ const supportController = require('../controllers/supportController');
 
 const router = Router();
 
+router.get('/tickets/active', auth, supportController.getActiveChatTicket);
 router.post('/tickets', auth, supportController.createTicket);
 router.get('/tickets/:ticketId/messages', auth, supportController.getTicketMessages);
 router.post('/tickets/:ticketId/messages', auth, supportController.sendMessage);

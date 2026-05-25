@@ -43,7 +43,8 @@ const productionIncidentSchema = new mongoose.Schema(
     factory_id: {
       type: String,
       required: true,
-      default: () => process.env.DEFAULT_FACTORY_ID || 'FAC-Austin-01',
+      default: () =>
+        process.env.DASHBOARD_HUB_KEY || process.env.DEFAULT_FACTORY_ID || 'chennai-hub',
     },
     reported_at: { type: Date, default: Date.now },
     resolved_at: { type: Date },

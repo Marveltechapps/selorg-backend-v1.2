@@ -14,6 +14,26 @@ const RestockTask = require('../models/RestockTask');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
 const cache = require('../../utils/cache');
+const multer = require('multer');
+const path = require('path');
+const inventoryBulkImport = require('../services/inventoryBulkImport.service');
+const {
+  deriveInventoryStatus,
+  resolveInventoryItem,
+  syncShelfStockForItem,
+} = require('../utils/inventoryStockSync');
+const cycleCountReportService = require('../services/cycleCountReport.service');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.csv', '.xlsx', '.xls'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) cb(null, true);
+    else cb(new Error('Invalid file type. Only CSV and Excel files are allowed.'));
+  },
+});
 
 /**
  * Get Live Shelf View
@@ -52,7 +72,30 @@ const getShelfView = async (req, res) => {
       shelfQuery.aisle = aisle;
     }
 
-    const shelves = await Shelf.find(shelfQuery).sort({ aisle: 1, shelf_number: 1 }).lean();
+    const sheetItemCount = await InventoryItem.countDocuments({
+      store_id: storeId,
+      imported_via_sheet: true,
+    });
+
+    if (sheetItemCount > 0) {
+      const fromInventory = await inventoryBulkImport.buildShelfViewFromInventory(
+        storeId,
+        zone,
+        req.query.shelf_location
+      );
+      return res.status(200).json(fromInventory);
+    }
+
+    let shelves = await Shelf.find(shelfQuery).sort({ aisle: 1, shelf_number: 1 }).lean();
+
+    if (shelves.length === 0) {
+      const fromInventory = await inventoryBulkImport.buildShelfViewFromInventory(
+        storeId,
+        zone,
+        req.query.shelf_location
+      );
+      return res.status(200).json(fromInventory);
+    }
 
     // Group shelves by aisle
     const aislesData = {};
@@ -146,7 +189,13 @@ const getStockLevels = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 50;
 
-    if (limit > 100) limit = 100;
+    const sheetOnly = req.query.sheetOnly === 'true' || req.query.sheetOnly === true;
+
+    if (sheetOnly) {
+      if (limit > 500) limit = 500;
+    } else if (limit > 100) {
+      limit = 100;
+    }
     if (limit < 1) limit = 50;
 
     const skip = (page - 1) * limit;
@@ -168,6 +217,10 @@ const getStockLevels = async (req, res) => {
       query.status = status;
     }
 
+    if (sheetOnly) {
+      query.imported_via_sheet = true;
+    }
+
     const items = await InventoryItem.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -183,10 +236,12 @@ const getStockLevels = async (req, res) => {
         id: item.id || item.sku,
         sku: item.sku,
         name: item.name,
+        product_name: item.name,
         category: item.category,
         stock: item.stock,
         status: item.status,
         trend: item.trend,
+        location: item.location || '',
       })),
       pagination: {
         current_page: page,
@@ -505,21 +560,36 @@ const getAdjustments = async (req, res) => {
  */
 const createAdjustment = async (req, res) => {
   try {
-    const { sku, mode, quantity, reason_code, notes } = req.body || {};
-    const storeId = req.query.storeId || req.body.storeId || process.env.DEFAULT_STORE_ID;
+    const { sku: skuInput, mode, quantity, reason_code, notes } = req.body || {};
+    const storeId = req.body.storeId || req.query.storeId || process.env.DEFAULT_STORE_ID;
 
-    if (!sku || !mode || quantity === undefined) {
+    if (!skuInput || !mode || quantity === undefined) {
       return res.status(400).json({
         success: false,
         error: 'SKU, mode, and quantity are required',
       });
     }
 
-    const item = await InventoryItem.findOne({ sku, store_id: storeId });
+    const qty = parseInt(String(quantity), 10);
+    if (Number.isNaN(qty) || qty <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Quantity must be a positive whole number',
+      });
+    }
+
+    if (!['add', 'remove', 'damage'].includes(mode)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Mode must be add, remove, or damage',
+      });
+    }
+
+    const item = await resolveInventoryItem(InventoryItem, storeId, skuInput);
     if (!item) {
       return res.status(404).json({
         success: false,
-        error: 'Item not found',
+        error: `No product found for "${String(skuInput).trim()}" in this store`,
       });
     }
 
@@ -527,13 +597,21 @@ const createAdjustment = async (req, res) => {
     let newStock = oldStock;
 
     if (mode === 'add') {
-      newStock = oldStock + quantity;
-    } else if (mode === 'remove' || mode === 'damage') {
-      newStock = Math.max(0, oldStock - quantity);
+      newStock = oldStock + qty;
+    } else {
+      if (qty > oldStock) {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot ${mode === 'damage' ? 'mark damaged' : 'remove'} ${qty} units — only ${oldStock} in stock`,
+        });
+      }
+      newStock = oldStock - qty;
     }
 
     item.stock = newStock;
+    item.status = deriveInventoryStatus(newStock);
     await item.save();
+    await syncShelfStockForItem(item);
 
     const adjustmentId = generateId('ADJ');
     const now = new Date();
@@ -542,15 +620,18 @@ const createAdjustment = async (req, res) => {
       minute: '2-digit',
       hour12: true,
     });
+    const userName =
+      req.user?.name || req.user?.email || req.userId || req.headers['x-user-name'] || 'System';
+    const signedQty = mode === 'add' ? qty : -qty;
 
-    const adjustment = await InventoryAdjustment.create({
+    await InventoryAdjustment.create({
       id: adjustmentId,
       adjustment_id: adjustmentId,
       time: timeString,
-      sku,
+      sku: item.sku,
       action: mode === 'damage' ? 'damage' : mode,
-      quantity: mode === 'remove' || mode === 'damage' ? -quantity : quantity,
-      user: req.userId || 'system',
+      quantity: signedQty,
+      user: userName,
       reason: reason_code || notes || 'Adjustment',
       store_id: storeId,
       mode,
@@ -559,15 +640,14 @@ const createAdjustment = async (req, res) => {
       new_stock: newStock,
     });
 
-    // Create audit log
     await AuditLog.create({
       id: generateId('AUDIT'),
       timestamp: now.toISOString(),
       action_type: 'adjustment',
       action: 'CREATE_ADJUSTMENT',
-      user: req.userId || 'system',
-      sku,
-      details: { mode, quantity, reason: reason_code || notes },
+      user: userName,
+      sku: item.sku,
+      details: { mode, quantity: qty, reason: reason_code || notes },
       changes: {
         stock_before: oldStock,
         stock_after: newStock,
@@ -578,8 +658,12 @@ const createAdjustment = async (req, res) => {
     res.status(200).json({
       success: true,
       adjustment_id: adjustmentId,
-      sku,
+      sku: item.sku,
+      product_name: item.name,
+      old_stock: oldStock,
       new_stock: newStock,
+      action: mode,
+      quantity: qty,
       message: 'Adjustment created successfully',
     });
   } catch (error) {
@@ -598,56 +682,20 @@ const getCycleCount = async (req, res) => {
   try {
     const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
-
-    // Normalize date to ensure YYYY-MM-DD format
-    const normalizedDate = date.split('T')[0];
-
-    // Query with exact match
-    const query = { store_id: storeId, date: normalizedDate };
-
-    const metrics = await CycleCountMetrics.findOne(query).lean();
-    const heatmap = await CycleCountHeatmap.find(query).lean();
-    const varianceReport = await CycleCountVariance.find(query)
-      .sort({ difference: -1 })
-      .lean();
-
-    // If no data found for the requested date, try to find the most recent data for this store
-    let finalMetrics = metrics;
-    let finalHeatmap = heatmap;
-    let finalVarianceReport = varianceReport;
-
-    if (!metrics || heatmap.length === 0 || varianceReport.length === 0) {
-      // Find most recent data for this store
-      const recentMetrics = await CycleCountMetrics.findOne({ store_id: storeId })
-        .sort({ date: -1 })
-        .lean();
-      
-      if (recentMetrics) {
-        const recentDate = recentMetrics.date;
-        finalMetrics = recentMetrics;
-        finalHeatmap = await CycleCountHeatmap.find({ store_id: storeId, date: recentDate }).lean();
-        finalVarianceReport = await CycleCountVariance.find({ store_id: storeId, date: recentDate })
-          .sort({ difference: -1 })
-          .lean();
-      }
-    }
+    const data = await cycleCountReportService.loadCycleCountData(storeId, date);
 
     res.status(200).json({
       success: true,
-      metrics: finalMetrics || {
+      report_date: data.reportDate,
+      metrics: data.metrics || {
         daily_count_progress: { percentage: 0, items_counted: 0, items_total: 0 },
         accuracy_rate: { percentage: 0, target: 99.0 },
         variance_value: { amount: 0, currency: 'INR', items_missing: 0, items_extra: 0 },
       },
-      heatmap: {
-        zones: finalHeatmap.map((zone) => ({
-          zone_id: zone.zone_id,
-          variance_level: zone.variance_level,
-          accuracy: zone.accuracy,
-        })),
-      },
-      variance_report: finalVarianceReport.map((v) => ({
+      heatmap: { zones: data.heatmap || [] },
+      variance_report: (data.variance_report || []).map((v) => ({
         sku: v.sku,
+        product_name: v.product_name,
         expected: v.expected,
         counted: v.counted,
         difference: v.difference,
@@ -668,25 +716,29 @@ const getCycleCount = async (req, res) => {
  */
 const downloadCycleCountReport = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID;
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
-    const format = req.query.format || 'pdf';
+    const format = String(req.query.format || 'pdf').toLowerCase();
 
-    // For now, return metadata. In production, generate actual file
-    const fileName = `cycle_count_report_${date}.${format}`;
-    const contentTypes = {
-      pdf: 'application/pdf',
-      csv: 'text/csv',
-      excel: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    };
+    const data = await cycleCountReportService.loadCycleCountData(storeId, date);
+    const fileDate = data.reportDate || date.split('T')[0];
 
-    // Response format matches YAML - no success field, just file metadata
-    res.status(200).json({
-      content_type: contentTypes[format] || 'application/pdf',
-      file_name: fileName,
-      file_data: 'base64_encoded_file_data_placeholder',
-    });
+    if (format === 'csv') {
+      const csv = cycleCountReportService.buildReportCsv(data);
+      const fileName = `cycle_count_report_${storeId}_${fileDate}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      return res.status(200).send(csv);
+    }
+
+    const pdfBuffer = await cycleCountReportService.buildReportPdfBuffer(data);
+    const fileName = `cycle_count_report_${storeId}_${fileDate}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    return res.status(200).send(pdfBuffer);
   } catch (error) {
+    logger.error('Cycle count report error', { error: error.message });
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to generate report',
@@ -1061,9 +1113,92 @@ const getProductLocation = async (req, res) => {
   }
 };
 
+/**
+ * Bulk import inventory from CSV/Excel sheet
+ * POST /api/darkstore/inventory/bulk-import
+ */
+const bulkImportInventory = async (req, res) => {
+  try {
+    upload.single('file')(req, res, async (err) => {
+      if (err) {
+        return res.status(400).json({ success: false, error: err.message || 'File upload failed' });
+      }
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: 'File is required' });
+      }
+
+      const storeId = req.body.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+      const zone = req.body.zone || 'Zone 1 (Ambient)';
+      const validateOnly = req.body.validateOnly === 'true' || req.body.validateOnly === true;
+      const ext = path.extname(req.file.originalname).toLowerCase();
+
+      try {
+        const rows = await inventoryBulkImport.parseUploadFile(req.file.buffer, ext);
+        if (!rows.length) {
+          return res.status(400).json({
+            success: false,
+            error: 'No data rows found in file. Use the template and include a header row.',
+          });
+        }
+
+        const result = await inventoryBulkImport.processInventoryRows(rows, {
+          storeId,
+          zone,
+          validateOnly,
+          userId: req.user?.id || req.userId || 'SYSTEM',
+          userName: req.user?.name || 'System',
+        });
+
+        res.status(200).json({
+          success: true,
+          uploadId: generateId('UPL'),
+          ...result,
+          message:
+            result.failedRows > 0
+              ? `Imported ${result.processedRows} rows with ${result.failedRows} errors`
+              : validateOnly
+                ? `Validated ${result.processedRows} rows`
+                : `Successfully imported ${result.processedRows} rows`,
+        });
+      } catch (parseErr) {
+        logger.error('Bulk import parse error', { error: parseErr.message });
+        res.status(400).json({
+          success: false,
+          error: parseErr.message || 'Failed to parse upload file',
+        });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to process bulk import',
+    });
+  }
+};
+
+/**
+ * Download inventory import template
+ * GET /api/darkstore/inventory/import-template
+ */
+const downloadInventoryImportTemplate = async (req, res) => {
+  try {
+    const csvContent = inventoryBulkImport.buildTemplateCsv();
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory-import-template.csv"');
+    res.status(200).send(csvContent);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to download template',
+    });
+  }
+};
+
 module.exports = {
   getShelfView,
   getProductLocation,
+  bulkImportInventory,
+  downloadInventoryImportTemplate,
   getStockLevels,
   updateStockLevel,
   deleteInventoryItem,

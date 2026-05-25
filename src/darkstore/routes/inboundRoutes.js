@@ -11,6 +11,7 @@ const {
   assignPutawayTask,
   completePutawayTask,
   getInterStoreTransfers,
+  getTransferDetails,
   receiveInterStoreTransfer,
   syncInterStoreTransfers,
 } = require('../controllers/inboundController');
@@ -47,6 +48,9 @@ router.get('/transfers', getInterStoreTransfers);
 
 // POST /api/darkstore/inbound/transfers/sync
 router.post('/transfers/sync', syncInterStoreTransfers);
+
+// GET /api/darkstore/inbound/transfers/:transferId
+router.get('/transfers/:transferId', getTransferDetails);
 
 // POST /api/darkstore/inbound/transfers/:transferId/receive
 router.post('/transfers/:transferId/receive', receiveInterStoreTransfer);

@@ -12,6 +12,7 @@ const SKUSchema = new Schema({
   competitorAvg: { type: Number, default: 0 },
   margin: { type: Number, default: 0 },
   marginStatus: { type: String, enum: ['healthy', 'warning', 'critical'], default: 'healthy' },
+  marginReviewed: { type: Boolean, default: false },
   stock: { type: Number, default: 0 },
   visibility: {
     'North America': { type: String, enum: ['Visible', 'Hidden'], default: 'Hidden' },

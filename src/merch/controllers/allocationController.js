@@ -1,5 +1,6 @@
 const AllocationService = require('../services/allocationService');
-const WarehouseAllocation = require('../models/WarehouseAllocation');
+const SkuAllocationService = require('../services/skuAllocationService');
+const AllocationAlert = require('../models/AllocationAlert');
 const { apiResponse } = require('../../utils/apiResponse');
 
 class AllocationController {
@@ -100,13 +101,10 @@ class AllocationController {
     }
   }
 
-  /** GET /allocation — list recent warehouse allocations */
+  /** GET /allocation — SKU × location allocations */
   static async getAllocations(req, res) {
     try {
-      const list = await WarehouseAllocation.find({})
-        .sort({ allocationDate: -1 })
-        .limit(100)
-        .lean();
+      const list = await SkuAllocationService.listAllocations();
       res.status(200).json(apiResponse.success(list, 'Allocations retrieved successfully'));
     } catch (error) {
       res.status(400).json(apiResponse.error(error.message, 400));
@@ -117,65 +115,111 @@ class AllocationController {
   static async getAllocationHistory(req, res) {
     try {
       const { skuId } = req.params;
-      const docs = await WarehouseAllocation.find({ 'allocations.sku': skuId })
-        .sort({ allocationDate: -1 })
-        .limit(50)
-        .lean();
-      res.status(200).json(apiResponse.success(docs, 'Allocation history retrieved successfully'));
+      const history = await SkuAllocationService.getAllocationHistory(skuId);
+      res.status(200).json(apiResponse.success(history, 'Allocation history retrieved successfully'));
     } catch (error) {
       res.status(400).json(apiResponse.error(error.message, 400));
     }
   }
 
-  /** PUT /allocation/:id — update allocation rule by ruleId */
+  /** PUT /allocation/:id — update SKU location allocation */
   static async updateAllocation(req, res) {
     try {
       const { id } = req.params;
-      const rule = await AllocationService.updateAllocationRule(id, req.body);
-      if (!rule) {
-        return res.status(404).json(apiResponse.error('Allocation rule not found', 404));
+      const updated = await SkuAllocationService.updateAllocation(id, req.body);
+      if (!updated) {
+        return res.status(404).json(apiResponse.error('Allocation not found', 404));
       }
-      res.status(200).json(apiResponse.success(rule, 'Allocation updated successfully'));
+      res.status(200).json(apiResponse.success(updated, 'Allocation updated successfully'));
     } catch (error) {
       res.status(400).json(apiResponse.error(error.message, 400));
     }
   }
 
   static async getAlerts(req, res) {
-    res.status(200).json(apiResponse.success([], 'No allocation alerts configured'));
+    try {
+      await SkuAllocationService.syncAlertsFromAllocations();
+      const alerts = await SkuAllocationService.listAlerts();
+      res.status(200).json(apiResponse.success(alerts, 'Allocation alerts retrieved'));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
   }
 
   static async createAlert(req, res) {
-    res.status(501).json(apiResponse.error('Allocation alerts are not implemented', 501));
+    try {
+      const alert = await AllocationAlert.create(req.body);
+      res.status(201).json(apiResponse.success(alert, 'Alert created'));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
   }
 
   static async updateAlertStatus(req, res) {
-    res.status(501).json(apiResponse.error('Allocation alerts are not implemented', 501));
+    try {
+      const { id } = req.params;
+      const status = req.body?.status ?? 'dismissed';
+      if (status === 'dismissed') {
+        const alert = await SkuAllocationService.dismissAlert(id);
+        if (!alert) {
+          return res.status(404).json(apiResponse.error('Alert not found', 404));
+        }
+        return res.status(200).json(apiResponse.success(alert, 'Alert dismissed'));
+      }
+      res.status(400).json(apiResponse.error('Unsupported status', 400));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
   }
 
   static async rebalanceAllocations(req, res) {
     try {
-      const metrics = await AllocationService.calculateAllocationMetrics();
-      res.status(200).json(apiResponse.success(metrics, 'Rebalance metrics computed'));
+      const { updates } = req.body ?? {};
+      const result = await SkuAllocationService.rebalance(updates ?? []);
+      res.status(200).json(apiResponse.success(result, 'Rebalance completed'));
     } catch (error) {
       res.status(400).json(apiResponse.error(error.message, 400));
     }
   }
 
   static async autoRebalance(req, res) {
-    return AllocationController.rebalanceAllocations(req, res);
+    try {
+      const result = await SkuAllocationService.autoRebalance(req.body ?? {});
+      res.status(200).json(apiResponse.success(result, 'Auto rebalance completed'));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
   }
 
   static async seedAllocationData(req, res) {
     if (process.env.NODE_ENV === 'production') {
       return res.status(403).json(apiResponse.error('Seed is disabled in production', 403));
     }
-    res.status(501).json(apiResponse.error('Seed not implemented', 501));
+    try {
+      const result = await SkuAllocationService.seedAllocationData();
+      res.status(200).json(apiResponse.success(result, 'Allocation data seeded'));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
+  }
+
+  static async getLocations(req, res) {
+    try {
+      const locations = await SkuAllocationService.listLocations();
+      res.status(200).json(apiResponse.success(locations, 'Locations retrieved'));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
   }
 
   static async createTransferOrder(req, res) {
-    const TransferOrderController = require('./transferOrderController');
-    return TransferOrderController.createTransferOrder(req, res);
+    try {
+      const createdBy = req.user?.id || req.user?._id;
+      const order = await SkuAllocationService.createTransferFromAllocation(req.body, createdBy);
+      res.status(201).json(apiResponse.success(order, 'Transfer order created successfully'));
+    } catch (error) {
+      res.status(400).json(apiResponse.error(error.message, 400));
+    }
   }
 }
 

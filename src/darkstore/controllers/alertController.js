@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const CustomerCall = require('../models/CustomerCall');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
+const { invalidateDarkstore } = require('../cacheInvalidation');
 
 const DEFAULT_ALERT_STORE_ID = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
@@ -353,6 +354,8 @@ const performAlertAction = async (req, res) => {
       message = 'Call initiated to rider';
     }
 
+    await invalidateDarkstore();
+
     res.status(200).json({
       success: true,
       alert: transformedAlert,
@@ -378,8 +381,12 @@ const clearResolvedAlerts = async (req, res) => {
 
     let query;
     if (ids.length > 0) {
-      // Delete exactly what the client asked to clear (visible resolved rows)
-      query = { alert_id: { $in: ids } };
+      // Delete visible resolved rows for this store only
+      query = {
+        alert_id: { $in: ids },
+        store_id: storeId,
+        status: { $in: ['resolved', 'dismissed'] },
+      };
     } else {
       query = {
         store_id: storeId,
@@ -388,6 +395,8 @@ const clearResolvedAlerts = async (req, res) => {
     }
 
     const deleteResult = await Alert.deleteMany(query);
+
+    await invalidateDarkstore();
 
     res.status(200).json({
       success: true,

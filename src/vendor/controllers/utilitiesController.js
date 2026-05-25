@@ -6,6 +6,7 @@ const VendorContract = require('../models/VendorContract');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
 const { mergeHubFilter, hubFieldsForCreate, getEffectiveHubKey } = require('../constants/hubScope');
+const vendorBulkUploadService = require('../services/vendorBulkUploadService');
 
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -31,29 +32,50 @@ function estimateCsvRows(buffer) {
 }
 
 // ---- Upload History ----
+const getBulkUploadTemplate = async (req, res) => {
+  try {
+    const csv = vendorBulkUploadService.buildTemplateCsv();
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="vendor-bulk-upload-template.csv"'
+    );
+    res.status(200).send(csv);
+  } catch (error) {
+    logger.error('Vendor bulk upload template error:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate template' });
+  }
+};
+
 const bulkUpload = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'File is required' });
     }
-    const uploadedBy = req.body.uploadedBy || req.user?.name || 'Current User';
+    const uploadedBy = req.body.uploadedBy || req.user?.name || req.user?.email || 'Current User';
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (!['.csv', '.xlsx', '.xls'].includes(ext)) {
+      return res.status(400).json({ success: false, error: 'Invalid file type. Only CSV and Excel allowed.' });
+    }
+
+    const result = await vendorBulkUploadService.processBulkVendorUpload({
+      buffer: req.file.buffer,
+      ext: ext === '.xls' ? '.xlsx' : ext,
+      uploadedBy,
+    });
 
     const uploadId = generateId('UPL');
     const now = new Date().toISOString();
-    const ext = path.extname(req.file.originalname).toLowerCase();
-    const totalRows = ext === '.csv' ? estimateCsvRows(req.file.buffer) : 0;
-    const processedRows = totalRows;
-    const failedRows = 0;
 
     await BulkUpload.create({
       upload_id: uploadId,
       store_id: getEffectiveHubKey(),
       file_name: req.file.originalname,
-      total_rows: totalRows,
-      processed_rows: processedRows,
-      failed_rows: failedRows,
-      errorLogs: [],
-      status: 'completed',
+      total_rows: result.totalRows,
+      processed_rows: result.processedRows,
+      failed_rows: result.failedRows,
+      errorLogs: result.errorLogs,
+      status: result.status,
       validate_only: false,
       upload_type: 'vendors',
       uploaded_by: uploadedBy,
@@ -68,27 +90,34 @@ const bulkUpload = async (req, res) => {
       user: 'SYSTEM',
       user_id: req.user?.id || 'SYSTEM',
       user_name: uploadedBy,
-      module: 'settings',
+      module: 'Vendor Management',
       action: 'BULK_UPLOAD',
       details: {
         uploadId,
         fileName: req.file.originalname,
         uploadType: 'vendors',
-        processedRows,
-        totalRows,
+        processedRows: result.processedRows,
+        totalRows: result.totalRows,
+        failedRows: result.failedRows,
       },
       store_id: getEffectiveHubKey(),
       ip_address: req.ip || req.connection?.remoteAddress,
     });
 
+    const message =
+      result.failedRows > 0
+        ? `Imported ${result.processedRows} of ${result.totalRows} vendors (${result.failedRows} failed)`
+        : `Successfully imported ${result.processedRows} vendor(s)`;
+
     res.status(200).json({
-      success: true,
+      success: result.processedRows > 0 || result.totalRows === 0,
       uploadId,
       fileName: req.file.originalname,
-      recordsProcessed: processedRows,
-      totalRows,
-      failedRows,
-      message: 'Upload completed successfully',
+      recordsProcessed: result.processedRows,
+      totalRows: result.totalRows,
+      failedRows: result.failedRows,
+      errors: result.errorLogs,
+      message,
     });
   } catch (error) {
     logger.error('Vendor bulk upload error:', error);
@@ -373,6 +402,7 @@ const exportAuditLogs = async (req, res) => {
 
 module.exports = {
   upload,
+  getBulkUploadTemplate,
   bulkUpload,
   getUploadHistory,
   getContracts,

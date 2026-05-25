@@ -4,6 +4,8 @@ const {
   getQCSummary,
   getQCInspections,
   createQCInspection,
+  updateQCInspection,
+  deleteQCInspection,
   getTemperatureLogs,
   createTemperatureLog,
   getComplianceChecks,
@@ -12,6 +14,7 @@ const {
   getSampleTests,
   createSampleTest,
   updateSampleResult,
+  deleteSampleTest,
   getRejections,
   createRejection,
   getQCFailures,
@@ -29,6 +32,8 @@ const {
 router.get('/summary', getQCSummary);
 router.get('/inspections', getQCInspections);
 router.post('/inspections', createQCInspection);
+router.put('/inspections/:id', updateQCInspection);
+router.delete('/inspections/:id', deleteQCInspection);
 router.get('/temperature', getTemperatureLogs);
 router.post('/temperature', createTemperatureLog);
 router.get('/checks', getComplianceChecks);
@@ -37,6 +42,7 @@ router.get('/docs', getComplianceDocs);
 router.get('/samples', getSampleTests);
 router.post('/samples', createSampleTest);
 router.put('/samples/:sampleId', updateSampleResult);
+router.delete('/samples/:sampleId', deleteSampleTest);
 router.get('/rejections', getRejections);
 router.post('/rejections', createRejection);
 router.get('/history', getActionHistory);

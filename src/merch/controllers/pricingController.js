@@ -383,26 +383,30 @@ const getReferencesZones = async (req, res, next) => {
 const getPricingSKUs = async (req, res, next) => {
   try {
     const skus = await SKU.find().lean();
-    const formatted = skus.map((s) => ({
-      ...s,
-      id: String(s._id),
-      sku: s.code,
-      code: s.code,
-      base: s.basePrice ?? s.sellingPrice ?? 0,
-      sell: s.sellingPrice ?? s.basePrice ?? 0,
-      currentPrice: s.sellingPrice ?? 0,
-      basePrice: s.basePrice ?? 0,
-      competitor: s.competitorAvg ?? 0,
-      competitorPrice: s.competitorAvg ?? 0,
-      margin: s.margin ?? 0,
-      marginStatus: s.marginStatus || 'healthy',
-      history: s.history || [],
-    }));
+    const formatted = skus.map((s) => formatSkuForApi(s));
     res.status(200).json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
     next(err);
   }
 };
+
+function formatSkuForApi(s) {
+  return {
+    ...s,
+    id: String(s._id),
+    sku: s.code,
+    code: s.code,
+    base: s.basePrice ?? s.sellingPrice ?? 0,
+    sell: s.sellingPrice ?? s.basePrice ?? 0,
+    currentPrice: s.sellingPrice ?? 0,
+    basePrice: s.basePrice ?? 0,
+    competitor: s.competitorAvg ?? 0,
+    competitorPrice: s.competitorAvg ?? 0,
+    margin: s.margin ?? 0,
+    marginStatus: s.marginStatus || 'healthy',
+    history: s.history || [],
+  };
+}
 
 const updateSKUPrice = async (req, res, next) => {
   try {
@@ -418,9 +422,65 @@ const updateSKUPrice = async (req, res, next) => {
     if (body.margin !== undefined) {
       body.marginStatus = body.margin < 10 ? 'critical' : body.margin < 15 ? 'warning' : 'healthy';
     }
+    if (body.marginReviewed === true) {
+      body.marginReviewed = true;
+    } else if (body.sellingPrice !== undefined && body.sellingPrice !== sku.sellingPrice) {
+      body.marginReviewed = false;
+    }
+    const prevSell = sku.sellingPrice;
+    if (body.sellingPrice !== undefined && body.sellingPrice !== prevSell) {
+      const monthLabel = new Date().toLocaleString('en-US', { month: 'short' });
+      const historyEntry = {
+        date: monthLabel,
+        price: body.sellingPrice,
+        competitor: body.competitorAvg ?? sku.competitorAvg ?? 0,
+      };
+      body.history = [...(sku.history || []), historyEntry].slice(-12);
+    }
     sku = await SKU.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true });
-    const formatted = { ...sku.toObject(), id: String(sku._id) };
-    res.status(200).json({ success: true, data: formatted });
+    res.status(200).json({ success: true, data: formatSkuForApi(sku.toObject()) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const bulkUpdateSKUPrices = async (req, res, next) => {
+  try {
+    const updates = Array.isArray(req.body.updates) ? req.body.updates : [];
+    if (updates.length === 0) {
+      return next(new ErrorResponse('updates array is required', 400));
+    }
+    const results = [];
+    for (const item of updates) {
+      const id = item.id || item._id;
+      if (!id) continue;
+      const sku = await SKU.findById(id);
+      if (!sku) continue;
+      const body = {};
+      if (item.base !== undefined) body.basePrice = item.base;
+      if (item.basePrice !== undefined) body.basePrice = item.basePrice;
+      if (item.sell !== undefined) body.sellingPrice = item.sell;
+      if (item.sellingPrice !== undefined) body.sellingPrice = item.sellingPrice;
+      if (item.competitor !== undefined) body.competitorAvg = item.competitor;
+      const cost = sku.cost ?? 0;
+      const sell = body.sellingPrice ?? sku.sellingPrice;
+      if (sell > 0 && cost > 0) body.margin = parseFloat((((sell - cost) / sell) * 100).toFixed(1));
+      if (body.margin !== undefined) {
+        body.marginStatus = body.margin < 10 ? 'critical' : body.margin < 15 ? 'warning' : 'healthy';
+      }
+      if (body.sellingPrice !== undefined && body.sellingPrice !== sku.sellingPrice) {
+        const monthLabel = new Date().toLocaleString('en-US', { month: 'short' });
+        body.history = [...(sku.history || []), {
+          date: monthLabel,
+          price: body.sellingPrice,
+          competitor: sku.competitorAvg ?? 0,
+        }].slice(-12);
+        body.marginReviewed = false;
+      }
+      const updated = await SKU.findByIdAndUpdate(id, body, { new: true, runValidators: true });
+      if (updated) results.push(formatSkuForApi(updated.toObject()));
+    }
+    res.status(200).json({ success: true, count: results.length, data: results });
   } catch (err) {
     next(err);
   }
@@ -429,17 +489,33 @@ const updateSKUPrice = async (req, res, next) => {
 // --- Pending Updates ---
 const getPendingUpdates = async (req, res, next) => {
   try {
-    const updates = await PriceChange.find({ status: 'Pending' }).lean();
-    const formatted = updates.map((u) => ({
-      ...u,
-      id: String(u._id),
-      sku: u.sku,
-      oldPrice: u.currentPrice,
-      newPrice: u.proposedPrice,
-      date: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '',
-      reason: u.marginImpact || u.requestedBy || '',
-      source: u.requestedBy || 'manual',
-    }));
+    const updates = await PriceChange.find({ status: 'Pending' }).sort({ createdAt: -1 }).lean();
+    const formatted = updates.map((u) => {
+      const oldPrice = u.currentPrice ?? 0;
+      const newPrice = u.proposedPrice ?? 0;
+      const marginImpact = u.marginImpact
+        || (oldPrice > 0 ? `${(((newPrice - oldPrice) / oldPrice) * 100).toFixed(1)}%` : '—');
+      return {
+        ...u,
+        id: String(u._id),
+        sku: u.sku,
+        skuName: u.productName || u.sku,
+        productName: u.productName || u.sku,
+        oldPrice,
+        newPrice,
+        currentPrice: oldPrice,
+        proposedPrice: newPrice,
+        marginImpact,
+        date: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '',
+        effectiveDate: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '',
+        reason: u.marginImpact || u.requestedBy || 'Price change request',
+        source: (u.requestedBy || 'manual').toLowerCase().includes('rule') ? 'rule' : 'manual',
+        user: u.requestedBy || 'system',
+        requestedBy: u.requestedBy || 'system',
+        priority: u.priority || 'medium',
+        status: u.status || 'Pending',
+      };
+    });
     res.status(200).json({ success: true, count: formatted.length, data: formatted });
   } catch (err) {
     next(err);
@@ -520,6 +596,7 @@ const updateSurgeConfig = async (req, res, next) => {
 module.exports = {
   getPricingSKUs,
   updateSKUPrice,
+  bulkUpdateSKUPrices,
   getSurgeRules,
   createSurgeRule,
   updateSurgeRule,

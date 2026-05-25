@@ -2,6 +2,8 @@ const Zone = require('../models/Zone');
 const ZoneAudit = require('../models/ZoneAudit');
 const Store = require('../models/Store');
 const City = require('../models/City');
+const Campaign = require('../models/Campaign');
+const { PricingCoupon } = require('../models/PricingCoupon');
 const Order = require('../../warehouse/models/Order');
 const Rider = require('../../rider/models/Rider');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
@@ -420,11 +422,57 @@ const getHistory = async (req, res, next) => {
   }
 };
 
-// @desc    Get overlap warnings (placeholder - returns empty; can implement geo overlap logic later)
+function pointInPolygon(point, polygon = []) {
+  if (!polygon || polygon.length < 3) return false;
+  const x = Number(point.lng);
+  const y = Number(point.lat);
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = Number(polygon[i].lng);
+    const yi = Number(polygon[i].lat);
+    const xj = Number(polygon[j].lng);
+    const yj = Number(polygon[j].lat);
+    const intersect = ((yi > y) !== (yj > y))
+      && (x < ((xj - xi) * (y - yi)) / (yj - yi + 0.0000001) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonsOverlap(polyA = [], polyB = []) {
+  if (polyA.length < 3 || polyB.length < 3) return false;
+  for (const p of polyA) {
+    if (pointInPolygon(p, polyB)) return true;
+  }
+  for (const p of polyB) {
+    if (pointInPolygon(p, polyA)) return true;
+  }
+  return false;
+}
+
+// @desc    Get overlap warnings between zone polygons
 // @route   GET /api/v1/merch/geofence/overlaps
 const getOverlaps = async (req, res, next) => {
   try {
-    res.status(200).json({ success: true, data: [] });
+    const zones = await Zone.find({ status: { $ne: 'deleted' } }).lean();
+    const warnings = [];
+    for (let i = 0; i < zones.length; i++) {
+      for (let j = i + 1; j < zones.length; j++) {
+        const a = zones[i];
+        const b = zones[j];
+        if (!polygonsOverlap(a.polygon, b.polygon)) continue;
+        warnings.push({
+          id: `${a._id}-${b._id}`,
+          zoneA: a.name,
+          zoneB: b.name,
+          zoneAId: a._id.toString(),
+          zoneBId: b._id.toString(),
+          severity: 'warning',
+          message: `${a.name} overlaps with ${b.name}`,
+        });
+      }
+    }
+    res.status(200).json({ success: true, data: warnings });
   } catch (err) {
     next(err);
   }
@@ -463,12 +511,242 @@ const toggleZoneStatus = async (req, res, next) => {
   }
 };
 
+function orderRevenueExpr() {
+  return {
+    $ifNull: [
+      '$total_bill',
+      { $ifNull: ['$totalBill', { $ifNull: ['$amount', 0] }] },
+    ],
+  };
+}
+
+async function campaignRedemptionsForZone(zoneName, since) {
+  const campaigns = await Campaign.find({
+    status: { $in: ['Active', 'Scheduled'] },
+    campaignCategory: { $in: ['promo', 'clearance'] },
+    createdAt: { $gte: since },
+    $or: [
+      { target: { $regex: zoneName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+      { scope: { $regex: zoneName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+      { tagline: { $regex: zoneName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+    ],
+  }).lean();
+  const orderSum = campaigns.reduce((sum, c) => sum + Number(c.performance?.orders ?? 0), 0);
+  if (orderSum > 0) return orderSum;
+  return campaigns.filter((c) => c.status === 'Active').length;
+}
+
+async function couponRedemptionsForZone(zoneName) {
+  const coupons = await PricingCoupon.find({
+    status: 'active',
+    $or: [
+      { targetZones: zoneName },
+      { targetZones: { $size: 0 } },
+      { targetZones: { $exists: false } },
+    ],
+  }).lean();
+  return coupons.reduce((sum, c) => {
+    const zones = c.targetZones || [];
+    if (zones.length === 0) return sum + Math.round((c.usageCount ?? 0) / 10);
+    if (zones.includes(zoneName)) return sum + Number(c.usageCount ?? 0);
+    return sum;
+  }, 0);
+}
+
+function isActiveZoneStatus(status) {
+  const s = String(status ?? 'active').toLowerCase();
+  return s === 'active' || s === 'testing';
+}
+
+function pickTopPromoZone(rows) {
+  if (!rows?.length) {
+    return { topPromoZone: '—', topPromoMetric: 'redemptions', topPromoValue: 0 };
+  }
+  const totals = rows.reduce(
+    (acc, r) => ({
+      revenue: acc.revenue + r.revenue,
+      orders: acc.orders + r.orders,
+      redemptions: acc.redemptions + r.redemptions,
+    }),
+    { revenue: 0, orders: 0, redemptions: 0 },
+  );
+  const pickMax = (key) => rows.reduce((best, r) => (r[key] > best[key] ? r : best), rows[0]);
+  if (totals.redemptions > 0) {
+    const top = pickMax('redemptions');
+    return { topPromoZone: top.zoneName, topPromoMetric: 'redemptions', topPromoValue: top.redemptions };
+  }
+  if (totals.revenue > 0) {
+    const top = pickMax('revenue');
+    return { topPromoZone: top.zoneName, topPromoMetric: 'revenue', topPromoValue: top.revenue };
+  }
+  if (totals.orders > 0) {
+    const top = pickMax('orders');
+    return { topPromoZone: top.zoneName, topPromoMetric: 'orders', topPromoValue: top.orders };
+  }
+  return { topPromoZone: rows[0].zoneName, topPromoMetric: 'redemptions', topPromoValue: 0 };
+}
+
+async function buildPromoHeatmapRows(days = 30) {
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const zones = (await Zone.find().sort({ name: 1 }).lean())
+    .filter((z) => z.isVisible !== false);
+  const zoneNames = zones.map((z) => z.name).filter(Boolean);
+
+  const orderAgg = zoneNames.length
+    ? await Order.aggregate([
+      { $match: { zone: { $in: zoneNames }, createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: '$zone',
+          revenue: { $sum: orderRevenueExpr() },
+          orders: { $sum: 1 },
+        },
+      },
+    ])
+    : [];
+
+  const orderByZone = Object.fromEntries(orderAgg.map((r) => [r._id, r]));
+
+  const rows = await Promise.all(zones.map(async (z) => {
+    const analytics = await buildComputedAnalytics(z);
+    const orderRow = orderByZone[z.name] || {};
+    const revenue = Number(orderRow.revenue ?? analytics.revenue ?? 0);
+    const orders = Number(orderRow.orders ?? analytics.dailyOrders ?? analytics.totalOrders ?? 0);
+    const couponRedemptions = await couponRedemptionsForZone(z.name);
+    const campaignRedemptions = await campaignRedemptionsForZone(z.name, since);
+    const redemptions = couponRedemptions + campaignRedemptions;
+
+    return {
+      zoneId: z._id.toString(),
+      zoneName: z.name,
+      color: z.color || '#3b82f6',
+      revenue,
+      orders,
+      redemptions,
+      promoCount: Number(z.promoCount ?? 0),
+      areaSqKm: polygonAreaSqKm(z.polygon) || Number(z.areaSqKm ?? 0),
+    };
+  }));
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      revenue: acc.revenue + r.revenue,
+      orders: acc.orders + r.orders,
+      redemptions: acc.redemptions + r.redemptions,
+    }),
+    { revenue: 0, orders: 0, redemptions: 0 },
+  );
+
+  return { days, rows, totals };
+}
+
+// @desc    Geofence KPI stats (zones, coverage, top promo zone)
+// @route   GET /api/v1/merch/geofence/stats
+const getGeofenceStats = async (req, res, next) => {
+  try {
+    const heatmapDays = Math.min(90, Math.max(1, parseInt(req.query.heatmapDays, 10) || 30));
+    const [zones, stores, heatmap] = await Promise.all([
+      Zone.find().lean(),
+      Store.find({
+        $or: [
+          { 'metadata.geofenceDemo': true },
+          { serviceStatus: { $in: ['Full', 'Partial', 'None'] } },
+          { x: { $exists: true } },
+          { latitude: { $exists: true, $ne: null } },
+        ],
+      }).lean(),
+      buildPromoHeatmapRows(heatmapDays),
+    ]);
+
+    const activeZones = zones.filter((z) => isActiveZoneStatus(z.status)).length;
+    const totalArea = Math.round(
+      zones.reduce((sum, z) => sum + (Number(z.areaSqKm) || polygonAreaSqKm(z.polygon) || 0), 0) * 100,
+    ) / 100;
+
+    const storesFullyCovered = stores.filter((s) => s.serviceStatus === 'Full').length;
+    const storesPartial = stores.filter((s) => s.serviceStatus === 'Partial').length;
+    const storesNone = stores.filter((s) => !s.serviceStatus || s.serviceStatus === 'None').length;
+    const promoPick = pickTopPromoZone(heatmap.rows);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalZones: zones.length,
+        activeZones,
+        inactiveZones: zones.length - activeZones,
+        totalArea,
+        storesTotal: stores.length,
+        storesFullyCovered,
+        storesPartial,
+        storesNone,
+        heatmapDays,
+        heatmapTotals: heatmap.totals,
+        ...promoPick,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Promo heatmap metrics per zone (revenue, orders, redemptions)
+// @route   GET /api/v1/merch/geofence/heatmap
+const getPromoHeatmap = async (req, res, next) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
+    const { rows, totals } = await buildPromoHeatmapRows(days);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        days,
+        periodLabel: `Last ${days} Days • All Campaigns`,
+        rows,
+        totals,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // @desc    Get all stores
 // @route   GET /api/v1/merch/geofence/stores
 const getStores = async (req, res, next) => {
   try {
-    const stores = await Store.find();
+    const stores = await Store.find({
+      $or: [
+        { 'metadata.geofenceDemo': true },
+        { serviceStatus: { $in: ['Full', 'Partial', 'None'] } },
+        { x: { $exists: true } },
+        { latitude: { $exists: true, $ne: null } },
+      ],
+    }).lean();
     res.status(200).json({ success: true, count: stores.length, data: stores });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Update store zone assignment / service status
+// @route   PUT /api/v1/merch/geofence/stores/:id
+const updateStore = async (req, res, next) => {
+  try {
+    const patch = {};
+    if (Array.isArray(req.body.zones)) patch.zones = req.body.zones.map(String);
+    if (req.body.serviceStatus != null) patch.serviceStatus = req.body.serviceStatus;
+    if (req.body.zoneId != null) patch.zoneId = req.body.zoneId;
+
+    const store = await Store.findByIdAndUpdate(req.params.id, patch, {
+      new: true,
+      runValidators: false,
+    });
+    if (!store) {
+      return next(new ErrorResponse(`Store not found with id of ${req.params.id}`, 404));
+    }
+    res.status(200).json({ success: true, data: store });
   } catch (err) {
     next(err);
   }
@@ -548,11 +826,52 @@ const seedGeofenceData = async (req, res, next) => {
     await Zone.deleteMany({});
     await Zone.insertMany(mockZones);
 
-    await Store.deleteMany({});
+    await Store.deleteMany({
+      $or: [
+        { 'metadata.geofenceDemo': true },
+        { code: { $in: ['GEO-MAIN', 'GEO-WEST', 'GEO-NORTH'] } },
+      ],
+    });
     await Store.insertMany([
-      { name: 'Main St. Express', address: '123 Main St, Downtown', x: 42, y: 38, zones: ['Downtown Core'], serviceStatus: 'Full' },
-      { name: 'Westside Market', address: '456 West Blvd, West End', x: 18, y: 52, zones: ['West End Hub'], serviceStatus: 'Full' },
-      { name: 'North Hills Outpost', address: '789 North Rd, North Hills', x: 72, y: 22, zones: [], serviceStatus: 'Partial' },
+      {
+        code: 'GEO-MAIN',
+        name: 'Main St. Express',
+        type: 'store',
+        address: '123 Main St, Downtown',
+        x: 42,
+        y: 38,
+        latitude: 19.071,
+        longitude: 72.8827,
+        zones: ['Downtown Core'],
+        serviceStatus: 'Full',
+        metadata: { geofenceDemo: true },
+      },
+      {
+        code: 'GEO-WEST',
+        name: 'Westside Market',
+        type: 'store',
+        address: '456 West Blvd, West End',
+        x: 18,
+        y: 52,
+        latitude: 19.045,
+        longitude: 72.845,
+        zones: ['West End Hub'],
+        serviceStatus: 'Full',
+        metadata: { geofenceDemo: true },
+      },
+      {
+        code: 'GEO-NORTH',
+        name: 'North Hills Outpost',
+        type: 'store',
+        address: '789 North Rd, North Hills',
+        x: 72,
+        y: 22,
+        latitude: 19.085,
+        longitude: 72.865,
+        zones: [],
+        serviceStatus: 'Partial',
+        metadata: { geofenceDemo: true },
+      },
     ]);
 
     res.status(201).json({ success: true, message: 'Geofence data seeded successfully' });
@@ -570,6 +889,9 @@ module.exports = {
   toggleZoneStatus,
   getHistory,
   getOverlaps,
+  getPromoHeatmap,
+  getGeofenceStats,
   getStores,
+  updateStore,
   seedGeofenceData,
 };

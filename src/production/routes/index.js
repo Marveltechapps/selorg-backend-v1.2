@@ -37,7 +37,7 @@ const protectedRouter = express.Router();
 protectedRouter.use(authenticateToken, requireRole('production', 'admin', 'super_admin'));
 protectedRouter.use(
   cacheMiddleware(appConfig.cache.production, {
-    skipPaths: ['/overview', '/planning'],
+    skipPaths: ['/overview', '/planning', '/qc', '/maintenance', '/dashboard/alerts', '/dashboard/incidents'],
   })
 );
 protectedRouter.use('/overview', overviewRoutes);

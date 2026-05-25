@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const ProductionAlert = require('../models/ProductionAlert');
 const ProductionIncident = require('../models/ProductionIncident');
 const ProductionSyncHistory = require('../models/ProductionSyncHistory');
@@ -16,6 +17,70 @@ const Attendance = require('../models/Attendance');
 // Production dashboard tenant scoping: default to the configured dashboard hub.
 const DEFAULT_FACTORY =
   process.env.DASHBOARD_HUB_KEY || process.env.DEFAULT_FACTORY_ID || 'chennai-hub';
+
+function decodeParam(value) {
+  try {
+    return decodeURIComponent(String(value ?? ''));
+  } catch {
+    return String(value ?? '');
+  }
+}
+
+function getFactoryId(req) {
+  return req.body?.factoryId || req.query?.factoryId || req.query?.storeId || req.body?.storeId || DEFAULT_FACTORY;
+}
+
+function toAlertDto(a) {
+  return {
+    id: a.alert_id,
+    title: a.title,
+    description: a.description,
+    severity: a.severity,
+    category: a.category,
+    status: a.status,
+    timestamp: a.created_at,
+    location: a.location,
+    assignedTo: a.assigned_to,
+    resolvedBy: a.resolved_by,
+    resolvedAt: a.resolved_at,
+  };
+}
+
+function toIncidentDto(i) {
+  return {
+    id: i.incident_id,
+    title: i.title,
+    description: i.description,
+    severity: i.severity,
+    category: i.category,
+    reportedBy: i.reported_by,
+    location: i.location,
+    timestamp: i.reported_at,
+    status: i.status,
+  };
+}
+
+async function findProductionAlert(factoryId, alertId) {
+  const id = decodeParam(alertId).trim();
+  if (!id) return null;
+
+  let alert = await ProductionAlert.findOne({ alert_id: id, factory_id: factoryId });
+  if (!alert && mongoose.Types.ObjectId.isValid(id)) {
+    alert = await ProductionAlert.findOne({ _id: id, factory_id: factoryId });
+  }
+  return alert;
+}
+
+async function findProductionIncident(factoryId, incidentId) {
+  const id = decodeParam(incidentId).trim();
+  if (!id) return null;
+
+  let incident = await ProductionIncident.findOne({ incident_id: id, factory_id: factoryId });
+  if (!incident && mongoose.Types.ObjectId.isValid(id)) {
+    incident = await ProductionIncident.findOne({ _id: id, factory_id: factoryId });
+  }
+  return incident;
+}
 
 // ---- Alerts ----
 const getProductionAlerts = async (req, res) => {
@@ -59,19 +124,7 @@ const getProductionAlerts = async (req, res) => {
       ['active', 'acknowledged'].includes(a.status)
     ).length;
 
-    const transformed = alerts.map((a) => ({
-      id: a.alert_id,
-      title: a.title,
-      description: a.description,
-      severity: a.severity,
-      category: a.category,
-      status: a.status,
-      timestamp: a.created_at,
-      location: a.location,
-      assignedTo: a.assigned_to,
-      resolvedBy: a.resolved_by,
-      resolvedAt: a.resolved_at,
-    }));
+    const transformed = alerts.map((a) => toAlertDto(a));
 
     res.status(200).json({
       success: true,
@@ -92,9 +145,9 @@ const updateProductionAlertStatus = async (req, res) => {
   try {
     const { alertId } = req.params;
     const { actionType, assignee } = req.body;
-    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
+    const factoryId = getFactoryId(req);
 
-    const alert = await ProductionAlert.findOne({ alert_id: alertId, factory_id: factoryId });
+    const alert = await findProductionAlert(factoryId, alertId);
     if (!alert) {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
@@ -125,19 +178,7 @@ const updateProductionAlertStatus = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      alert: {
-        id: alert.alert_id,
-        title: alert.title,
-        description: alert.description,
-        severity: alert.severity,
-        category: alert.category,
-        status: alert.status,
-        timestamp: alert.created_at,
-        location: alert.location,
-        assignedTo: alert.assigned_to,
-        resolvedBy: alert.resolved_by,
-        resolvedAt: alert.resolved_at,
-      },
+      alert: toAlertDto(alert.toObject()),
       message: `Alert ${actionType} successfully`,
     });
   } catch (error) {
@@ -149,11 +190,12 @@ const updateProductionAlertStatus = async (req, res) => {
 const deleteProductionAlert = async (req, res) => {
   try {
     const { alertId } = req.params;
-    const factoryId = req.query.factoryId || req.query.storeId || req.body?.factoryId || DEFAULT_FACTORY;
-    const result = await ProductionAlert.deleteOne({ alert_id: alertId, factory_id: factoryId });
-    if (result.deletedCount === 0) {
+    const factoryId = getFactoryId(req);
+    const alert = await findProductionAlert(factoryId, alertId);
+    if (!alert) {
       return res.status(404).json({ success: false, error: 'Alert not found' });
     }
+    await ProductionAlert.deleteOne({ _id: alert._id });
     res.status(200).json({ success: true, message: 'Alert deleted' });
   } catch (error) {
     logger.error('Delete production alert error:', error);
@@ -172,17 +214,7 @@ const getProductionIncidents = async (req, res) => {
 
     const openCount = incidents.filter((i) => ['open', 'investigating'].includes(i.status)).length;
 
-    const transformed = incidents.map((i) => ({
-      id: i.incident_id,
-      title: i.title,
-      description: i.description,
-      severity: i.severity,
-      category: i.category,
-      reportedBy: i.reported_by,
-      location: i.location,
-      timestamp: i.reported_at,
-      status: i.status,
-    }));
+    const transformed = incidents.map((i) => toIncidentDto(i));
 
     res.status(200).json({
       success: true,
@@ -221,17 +253,7 @@ const createProductionIncident = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      incident: {
-        id: incident.incident_id,
-        title: incident.title,
-        description: incident.description,
-        severity: incident.severity,
-        category: incident.category,
-        reportedBy: incident.reported_by,
-        location: incident.location,
-        timestamp: incident.reported_at,
-        status: incident.status,
-      },
+      incident: toIncidentDto(incident.toObject()),
       message: 'Incident reported successfully',
     });
   } catch (error) {
@@ -244,40 +266,29 @@ const updateProductionIncidentStatus = async (req, res) => {
   try {
     const { incidentId } = req.params;
     const { status } = req.body;
-    const factoryId = req.body.factoryId || req.query.factoryId || req.query.storeId || DEFAULT_FACTORY;
+    const factoryId = getFactoryId(req);
 
     if (!['open', 'investigating', 'resolved'].includes(status)) {
       return res.status(400).json({ success: false, error: 'Invalid status' });
     }
 
-    const update = { status, updated_at: new Date() };
-    if (status === 'resolved') {
-      update.resolved_at = new Date();
-      update.resolved_by = req.body.resolvedBy || 'System';
-    }
-
-    const incident = await ProductionIncident.findOneAndUpdate(
-      { incident_id: incidentId, factory_id: factoryId },
-      update,
-      { new: true }
-    );
-    if (!incident) {
+    const existing = await findProductionIncident(factoryId, incidentId);
+    if (!existing) {
       return res.status(404).json({ success: false, error: 'Incident not found' });
     }
 
+    const now = new Date();
+    existing.status = status;
+    existing.updated_at = now;
+    if (status === 'resolved') {
+      existing.resolved_at = now;
+      existing.resolved_by = req.body.resolvedBy || 'System';
+    }
+    await existing.save();
+
     res.status(200).json({
       success: true,
-      incident: {
-        id: incident.incident_id,
-        title: incident.title,
-        description: incident.description,
-        severity: incident.severity,
-        category: incident.category,
-        reportedBy: incident.reported_by,
-        location: incident.location,
-        timestamp: incident.reported_at,
-        status: incident.status,
-      },
+      incident: toIncidentDto(existing.toObject()),
       message: 'Incident updated successfully',
     });
   } catch (error) {

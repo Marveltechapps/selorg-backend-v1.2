@@ -10,6 +10,8 @@ const CampaignSchema = new Schema({
     default: 'Draft' 
   },
   period: { type: String, required: true },
+  /** Optional end date for “ending soon” stats and extend flows */
+  endsAt: { type: Date },
   target: { type: String, required: true },
   scope: { type: String, required: true },
   type: { type: String, required: true },
@@ -38,13 +40,27 @@ const CampaignSchema = new Schema({
     category: String,
     basePrice: Number,
     promoPrice: Number
-  }]
+  }],
+  /** Report filters: na | eu | all */
+  region: { type: String, enum: ['na', 'eu', 'all'], default: 'na' },
+  /** Report filters: online | store | all */
+  channel: { type: String, enum: ['online', 'store', 'all'], default: 'all' },
+  /** Report filters: promo | clearance */
+  campaignCategory: { type: String, enum: ['promo', 'clearance'], default: 'promo' },
+  performance: {
+    revenue: { type: Number },
+    uplift: { type: Number },
+    roi: { type: Number },
+    discountDepth: { type: Number },
+    orders: { type: Number },
+  },
 }, {
   timestamps: true
 });
 
 // Indexes for performance
 CampaignSchema.index({ status: 1, createdAt: -1 });
+CampaignSchema.index({ status: 1, endsAt: 1 });
 CampaignSchema.index({ type: 1, status: 1 });
 CampaignSchema.index({ owner: 1 });
 

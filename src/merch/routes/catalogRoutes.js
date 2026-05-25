@@ -3,6 +3,7 @@ const {
   getSKUs,
   createSKU,
   updateSKU,
+  patchSKUVisibility,
   deleteSKU,
   getCollections,
   createCollection,
@@ -15,6 +16,9 @@ const router = express.Router();
 router.route('/skus')
   .get(getSKUs)
   .post(createSKU);
+
+router.route('/skus/:id/visibility')
+  .patch(patchSKUVisibility);
 
 router.route('/skus/:id')
   .put(updateSKU)

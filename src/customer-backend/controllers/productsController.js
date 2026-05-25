@@ -155,6 +155,50 @@ async function getProductDetail(req, res) {
   }
 }
 
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isTextIndexUnavailableError(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  return err?.code === 27 || msg.includes('text index') || msg.includes('no text index');
+}
+
+async function runProductSearch(query, searchFilter, skip, limit) {
+  const baseFilter = { ...searchFilter };
+  try {
+    const textFilter = { ...baseFilter, $text: { $search: query } };
+    const [rawProducts, total] = await Promise.all([
+      Product.find(textFilter, { score: { $meta: 'textScore' } })
+        .sort({ score: { $meta: 'textScore' }, sortOrder: 1, order: 1 })
+        .skip(skip)
+        .limit(limit)
+        .select({ baseCost: 0 })
+        .lean(),
+      Product.countDocuments(textFilter),
+    ]);
+    return { rawProducts, total };
+  } catch (err) {
+    if (!isTextIndexUnavailableError(err)) throw err;
+  }
+
+  const regex = new RegExp(escapeRegex(query), 'i');
+  const regexFilter = {
+    ...baseFilter,
+    $or: [{ name: regex }, { tag: regex }, { 'description.about': regex }],
+  };
+  const [rawProducts, total] = await Promise.all([
+    Product.find(regexFilter)
+      .sort({ sortOrder: 1, order: 1, name: 1 })
+      .skip(skip)
+      .limit(limit)
+      .select({ baseCost: 0 })
+      .lean(),
+    Product.countDocuments(regexFilter),
+  ]);
+  return { rawProducts, total };
+}
+
 async function searchProducts(req, res) {
   try {
     const query = String(req.query.q || '').trim();
@@ -168,7 +212,6 @@ async function searchProducts(req, res) {
 
     const skip = (page - 1) * limit;
     const searchFilter = {
-      $text: { $search: query },
       isActive: true,
       isSaleable: true,
       classification: 'Style',
@@ -183,15 +226,7 @@ async function searchProducts(req, res) {
       searchFilter._id = { $in: availableIds };
     }
 
-    const [rawProducts, total] = await Promise.all([
-      Product.find(searchFilter, { score: { $meta: 'textScore' } })
-        .sort({ score: { $meta: 'textScore' }, sortOrder: 1, order: 1 })
-        .skip(skip)
-        .limit(limit)
-        .select({ baseCost: 0 })
-        .lean(),
-      Product.countDocuments(searchFilter),
-    ]);
+    const { rawProducts, total } = await runProductSearch(query, searchFilter, skip, limit);
     const products = await enrichProductsWithVariants(rawProducts, { dedupeProductLines: false });
 
     return res.status(200).json({

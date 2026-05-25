@@ -2,9 +2,10 @@ const express = require('express');
 const {
   getSummary,
   getApprovals,
+  bulkUpdateApprovals,
   updateApprovalStatus,
   getAudits,
-  seedComplianceData
+  seedComplianceData,
 } = require('../controllers/complianceController');
 
 const router = express.Router();
@@ -14,6 +15,9 @@ router.route('/summary')
 
 router.route('/approvals')
   .get(getApprovals);
+
+router.route('/approvals/bulk')
+  .post(bulkUpdateApprovals);
 
 router.route('/approvals/:id')
   .put(updateApprovalStatus);

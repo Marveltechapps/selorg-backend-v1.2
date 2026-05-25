@@ -5,6 +5,65 @@
 const mongoose = require('mongoose');
 const adminSupportService = require('../../admin/services/adminSupportService');
 const { AdminSupportTicket, AdminSupportTicketNote } = require('../../admin/models/AdminSupportTicket');
+const { resolveCustomerIdentity } = require('../utils/customerDisplay');
+
+function customerIdentityFromRequest(req, ticket) {
+  return resolveCustomerIdentity({ user: req.user?.profile, ticket });
+}
+
+function ticketOwnedByUser(ticket, userId) {
+  return String(ticket?.customerId || '') === String(userId);
+}
+
+function isLiveChatRequest(body = {}) {
+  const type = String(body.type || '').trim();
+  return (
+    body.channel === 'chat' ||
+    type === 'general_inquiry' ||
+    type === 'order_issue' ||
+    body.liveChat === true
+  );
+}
+
+async function getActiveChatTicket(req, res, next) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const orderNumber = req.query.orderNumber ? String(req.query.orderNumber).trim() : '';
+    const filter = {
+      customerId: String(userId),
+      channel: 'chat',
+      status: { $in: ['open', 'in_progress'] },
+    };
+
+    if (orderNumber) {
+      filter.orderNumber = orderNumber;
+    } else {
+      filter.$or = [{ orderNumber: { $exists: false } }, { orderNumber: null }, { orderNumber: '' }];
+    }
+
+    const ticket = await AdminSupportTicket.findOne(filter).sort({ updatedAt: -1 }).lean();
+    if (!ticket) {
+      return res.status(200).json({ success: true, data: null });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: ticket._id.toString(),
+        _id: ticket._id.toString(),
+        subject: ticket.subject,
+        orderNumber: ticket.orderNumber,
+        status: ticket.status,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
 
 async function createTicket(req, res, next) {
   try {
@@ -14,9 +73,12 @@ async function createTicket(req, res, next) {
     }
 
     const profile = req.user?.profile;
-    const customerName = profile?.name || 'Customer';
-    const customerEmail = profile?.phoneNumber ? `customer-${profile.phoneNumber}@selorg.com` : `customer-${userId}@selorg.com`;
-    const customerPhone = profile?.phoneNumber || '';
+    const identity = customerIdentityFromRequest(req);
+    const customerName = identity.customerName;
+    const customerPhone = identity.customerPhone;
+    const customerEmail = customerPhone
+      ? `customer-${customerPhone.replace(/\D/g, '')}@selorg.com`
+      : `customer-${userId}@selorg.com`;
 
     const {
       subject,
@@ -30,9 +92,13 @@ async function createTicket(req, res, next) {
 
     const resolvedOrderNumber = orderNumber || orderId;
 
+    const liveChat = isLiveChatRequest(req.body);
+
     const data = {
       subject: (subject || 'General Chat Support').trim(),
-      description: (description || req.body.message || subject || 'General inquiry').trim(),
+      description: liveChat
+        ? String(description || req.body.message || '').trim()
+        : (description || req.body.message || subject || 'General inquiry').trim(),
       category: category || (type === 'general_inquiry' ? 'account' : 'order'),
       priority: priority || 'medium',
       customerName: String(customerName).trim(),
@@ -40,10 +106,10 @@ async function createTicket(req, res, next) {
       customerPhone: String(customerPhone).trim(),
       customerId: String(userId),
       orderNumber: resolvedOrderNumber ? String(resolvedOrderNumber).trim() : undefined,
-      channel: 'customer_app',
+      channel: liveChat ? 'chat' : 'in_app',
     };
 
-    const ticket = await adminSupportService.createTicket(data, 'system', 'Customer');
+    const ticket = await adminSupportService.createTicket(data, 'system', 'Support');
     return res.status(201).json({
       success: true,
       data: {
@@ -69,7 +135,7 @@ async function getTicketMessages(req, res, next) {
     if (!ticket) {
       return res.status(404).json({ success: false, error: 'Ticket not found' });
     }
-    if (ticket.customerId !== String(userId)) {
+    if (!ticketOwnedByUser(ticket, userId)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
@@ -112,7 +178,7 @@ async function sendMessage(req, res, next) {
     if (!ticket) {
       return res.status(404).json({ success: false, error: 'Ticket not found' });
     }
-    if (ticket.customerId !== String(userId)) {
+    if (!ticketOwnedByUser(ticket, userId)) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
@@ -121,15 +187,23 @@ async function sendMessage(req, res, next) {
       return res.status(400).json({ success: false, error: 'Message content is required' });
     }
 
-    const profile = req.user?.profile;
-    const customerName = profile?.name || 'Customer';
+    const identity = customerIdentityFromRequest(req, ticket);
 
     const note = await adminSupportService.addTicketNote(ticketId, {
       authorId: String(userId),
-      authorName: customerName,
+      authorName: identity.displayName,
       type: 'customer_reply',
       content: String(content).trim(),
       isInternal: false,
+    });
+
+    await AdminSupportTicket.findByIdAndUpdate(ticketId, {
+      $set: {
+        updatedAt: new Date(),
+        status: ticket.status === 'closed' ? 'open' : ticket.status,
+        customerName: identity.customerName,
+        customerPhone: identity.customerPhone || ticket.customerPhone || '',
+      },
     });
 
     return res.status(201).json({
@@ -147,6 +221,7 @@ async function sendMessage(req, res, next) {
 }
 
 module.exports = {
+  getActiveChatTicket,
   createTicket,
   getTicketMessages,
   sendMessage,

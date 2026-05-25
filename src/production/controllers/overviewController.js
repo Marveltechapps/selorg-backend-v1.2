@@ -1,10 +1,33 @@
 const ProductionLine = require('../models/ProductionLine');
 const Factory = require('../models/Factory');
 const QCInspection = require('../models/QCInspection');
-const { generateId } = require('../../utils/helpers');
-
 const DEFAULT_FACTORY_ID =
   process.env.DASHBOARD_HUB_KEY || process.env.DEFAULT_FACTORY_ID || 'chennai-hub';
+
+const LINE_STATUSES = ['running', 'changeover', 'maintenance', 'idle'];
+
+function resolveFactoryId(req) {
+  return req.body?.factoryId || req.query.factoryId || req.query.storeId || DEFAULT_FACTORY_ID;
+}
+
+function transformLine(l) {
+  return {
+    id: l.line_id,
+    name: l.name,
+    currentJob: l.currentJob || undefined,
+    status: l.status,
+    output: l.output || 0,
+    target: l.target || 0,
+    efficiency: l.efficiency || 0,
+  };
+}
+
+async function nextLineId(factoryId) {
+  const count = await ProductionLine.countDocuments({ factory_id: factoryId });
+  const factory = await Factory.findOne({ factory_id: factoryId }).lean();
+  const prefix = factory?.code?.replace(/[^A-Z0-9]/gi, '').slice(0, 6).toUpperCase() || 'LINE';
+  return `${prefix}-L${count + 1}`;
+}
 
 /**
  * GET /api/v1/production/overview
@@ -49,15 +72,7 @@ const getOverview = async (req, res) => {
     const downtimeCount = lines.filter((l) => l.status !== 'running').length;
     const activeDowntime = downtimeCount * 15;
 
-    const transformedLines = lines.map((l) => ({
-      id: l.line_id,
-      name: l.name,
-      currentJob: l.currentJob || undefined,
-      status: l.status,
-      output: l.output || 0,
-      target: l.target || 0,
-      efficiency: l.efficiency || 0,
-    }));
+    const transformedLines = lines.map(transformLine);
 
     res.status(200).json({
       success: true,
@@ -213,6 +228,166 @@ const updateLine = async (req, res) => {
 };
 
 /**
+ * POST /api/v1/production/overview/lines
+ * Create a production line
+ */
+const createLine = async (req, res) => {
+  try {
+    const factoryId = resolveFactoryId(req);
+    const { name, status, currentJob, output, target, efficiency, lineId } = req.body || {};
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, error: 'name is required' });
+    }
+    if (status && !LINE_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: `status must be one of: ${LINE_STATUSES.join(', ')}`,
+      });
+    }
+
+    const factory = await Factory.findOne({ factory_id: factoryId }).lean();
+    if (!factory) {
+      return res.status(404).json({ success: false, error: 'Factory not found' });
+    }
+
+    const resolvedLineId = lineId?.trim() || (await nextLineId(factoryId));
+    const existing = await ProductionLine.findOne({ line_id: resolvedLineId }).lean();
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'Line ID already exists' });
+    }
+
+    const outNum = Math.max(0, parseInt(output, 10) || 0);
+    const targetNum = Math.max(0, parseInt(target, 10) || 0);
+    let efficiencyNum = Math.max(0, Math.min(100, parseInt(efficiency, 10) || 0));
+    if (!efficiency && targetNum > 0) {
+      efficiencyNum = Math.min(100, Math.round((outNum / targetNum) * 100));
+    }
+
+    const now = new Date();
+    const doc = await ProductionLine.create({
+      line_id: resolvedLineId,
+      factory_id: factoryId,
+      name: String(name).trim(),
+      currentJob: currentJob?.trim() || null,
+      status: status || 'idle',
+      output: outNum,
+      target: targetNum,
+      efficiency: efficiencyNum,
+      defect_rate: 0,
+      created_at: now,
+      updated_at: now,
+    });
+
+    res.status(201).json({
+      success: true,
+      line: transformLine(doc.toObject()),
+      message: 'Production line created',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create line',
+    });
+  }
+};
+
+/**
+ * PUT /api/v1/production/overview/lines/:lineId
+ * Update production line fields
+ */
+const updateLineDetails = async (req, res) => {
+  try {
+    const { lineId } = req.params;
+    const factoryId = resolveFactoryId(req);
+    const { name, status, currentJob, output, target, efficiency } = req.body || {};
+
+    const line = await ProductionLine.findOne({ line_id: lineId, factory_id: factoryId });
+    if (!line) {
+      return res.status(404).json({ success: false, error: 'Line not found' });
+    }
+
+    if (name !== undefined) {
+      if (!String(name).trim()) {
+        return res.status(400).json({ success: false, error: 'name cannot be empty' });
+      }
+      line.name = String(name).trim();
+    }
+    if (status !== undefined) {
+      if (!LINE_STATUSES.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          error: `status must be one of: ${LINE_STATUSES.join(', ')}`,
+        });
+      }
+      line.status = status;
+    }
+    if (currentJob !== undefined) {
+      line.currentJob = currentJob?.trim() || null;
+    }
+    if (output !== undefined) {
+      line.output = Math.max(0, parseInt(output, 10) || 0);
+    }
+    if (target !== undefined) {
+      line.target = Math.max(0, parseInt(target, 10) || 0);
+    }
+    if (efficiency !== undefined) {
+      line.efficiency = Math.max(0, Math.min(100, parseInt(efficiency, 10) || 0));
+    } else if (output !== undefined || target !== undefined) {
+      const t = line.target || 0;
+      line.efficiency = t > 0 ? Math.min(100, Math.round((line.output / t) * 100)) : 0;
+    }
+
+    line.updated_at = new Date();
+    await line.save();
+
+    res.status(200).json({
+      success: true,
+      line: transformLine(line.toObject()),
+      message: 'Production line updated',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to update line',
+    });
+  }
+};
+
+/**
+ * DELETE /api/v1/production/overview/lines/:lineId
+ */
+const deleteLine = async (req, res) => {
+  try {
+    const { lineId } = req.params;
+    const factoryId = resolveFactoryId(req);
+
+    const line = await ProductionLine.findOne({ line_id: lineId, factory_id: factoryId });
+    if (!line) {
+      return res.status(404).json({ success: false, error: 'Line not found' });
+    }
+    if (line.status === 'running') {
+      return res.status(400).json({
+        success: false,
+        error: 'Stop the line before deleting it',
+      });
+    }
+
+    await ProductionLine.deleteOne({ line_id: lineId, factory_id: factoryId });
+
+    res.status(200).json({
+      success: true,
+      message: 'Production line deleted',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to delete line',
+    });
+  }
+};
+
+/**
  * GET /api/v1/production/factories
  * List all factories for factory selector
  */
@@ -242,5 +417,8 @@ module.exports = {
   getOverview,
   startBatch,
   updateLine,
+  createLine,
+  updateLineDetails,
+  deleteLine,
   listFactories,
 };

@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   upload,
   bulkUpload,
+  getBulkUploadTemplate,
   getUploadHistory,
   getContracts,
   createContract,
@@ -15,6 +16,7 @@ const {
 router.get('/upload-history', getUploadHistory);
 
 // Bulk vendor upload
+router.get('/bulk-upload/template', getBulkUploadTemplate);
 router.post('/bulk-upload', upload.single('file'), bulkUpload);
 
 // Contracts

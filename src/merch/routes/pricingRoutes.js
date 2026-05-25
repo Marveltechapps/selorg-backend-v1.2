@@ -4,6 +4,7 @@ const { PERMISSIONS } = require('../../config/permissions');
 const {
   getPricingSKUs,
   updateSKUPrice,
+  bulkUpdateSKUPrices,
   getSurgeRules,
   createSurgeRule,
   updateSurgeRule,
@@ -48,6 +49,8 @@ router.route('/references/zones')
 
 router.route('/skus')
   .get(requirePermission(PERMISSIONS.PRICING_READ), getPricingSKUs);
+
+router.post('/skus/bulk', requirePermission(PERMISSIONS.PRICING_OVERRIDE), bulkUpdateSKUPrices);
 
 router.route('/skus/:id')
   .put(requirePermission(PERMISSIONS.PRICING_OVERRIDE), updateSKUPrice);

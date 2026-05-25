@@ -1,5 +1,6 @@
 const Alert = require('../models/Alert');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
+const alertActionService = require('../services/alertActionService');
 
 // @desc    Get all alerts
 // @route   GET /api/v1/alerts
@@ -149,9 +150,59 @@ const seedAlertData = async (req, res, next) => {
   }
 };
 
+const resolvePricingConflict = async (req, res, next) => {
+  try {
+    const alert = await alertActionService.resolvePricingConflict(req.params.id, req.body);
+    res.status(200).json({ success: true, data: alert });
+  } catch (err) {
+    if (err.message === 'Alert not found') {
+      return next(new ErrorResponse(err.message, 404));
+    }
+    next(err);
+  }
+};
+
+const allocateStock = async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.user?._id;
+    const result = await alertActionService.allocateStockForAlert(req.params.id, req.body, userId);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    if (err.message === 'Alert not found') {
+      return next(new ErrorResponse(err.message, 404));
+    }
+    res.status(400).json({ success: false, error: err.message });
+  }
+};
+
+const pauseCampaign = async (req, res, next) => {
+  try {
+    const result = await alertActionService.pauseCampaignForAlert(req.params.id, req.body);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    if (err.message === 'Alert not found') {
+      return next(new ErrorResponse(err.message, 404));
+    }
+    next(err);
+  }
+};
+
+const clearResolvedAlerts = async (req, res, next) => {
+  try {
+    const count = await alertActionService.clearResolvedAlerts();
+    res.status(200).json({ success: true, deletedCount: count });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getAlerts,
   updateAlert,
   bulkUpdateAlerts,
   seedAlertData,
+  resolvePricingConflict,
+  allocateStock,
+  pauseCampaign,
+  clearResolvedAlerts,
 };

@@ -51,6 +51,10 @@ const inventoryItemSchema = new mongoose.Schema(
       required: false,
       unique: false,
     },
+    imported_via_sheet: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -62,6 +66,7 @@ inventoryItemSchema.index({ sku: 1 });
 inventoryItemSchema.index({ barcode: 1 });
 inventoryItemSchema.index({ status: 1 });
 inventoryItemSchema.index({ store_id: 1, status: 1 });
+inventoryItemSchema.index({ store_id: 1, imported_via_sheet: 1 });
 
 module.exports = mongoose.models.InventoryItem || mongoose.model('InventoryItem', inventoryItemSchema);
 

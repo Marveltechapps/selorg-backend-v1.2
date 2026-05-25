@@ -6,10 +6,28 @@ const { generateId } = require('../../utils/helpers');
 function getStoreId(req) {
   return (
     req.query?.storeId ||
+    req.query?.factoryId ||
     req.body?.storeId ||
+    req.body?.factoryId ||
     process.env.DEFAULT_STORE_ID ||
+    process.env.DASHBOARD_HUB_KEY ||
     'chennai-hub'
   );
+}
+
+function toMaterialDto(m) {
+  return {
+    id: m._id.toString(),
+    name: m.name,
+    currentStock: m.currentStock,
+    unit: m.unit,
+    safetyStock: m.safetyStock,
+    reorderPoint: m.reorderPoint,
+    supplier: m.supplier || '',
+    category: m.category || '',
+    lastOrderDate: m.lastOrderDate ? m.lastOrderDate.toISOString().split('T')[0] : undefined,
+    orderStatus: m.orderStatus || 'none',
+  };
 }
 
 /**
@@ -30,18 +48,7 @@ const listMaterials = async (req, res) => {
         }
       : baseQuery;
     const materials = await RawMaterial.find(query).sort({ name: 1 }).lean();
-    res.status(200).json(materials.map((m) => ({
-      id: m._id.toString(),
-      name: m.name,
-      currentStock: m.currentStock,
-      unit: m.unit,
-      safetyStock: m.safetyStock,
-      reorderPoint: m.reorderPoint,
-      supplier: m.supplier || '',
-      category: m.category || '',
-      lastOrderDate: m.lastOrderDate ? m.lastOrderDate.toISOString().split('T')[0] : undefined,
-      orderStatus: m.orderStatus || 'none',
-    })));
+    res.status(200).json(materials.map(toMaterialDto));
   } catch (error) {
     res.status(500).json({ success: false, error: error.message || 'Failed to fetch materials' });
   }
@@ -64,18 +71,72 @@ const createMaterial = async (req, res) => {
       supplier: supplier || '',
       category: category || '',
     });
-    res.status(201).json({
-      id: doc._id.toString(),
-      name: doc.name,
-      currentStock: doc.currentStock,
-      unit: doc.unit,
-      safetyStock: doc.safetyStock,
-      reorderPoint: doc.reorderPoint,
-      supplier: doc.supplier,
-      category: doc.category,
-    });
+    res.status(201).json(toMaterialDto(doc.toObject()));
   } catch (error) {
     res.status(500).json({ success: false, error: error.message || 'Failed to create material' });
+  }
+};
+
+const updateMaterial = async (req, res) => {
+  try {
+    const storeId = getStoreId(req);
+    const { id } = req.params;
+    const { name, currentStock, unit, safetyStock, reorderPoint, supplier, category } = req.body || {};
+
+    const material = await RawMaterial.findOne({ _id: id, store_id: storeId });
+    if (!material) {
+      return res.status(404).json({ success: false, error: 'Material not found' });
+    }
+
+    if (name !== undefined) {
+      if (!String(name).trim()) {
+        return res.status(400).json({ success: false, error: 'name cannot be empty' });
+      }
+      material.name = String(name).trim();
+    }
+    if (currentStock !== undefined) {
+      material.currentStock = Math.max(0, Number(currentStock) || 0);
+    }
+    if (unit !== undefined) {
+      if (!String(unit).trim()) {
+        return res.status(400).json({ success: false, error: 'unit cannot be empty' });
+      }
+      material.unit = String(unit).trim();
+    }
+    if (safetyStock !== undefined) {
+      material.safetyStock = Math.max(0, Number(safetyStock) || 0);
+    }
+    if (reorderPoint !== undefined) {
+      material.reorderPoint = Math.max(0, Number(reorderPoint) || 0);
+    }
+    if (supplier !== undefined) {
+      material.supplier = supplier || '';
+    }
+    if (category !== undefined) {
+      material.category = category || '';
+    }
+
+    await material.save();
+    res.status(200).json(toMaterialDto(material.toObject()));
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to update material' });
+  }
+};
+
+const deleteMaterial = async (req, res) => {
+  try {
+    const storeId = getStoreId(req);
+    const { id } = req.params;
+
+    const material = await RawMaterial.findOne({ _id: id, store_id: storeId });
+    if (!material) {
+      return res.status(404).json({ success: false, error: 'Material not found' });
+    }
+
+    await RawMaterial.deleteOne({ _id: id, store_id: storeId });
+    res.status(200).json({ success: true, message: 'Material deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to delete material' });
   }
 };
 
@@ -237,6 +298,8 @@ const updateRequisitionStatus = async (req, res) => {
 module.exports = {
   listMaterials,
   createMaterial,
+  updateMaterial,
+  deleteMaterial,
   orderMaterial,
   listReceipts,
   markReceived,

@@ -117,6 +117,57 @@ const getOrders = async (req, res) => {
 };
 
 /**
+ * Get single order by order_id
+ * GET /api/darkstore/orders/:orderId
+ */
+const getOrderById = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const order = await Order.findOne({ order_id: orderId, store_id: storeId }).lean();
+    if (!order) {
+      return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+
+    let items = order.items || [];
+    if (!items.length) {
+      try {
+        const customerOrder = await CustomerOrder.findOne({ orderNumber: orderId }, { items: 1 }).lean();
+        if (customerOrder?.items?.length) {
+          items = customerOrder.items.map((it) => ({
+            productName: it.productName || 'Item',
+            quantity: it.quantity || 1,
+            price: it.price || 0,
+            image: it.image || '',
+            variantSize: it.variantSize || '',
+          }));
+        }
+      } catch (_) { /* non-blocking */ }
+    }
+
+    const rawPhone = order.customer_phone || '';
+    const maskedPhone = rawPhone.length >= 8
+      ? rawPhone.slice(0, 2) + '******' + rawPhone.slice(-2)
+      : rawPhone ? '******' : '';
+
+    res.status(200).json({
+      success: true,
+      order: {
+        ...order,
+        items,
+        customer_name: order.customer_name || 'Customer',
+        customer_phone: maskedPhone,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch order',
+    });
+  }
+};
+
+/**
  * Call customer for RTO risk order
  * POST /api/darkstore/orders/:orderId/call-customer
  */
@@ -882,6 +933,7 @@ const getOrderActionLogs = async (req, res) => {
 
 module.exports = {
   getOrders,
+  getOrderById,
   callCustomer,
   markRTO,
   updateOrder,

@@ -3,6 +3,12 @@ const router = express.Router();
 const { requirePermission } = require('../../core/middleware');
 const { PERMISSIONS } = require('../../config/permissions');
 const {
+  listShelves,
+  createShelf,
+  updateShelf,
+  deleteShelf,
+} = require('../controllers/shelfController');
+const {
   getShelfView,
   getProductLocation,
   getStockLevels,
@@ -18,10 +24,28 @@ const {
   createRestockTask,
   createRestock,
   updateInventoryItem,
+  bulkImportInventory,
+  downloadInventoryImportTemplate,
 } = require('../controllers/inventoryController');
+
+// GET /api/darkstore/inventory/import-template
+router.get('/import-template', requirePermission(PERMISSIONS.INVENTORY_STOCK_READ), downloadInventoryImportTemplate);
+
+// POST /api/darkstore/inventory/bulk-import
+router.post(
+  '/bulk-import',
+  requirePermission(PERMISSIONS.INVENTORY_STOCK_WRITE),
+  bulkImportInventory
+);
 
 // GET /api/darkstore/inventory/shelf-view
 router.get('/shelf-view', requirePermission(PERMISSIONS.INVENTORY_STOCK_READ), getShelfView);
+
+// Store setup — shelf layout CRUD
+router.get('/shelves', requirePermission(PERMISSIONS.INVENTORY_STOCK_READ), listShelves);
+router.post('/shelves', requirePermission(PERMISSIONS.INVENTORY_STOCK_WRITE), createShelf);
+router.put('/shelves/:shelfId', requirePermission(PERMISSIONS.INVENTORY_STOCK_WRITE), updateShelf);
+router.delete('/shelves/:shelfId', requirePermission(PERMISSIONS.INVENTORY_STOCK_WRITE), deleteShelf);
 
 // GET /api/darkstore/inventory/product-location/:sku
 router.get('/product-location/:sku', requirePermission(PERMISSIONS.INVENTORY_STOCK_READ), getProductLocation);

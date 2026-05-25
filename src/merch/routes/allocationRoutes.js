@@ -6,6 +6,11 @@ const AllocationController = require('../controllers/allocationController');
 const router = express.Router();
 
 // Specific paths before `/:id` to avoid param shadowing (e.g. "alerts" captured as id)
+router.route('/references/locations').get(
+  requirePermission(PERMISSIONS.MERCH_ALLOCATION_READ),
+  AllocationController.getLocations
+);
+
 router.route('/sku/:skuId/history').get(
   requirePermission(PERMISSIONS.MERCH_ALLOCATION_READ),
   AllocationController.getAllocationHistory
@@ -26,7 +31,7 @@ router.route('/alerts/:id').put(
 );
 
 router.route('/transfers').post(
-  requirePermission(PERMISSIONS.WAREHOUSE_TRANSFER_CREATE),
+  requirePermission(PERMISSIONS.MERCH_ALLOCATION_WRITE),
   AllocationController.createTransferOrder
 );
 

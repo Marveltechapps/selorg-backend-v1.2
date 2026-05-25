@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getOrders,
+  getOrderById,
   callCustomer,
   markRTO,
   updateOrder,
@@ -17,6 +18,9 @@ router.get('/', getOrders);
 
 // GET /api/darkstore/orders/:orderId/action-logs
 router.get('/:orderId/action-logs', getOrderActionLogs);
+
+// GET /api/darkstore/orders/:orderId
+router.get('/:orderId', getOrderById);
 
 // POST /api/darkstore/orders/:orderId/call-customer
 router.post('/:orderId/call-customer', callCustomer);

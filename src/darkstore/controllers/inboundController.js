@@ -8,6 +8,38 @@ const InventoryItem = require('../models/InventoryItem');
 const AuditLog = require('../models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
+const { deriveInventoryStatus } = require('../utils/inventoryStockSync');
+const { invalidateDarkstore } = require('../cacheInvalidation');
+
+async function flushDarkstoreCache() {
+  try {
+    await invalidateDarkstore();
+  } catch (err) {
+    logger.warn('Darkstore cache invalidation failed', { error: err.message });
+  }
+}
+
+async function writeInboundAudit(entry) {
+  try {
+    await AuditLog.create(entry);
+  } catch (err) {
+    logger.warn('Inbound audit log failed', { error: err.message, action: entry.action });
+  }
+}
+
+/** Backfill required date fields on legacy/incomplete GRN documents before save. */
+function ensureGrnRequiredDates(grn) {
+  const now = new Date().toISOString();
+  if (!grn.created_at) {
+    grn.created_at = grn.actual_arrival || grn.updated_at || now;
+  }
+  if (!grn.expected_arrival) {
+    grn.expected_arrival = grn.created_at || now;
+  }
+  if (!grn.updated_at) {
+    grn.updated_at = now;
+  }
+}
 
 /**
  * Get Inbound Summary
@@ -18,11 +50,23 @@ const getInboundSummary = async (req, res) => {
     const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
     const date = req.query.date || new Date().toISOString().split('T')[0];
 
-    // Count trucks for today
-    const trucksToday = await Truck.countDocuments({
+    let trucksToday = await Truck.countDocuments({
       store_id: storeId,
       date: date,
     });
+
+    if (trucksToday === 0) {
+      const todayGrns = await GRN.find({
+        store_id: storeId,
+        $or: [
+          { created_at: { $regex: `^${date}` } },
+          { actual_arrival: { $regex: `^${date}` } },
+        ],
+      })
+        .select('truck_id')
+        .lean();
+      trucksToday = new Set(todayGrns.map((g) => g.truck_id).filter(Boolean)).size;
+    }
 
     // Count pending GRN orders
     const pendingGrn = await GRN.countDocuments({
@@ -187,11 +231,11 @@ const startGRNProcessing = async (req, res) => {
       grn.notes = notes;
     }
     grn.updated_at = new Date().toISOString();
+    ensureGrnRequiredDates(grn);
 
     await grn.save();
 
-    // Create audit log
-    await AuditLog.create({
+    await writeInboundAudit({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'update',
@@ -205,6 +249,8 @@ const startGRNProcessing = async (req, res) => {
       },
       store_id: grn.store_id,
     });
+
+    await flushDarkstoreCache();
 
     res.status(200).json({
       success: true,
@@ -271,8 +317,11 @@ const updateGRNItemQuantity = async (req, res) => {
     if (grn) {
       grn.received_quantity = totalReceived;
       grn.updated_at = new Date().toISOString();
+      ensureGrnRequiredDates(grn);
       await grn.save();
     }
+
+    await flushDarkstoreCache();
 
     res.status(200).json({
       success: true,
@@ -320,7 +369,10 @@ const completeGRNProcessing = async (req, res) => {
     // Check if all items are processed
     const items = await GRNItem.find({ grn_id: grnId });
     const unprocessedItems = items.filter(
-      (item) => item.status === 'pending' && item.received_quantity === 0
+      (item) =>
+        item.status === 'pending' &&
+        (item.received_quantity || 0) === 0 &&
+        (item.damaged_quantity || 0) === 0
     );
 
     if (unprocessedItems.length > 0) {
@@ -352,9 +404,12 @@ const completeGRNProcessing = async (req, res) => {
       grn.notes = notes;
     }
     grn.updated_at = new Date().toISOString();
+    ensureGrnRequiredDates(grn);
     await grn.save();
 
     let putawayTasksCreated = 0;
+
+    // Shelf stock is updated when putaway completes — not at GRN receipt.
 
     // Create putaway tasks if requested
     if (auto_create_putaway) {
@@ -363,8 +418,10 @@ const completeGRNProcessing = async (req, res) => {
           const taskId = generateId('PUTAWAY');
           const now = new Date().toISOString();
 
-          // Get item location from inventory if available
-          const inventoryItem = await InventoryItem.findOne({ sku: item.sku });
+          const inventoryItem = await InventoryItem.findOne({
+            sku: item.sku,
+            store_id: grn.store_id,
+          });
           const location = inventoryItem?.location || 'TBD';
 
           await PutawayTask.create({
@@ -385,8 +442,7 @@ const completeGRNProcessing = async (req, res) => {
       }
     }
 
-    // Create audit log
-    await AuditLog.create({
+    await writeInboundAudit({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'update',
@@ -400,6 +456,8 @@ const completeGRNProcessing = async (req, res) => {
       },
       store_id: grn.store_id,
     });
+
+    await flushDarkstoreCache();
 
     res.status(200).json({
       success: true,
@@ -508,6 +566,8 @@ const assignPutawayTask = async (req, res) => {
 
     await task.save();
 
+    await flushDarkstoreCache();
+
     res.status(200).json({
       success: true,
       task_id: taskId,
@@ -551,13 +611,14 @@ const completePutawayTask = async (req, res) => {
     if (task.status === 'pending') {
       return res.status(400).json({
         success: false,
-        error: 'Task is not assigned or already completed',
+        error: 'Assign the task to staff before completing putaway',
       });
     }
 
     task.status = 'completed';
     if (actual_location) {
       task.actual_location = actual_location;
+      task.location = actual_location;
     }
     if (notes) {
       task.notes = notes;
@@ -566,15 +627,19 @@ const completePutawayTask = async (req, res) => {
 
     await task.save();
 
-    // Update inventory stock level
-    const inventoryItem = await InventoryItem.findOne({ sku: task.sku });
+    const inventoryItem = await InventoryItem.findOne({
+      sku: task.sku,
+      store_id: task.store_id,
+    });
     if (inventoryItem) {
       inventoryItem.stock = (inventoryItem.stock || 0) + task.quantity;
-      if (actual_location) {
-        inventoryItem.location = actual_location;
-      }
+      const loc = actual_location || task.location;
+      if (loc) inventoryItem.location = loc;
+      inventoryItem.status = deriveInventoryStatus(inventoryItem.stock);
       await inventoryItem.save();
     }
+
+    await flushDarkstoreCache();
 
     res.status(200).json({
       success: true,
@@ -640,6 +705,43 @@ const getInterStoreTransfers = async (req, res) => {
 };
 
 /**
+ * Get Inter-Store Transfer Details
+ * GET /api/darkstore/inbound/transfers/:transferId
+ */
+const getTransferDetails = async (req, res) => {
+  try {
+    const { transferId } = req.params;
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+
+    const transfer = await InterStoreTransfer.findOne({
+      transfer_id: transferId,
+      to_store: storeId,
+    }).lean();
+
+    if (!transfer) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transfer not found',
+      });
+    }
+
+    const items = await TransferItem.find({ transfer_id: transferId }).lean();
+
+    res.status(200).json({
+      success: true,
+      transfer,
+      items,
+    });
+  } catch (error) {
+    logger.error('Get transfer details error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch transfer details',
+    });
+  }
+};
+
+/**
  * Receive Inter-Store Transfer
  * POST /api/darkstore/inbound/transfers/:transferId/receive
  */
@@ -677,38 +779,49 @@ const receiveInterStoreTransfer = async (req, res) => {
     let putawayTasksCreated = 0;
 
     // Create putaway tasks if requested
-    if (auto_create_putaway) {
-      const transferItems = await TransferItem.find({ transfer_id: transferId });
+    const transferItems = await TransferItem.find({ transfer_id: transferId });
 
-      for (const item of transferItems) {
-        if (item.quantity > 0) {
-          const taskId = generateId('PUTAWAY');
-          const now = new Date().toISOString();
+    for (const item of transferItems) {
+      if (item.quantity <= 0) continue;
 
-          // Get item location from inventory if available
-          const inventoryItem = await InventoryItem.findOne({ sku: item.sku });
-          const location = inventoryItem?.location || 'TBD';
+      const inventoryItem = await InventoryItem.findOne({
+        sku: item.sku,
+        store_id: transfer.to_store,
+      });
+      if (inventoryItem) {
+        inventoryItem.stock = (inventoryItem.stock || 0) + item.quantity;
+        inventoryItem.status = deriveInventoryStatus(inventoryItem.stock);
+        await inventoryItem.save();
+      }
 
-          await PutawayTask.create({
-            task_id: taskId,
-            transfer_id: transferId,
-            sku: item.sku,
-            product_name: item.product_name,
-            quantity: item.quantity,
-            location: location,
-            status: 'pending',
-            store_id: transfer.to_store,
-            created_at: now,
-            updated_at: now,
-          });
+      item.status = 'received';
+      item.received_quantity = item.quantity;
+      item.updated_at = new Date().toISOString();
+      await item.save();
 
-          putawayTasksCreated++;
-        }
+      if (auto_create_putaway) {
+        const taskId = generateId('PUTAWAY');
+        const now = new Date().toISOString();
+        const location = inventoryItem?.location || 'TBD';
+
+        await PutawayTask.create({
+          task_id: taskId,
+          transfer_id: transferId,
+          sku: item.sku,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          location,
+          status: 'pending',
+          store_id: transfer.to_store,
+          created_at: now,
+          updated_at: now,
+        });
+
+        putawayTasksCreated++;
       }
     }
 
-    // Create audit log
-    await AuditLog.create({
+    await writeInboundAudit({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),
       action_type: 'update',
@@ -722,6 +835,8 @@ const receiveInterStoreTransfer = async (req, res) => {
       },
       store_id: transfer.to_store,
     });
+
+    await flushDarkstoreCache();
 
     res.status(200).json({
       success: true,
@@ -755,8 +870,7 @@ const syncInterStoreTransfers = async (req, res) => {
       { $set: { updated_at: now } }
     );
 
-    // Create audit log
-    await AuditLog.create({
+    await writeInboundAudit({
       id: generateId('AUD'),
       timestamp: now,
       action_type: 'update',
@@ -770,6 +884,8 @@ const syncInterStoreTransfers = async (req, res) => {
       },
       store_id: storeId,
     });
+
+    await flushDarkstoreCache();
 
     res.status(200).json({
       success: true,
@@ -797,6 +913,7 @@ module.exports = {
   assignPutawayTask,
   completePutawayTask,
   getInterStoreTransfers,
+  getTransferDetails,
   receiveInterStoreTransfer,
   syncInterStoreTransfers,
 };

@@ -3,6 +3,8 @@ const router = express.Router();
 const {
   listMaterials,
   createMaterial,
+  updateMaterial,
+  deleteMaterial,
   orderMaterial,
   listReceipts,
   markReceived,
@@ -13,6 +15,8 @@ const {
 
 router.get('/materials', listMaterials);
 router.post('/materials', createMaterial);
+router.put('/materials/:id', updateMaterial);
+router.delete('/materials/:id', deleteMaterial);
 router.post('/materials/:id/order', orderMaterial);
 
 router.get('/receipts', listReceipts);

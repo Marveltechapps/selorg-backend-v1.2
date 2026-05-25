@@ -6,6 +6,8 @@ const {
   updateCampaign,
   deleteCampaign,
   getMerchStats,
+  getPerformanceReport,
+  seedOverviewData,
   getStockConflicts,
   getPromoUplift,
   createStockConflict,
@@ -18,6 +20,8 @@ const router = express.Router();
 
 // Overview routes
 router.get('/overview/stats', getMerchStats);
+router.get('/overview/performance-report', getPerformanceReport);
+router.post('/overview/seed', seedOverviewData);
 
 router.route('/overview/conflicts')
   .get(getStockConflicts)

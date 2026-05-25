@@ -2,6 +2,8 @@ const SKU = require('../models/SKU');
 const Collection = require('../models/Collection');
 const ErrorResponse = require('../../core/utils/ErrorResponse');
 
+const CATALOG_REGIONS = ['North America', 'Europe (West)', 'APAC'];
+
 // @desc    Get all SKUs
 // @route   GET /api/v1/catalog/skus
 const getSKUs = async (req, res, next) => {
@@ -28,6 +30,21 @@ const createSKU = async (req, res, next) => {
 // @route   PUT /api/v1/catalog/skus/:id
 const updateSKU = async (req, res, next) => {
   try {
+    if (req.body.visibility && Object.keys(req.body).length === 1) {
+      const sku = await SKU.findById(req.params.id);
+      if (!sku) {
+        return next(new ErrorResponse(`SKU not found with id of ${req.params.id}`, 404));
+      }
+      CATALOG_REGIONS.forEach((r) => {
+        if (req.body.visibility[r] != null) {
+          sku.visibility[r] = req.body.visibility[r];
+        }
+      });
+      sku.markModified('visibility');
+      await sku.save();
+      return res.status(200).json({ success: true, data: sku });
+    }
+
     const sku = await SKU.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true
@@ -36,6 +53,39 @@ const updateSKU = async (req, res, next) => {
     if (!sku) {
       return next(new ErrorResponse(`SKU not found with id of ${req.params.id}`, 404));
     }
+
+    res.status(200).json({ success: true, data: sku });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Toggle SKU visibility for one region or all regions
+// @route   PATCH /api/v1/merch/catalog/skus/:id/visibility
+const patchSKUVisibility = async (req, res, next) => {
+  try {
+    const { region, status } = req.body;
+    if (!['Visible', 'Hidden'].includes(status)) {
+      return next(new ErrorResponse('status must be Visible or Hidden', 400));
+    }
+
+    const sku = await SKU.findById(req.params.id);
+    if (!sku) {
+      return next(new ErrorResponse(`SKU not found with id of ${req.params.id}`, 404));
+    }
+
+    if (region === 'Global') {
+      CATALOG_REGIONS.forEach((r) => {
+        sku.visibility[r] = status;
+      });
+    } else if (CATALOG_REGIONS.includes(region)) {
+      sku.visibility[region] = status;
+    } else {
+      return next(new ErrorResponse(`Invalid region: ${region}`, 400));
+    }
+
+    sku.markModified('visibility');
+    await sku.save();
 
     res.status(200).json({ success: true, data: sku });
   } catch (error) {
@@ -120,6 +170,7 @@ module.exports = {
   getSKUs,
   createSKU,
   updateSKU,
+  patchSKUVisibility,
   deleteSKU,
   getCollections,
   createCollection,

@@ -8,6 +8,7 @@ const AlertSchema = new Schema({
   severity: { type: String, enum: ['critical', 'warning', 'info'], required: true },
   status: { type: String, enum: ['New', 'In Progress', 'Resolved', 'Snoozed', 'Dismissed'], default: 'New' },
   region: { type: String },
+  resolutionNote: { type: String },
   linkedEntities: {
     skus: [{ type: String }],
     campaigns: [{

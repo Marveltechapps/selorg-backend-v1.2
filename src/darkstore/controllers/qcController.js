@@ -9,6 +9,7 @@ const ComplianceDoc = require('../models/ComplianceDoc');
 const SampleTest = require('../models/SampleTest');
 const ChecklistItem = require('../models/ChecklistItem');
 const { generateId } = require('../../utils/helpers');
+const { parseReportDateRange, resolveStoreId } = require('../utils/reportDateRange');
 
 const getQCSummary = async (req, res) => {
   try {
@@ -642,7 +643,7 @@ const logQCCheck = async (req, res) => {
 
 const getComplianceLogs = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID;
+    const storeId = resolveStoreId(req.query.storeId);
     const category = req.query.category || 'all';
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
@@ -651,6 +652,15 @@ const getComplianceLogs = async (req, res) => {
     const query = { store_id: storeId };
     if (category !== 'all') {
       query.category = category;
+    }
+
+    if (req.query.range) {
+      const { start, end } = parseReportDateRange(req.query.range);
+      query.logged_at = { $gte: start, $lte: end };
+    } else if (req.query.startDate || req.query.endDate) {
+      query.logged_at = {};
+      if (req.query.startDate) query.logged_at.$gte = new Date(req.query.startDate);
+      if (req.query.endDate) query.logged_at.$lte = new Date(req.query.endDate);
     }
 
     const logs = await ComplianceLog.find(query)

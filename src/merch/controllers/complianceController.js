@@ -53,9 +53,58 @@ const getApprovals = async (req, res, next) => {
 // @desc    Update approval status
 // @route   PUT /api/v1/compliance/approvals/:id
 // @access  Public
+const bulkUpdateApprovals = async (req, res, next) => {
+  try {
+    const { ids, status, user, reason } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'ids array is required' });
+    }
+    const validStatus = ['Approved', 'Rejected'];
+    if (!validStatus.includes(status)) {
+      return res.status(400).json({ success: false, error: 'status must be Approved or Rejected' });
+    }
+
+    const approvals = await ApprovalRequest.find({ _id: { $in: ids } });
+    for (const approval of approvals) {
+      approval.status = status;
+      if (reason) {
+        approval.comments = approval.comments || [];
+        approval.comments.push({
+          user: user || 'system',
+          text: reason,
+          timestamp: new Date(),
+        });
+      }
+      await approval.save();
+
+      await AuditLog.create({
+        module: 'Compliance',
+        action: 'Approval',
+        entityType: approval.type,
+        entityId: approval._id.toString(),
+        userId: user && mongoose.Types.ObjectId.isValid(user) ? new mongoose.Types.ObjectId(user) : new mongoose.Types.ObjectId(),
+        severity: status === 'Approved' ? 'info' : 'warning',
+        details: {
+          title: approval.title,
+          summary: `Bulk ${status.toLowerCase()}${reason ? `: ${reason}` : ''}`,
+          region: approval.region,
+        },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      count: approvals.length,
+      data: approvals,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const updateApprovalStatus = async (req, res, next) => {
   try {
-    const { status, user } = req.body;
+    const { status, user, note, reason } = req.body;
     let approval = await ApprovalRequest.findById(req.params.id);
 
     if (!approval) {
@@ -63,6 +112,15 @@ const updateApprovalStatus = async (req, res, next) => {
     }
 
     approval.status = status;
+    const commentText = note || reason;
+    if (commentText) {
+      approval.comments = approval.comments || [];
+      approval.comments.push({
+        user: user || 'system',
+        text: commentText,
+        timestamp: new Date(),
+      });
+    }
     await approval.save();
 
     // Log the event
@@ -130,21 +188,45 @@ const seedComplianceData = async (req, res, next) => {
         title: 'Coffee Beans 1kg',
         description: '$25.00 → $28.00',
         requestedBy: 'John D.',
+        status: 'Pending',
         riskLevel: 'Low',
         region: 'North America',
         details: { sku: 'SKU-CB-001', currentPrice: 25, proposedPrice: 28 },
-        slaDeadline: new Date(Date.now() + 4 * 3600000)
+        slaDeadline: new Date(Date.now() + 4 * 3600000),
       },
       {
         type: 'New Campaign',
         title: 'Winter Warmers',
         description: 'Bundle Discount',
         requestedBy: 'Sarah M.',
+        status: 'Pending',
         riskLevel: 'Medium',
         region: 'Europe',
         details: { campaignName: 'Winter Warmers 2024', discountMechanics: 'Buy 2 Get 1 Free' },
-        slaDeadline: new Date(Date.now() + 2 * 3600000)
-      }
+        slaDeadline: new Date(Date.now() + 2 * 3600000),
+      },
+      {
+        type: 'Zone Change',
+        title: 'Downtown Core expansion',
+        description: 'Expand polygon by 0.8 sq km',
+        requestedBy: 'Alex K.',
+        status: 'Pending',
+        riskLevel: 'High',
+        region: 'North America',
+        details: { zoneId: 'zone-downtown', areaDelta: 0.8 },
+        slaDeadline: new Date(Date.now() + 1 * 3600000),
+      },
+      {
+        type: 'Policy Override',
+        title: 'Stackable promo exception',
+        description: 'Allow stackable discounts for VIP segment',
+        requestedBy: 'Priya S.',
+        status: 'Approved',
+        riskLevel: 'Medium',
+        region: 'Global',
+        details: { segment: 'VIP', stackable: true },
+        slaDeadline: new Date(Date.now() - 2 * 3600000),
+      },
     ];
 
     const mockAudits = Array.from({ length: 22 }).map((_, i) => ({
@@ -180,7 +262,8 @@ const seedComplianceData = async (req, res, next) => {
 module.exports = {
   getSummary,
   getApprovals,
+  bulkUpdateApprovals,
   updateApprovalStatus,
   getAudits,
-  seedComplianceData
+  seedComplianceData,
 };

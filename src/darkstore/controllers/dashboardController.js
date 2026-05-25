@@ -32,6 +32,10 @@ const getDashboardSummary = async (req, res) => {
         }).lean();
 
         const newOrders = orders.filter((o) => o.status === 'new').length;
+        const [returnsCount, cancelledCount] = await Promise.all([
+          Order.countDocuments({ store_id: storeId, status: 'rto' }),
+          Order.countDocuments({ store_id: storeId, status: 'cancelled' }),
+        ]);
         const breakdown = {
           normal: orders.filter((o) => o.order_type === 'Normal').length,
           priority: orders.filter((o) => o.order_type === 'Priority').length,
@@ -68,7 +72,7 @@ const getDashboardSummary = async (req, res) => {
         const lastHourData = generateLastHourData();
 
         return {
-          queue: { total, new_orders: newOrders, breakdown },
+          queue: { total, new_orders: newOrders, returns_count: returnsCount, cancelled_count: cancelledCount, breakdown },
           sla_threat: { percentage: slaThreatPercentage, orders_at_risk: ordersAtRisk, orders_under_5min: ordersUnder5Min },
           store_capacity: { percentage: capacityPercentage, expected_peak_time: calculatePeakTime() },
           rider_wait_times: { average: averageWait, last_hour_data: lastHourData },
@@ -221,23 +225,33 @@ const getRTOAlerts = async (req, res) => {
 /**
  * Fetch live orders data (used by HTTP handler and WebSocket snapshot).
  * @param {string} storeId - Store ID
- * @param {string} status - 'all' | 'new' | 'processing' | 'ready'
+ * @param {string} status - 'all' | 'new' | 'processing' | 'ready' | 'returns' | 'cancelled'
  * @param {number} limit - Max orders to return
  * @returns {Promise<{orders: object[]}>}
  */
 async function fetchLiveOrdersData(storeId, status = 'all', limit = 50) {
   const effectiveStoreId = storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
   const allActiveStatuses = ['new', 'queued', 'processing', 'ready', 'ASSIGNED', 'PICKING', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'];
-  const query = { store_id: effectiveStoreId, status: { $in: allActiveStatuses } };
-  if (status !== 'all') {
-    const statusMap = {
-      new: ['new', 'queued'],
-      processing: ['processing', 'ASSIGNED', 'PICKING'],
-      ready: ['ready', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'],
-    };
-    query.status = { $in: statusMap[status] || allActiveStatuses };
+  let query;
+  let sort = { createdAt: -1 };
+  if (status === 'returns') {
+    query = { store_id: effectiveStoreId, status: 'rto' };
+    sort = { updatedAt: -1 };
+  } else if (status === 'cancelled') {
+    query = { store_id: effectiveStoreId, status: 'cancelled' };
+    sort = { updatedAt: -1 };
+  } else {
+    query = { store_id: effectiveStoreId, status: { $in: allActiveStatuses } };
+    if (status !== 'all') {
+      const statusMap = {
+        new: ['new', 'queued'],
+        processing: ['processing', 'ASSIGNED', 'PICKING'],
+        ready: ['ready', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'],
+      };
+      query.status = { $in: statusMap[status] || allActiveStatuses };
+    }
   }
-  const orders = await Order.find(query).sort({ createdAt: -1 }).limit(limit).lean();
+  const orders = await Order.find(query).sort(sort).limit(limit).lean();
 
   const ordersMissingItems = orders.filter((o) => !o.items || o.items.length === 0);
   let customerItemsMap = {};
