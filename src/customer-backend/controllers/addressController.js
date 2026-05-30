@@ -49,7 +49,12 @@ async function create(req, res) {
     res.status(status).json({ success: true, data: address, updated: wasUpdated });
   } catch (err) {
     console.error('address create error:', err);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    const status =
+      err.statusCode ||
+      (err.name === 'ValidationError' ? 400 : err.code === 11000 ? 409 : 500);
+    const message =
+      status === 500 ? 'Internal server error' : err.message || 'Request failed';
+    res.status(status).json({ success: false, message });
   }
 }
 

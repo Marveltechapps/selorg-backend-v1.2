@@ -8,9 +8,14 @@ const Integration = require('../../admin/models/Integration');
 const GEOCODE_BASE = 'https://maps.googleapis.com/maps/api/geocode/json';
 
 async function getGoogleMapsApiKey() {
-  const integ = await Integration.findOne({ service: 'google_maps', isActive: true });
-  const key = integ?.apiKey?.trim() || process.env.GOOGLE_MAPS_API_KEY?.trim();
-  return key || null;
+  try {
+    const integ = await Integration.findOne({ service: 'google_maps', isActive: true });
+    const key = integ?.apiKey?.trim() || process.env.GOOGLE_MAPS_API_KEY?.trim();
+    return key || null;
+  } catch (err) {
+    console.warn('Geocoding: failed to load API key from database', err.message);
+    return process.env.GOOGLE_MAPS_API_KEY?.trim() || null;
+  }
 }
 
 /**

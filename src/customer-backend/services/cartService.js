@@ -26,10 +26,36 @@ function normalizeVariantId(productId, variantId) {
 }
 
 function matchCartLine(it, productId, variantId) {
-  const pid = String(productId);
-  const vid = normalizeVariantId(productId, variantId);
+  const pid = String(productId || '').trim();
+  const vid = normalizeVariantId(pid, variantId);
+  const linePid = String(it.productId || '').trim();
   const lineVid = normalizeVariantId(it.productId, it.variantId);
-  return String(it.productId) === pid && lineVid === vid;
+  return linePid === pid && lineVid === vid;
+}
+
+/**
+ * Resolve catalog keys and locate a cart line (handles parent vs SKU product ids).
+ */
+async function locateCartLine(cart, productId, variantId) {
+  if (!cart || !Array.isArray(cart.items) || !productId) return null;
+
+  let line = cart.items.find((it) => matchCartLine(it, productId, variantId));
+  if (line) return line;
+
+  const snapshot = await resolveLineSnapshot(productId, variantId);
+  if (snapshot.error) return null;
+
+  line = cart.items.find((it) =>
+    matchCartLine(it, snapshot.lineProductId, snapshot.lineVariantId),
+  );
+  if (line) return line;
+
+  return cart.items.find(
+    (it) =>
+      String(it.variantId || '').trim() === snapshot.lineVariantId &&
+      (String(it.productId) === snapshot.lineProductId ||
+        String(it.productId) === String(productId)),
+  );
 }
 
 /**
@@ -322,14 +348,22 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
     return removeItem(userId, itemId, opts);
   }
 
-  let filter = { userId };
+  const uid =
+    userId instanceof mongoose.Types.ObjectId
+      ? userId
+      : mongoose.Types.ObjectId.isValid(String(userId))
+        ? new mongoose.Types.ObjectId(String(userId))
+        : null;
+  if (!uid) return { error: 'Invalid user id' };
+
+  let filter = { userId: uid };
   let update = { $set: { 'items.$.quantity': quantity } };
 
   if (itemId && mongoose.Types.ObjectId.isValid(itemId)) {
     filter['items._id'] = new mongoose.Types.ObjectId(itemId);
   } else if (productId) {
-    const cart = await Cart.findOne({ userId }).lean();
-    const line = findCartLine(cart, null, productId, variantId);
+    const cart = await Cart.findOne({ userId: uid }).lean();
+    const line = await locateCartLine(cart, productId, variantId);
     if (!line) return { error: 'Item not found' };
     filter['items._id'] = line._id;
   } else {
@@ -338,8 +372,8 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
 
   let cart = await Cart.findOneAndUpdate(filter, update, { new: true }).lean();
   if (!cart && itemId && productId) {
-    const existing = await Cart.findOne({ userId }).lean();
-    const line = findCartLine(existing, null, productId, variantId);
+    const existing = await Cart.findOne({ userId: uid }).lean();
+    const line = await locateCartLine(existing, productId, variantId);
     if (line) {
       cart = await Cart.findOneAndUpdate(
         { userId, 'items._id': line._id },
@@ -360,17 +394,23 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
  */
 async function removeItem(userId, itemId, opts = {}) {
   const { productId, variantId } = opts;
-  let filter = { userId };
+  const uid =
+    userId instanceof mongoose.Types.ObjectId
+      ? userId
+      : mongoose.Types.ObjectId.isValid(String(userId))
+        ? new mongoose.Types.ObjectId(String(userId))
+        : null;
+  if (!uid) return { error: 'Invalid user id' };
+
+  const filter = { userId: uid };
   let pullQuery;
 
   if (itemId && mongoose.Types.ObjectId.isValid(itemId)) {
     pullQuery = { _id: new mongoose.Types.ObjectId(itemId) };
   } else if (productId) {
-    const cart = await Cart.findOne({ userId }).lean();
-    const line = findCartLine(cart, null, productId, variantId);
-    if (!line) {
-      return formatCartResponse(cart || { items: [] }, { userId });
-    }
+    const cart = await Cart.findOne({ userId: uid }).lean();
+    const line = await locateCartLine(cart, productId, variantId);
+    if (!line) return { error: 'Item not found' };
     pullQuery = { _id: line._id };
   } else {
     return { error: 'Item not found' };
@@ -379,12 +419,12 @@ async function removeItem(userId, itemId, opts = {}) {
   const cart = await Cart.findOneAndUpdate(
     filter,
     { $pull: { items: pullQuery } },
-    { new: true }
+    { new: true },
   ).lean();
 
   if (!cart) return { error: 'Cart not found' };
 
-  return formatCartResponse(cart, { userId });
+  return formatCartResponse(cart, { userId: uid });
 }
 
 /**
