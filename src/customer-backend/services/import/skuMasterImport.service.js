@@ -215,7 +215,6 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
 
           if (doc.mrp > 0 && doc.mrp < doc.price) {
             doc.mrp = doc.price;
-            warnings.push({ row: r, sku, message: 'MRP was lower than price, adjusted to match sale price' });
           }
           doc.originalPrice = doc.mrp;
           doc.costPrice = doc.baseCost || 0;
@@ -455,7 +454,14 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
 
         try {
           const filter = bannerId ? { bannerId } : { order };
-          const updateData = { title: title || '', imageUrl: imageUrl || '', isActive, order, ...(bannerId ? { bannerId } : {}) };
+          const updateData = {
+            title: title || '',
+            imageUrl: imageUrl || '',
+            isActive,
+            order,
+            redirectType: 'none',
+            ...(bannerId ? { bannerId } : {}),
+          };
           const updateQ = Banner.findOneAndUpdate(filter, { $set: updateData }, { upsert: true, new: false });
           if (session) updateQ.session(session);
           // eslint-disable-next-line no-await-in-loop
