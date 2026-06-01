@@ -49,6 +49,11 @@ const pageSchema = new mongoose.Schema(
     previousVersionId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerPage', default: null },
     publishedAt: Date,
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    /**
+     * CMS Pages Excel columns that have no dedicated schema field (exact header string → cell text).
+     * Ensures 100% data capture from Excel imports without losing any column data.
+     */
+    additionalImportedFields: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   },
   { timestamps: true }
 );

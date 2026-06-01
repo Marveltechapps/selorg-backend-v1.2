@@ -303,7 +303,9 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
   for (const [header, col] of headerMap.entries()) {
     const hTrim = String(header || '').trim();
     const norm = normalizeHeaderKey(header);
-    if (/^skuimg\d+$/i.test(hTrim) || /^skuimgdesc\d+$/i.test(hTrim)) {
+    // Support unlimited SKUimg and SKUimgDesc columns
+    if (/^skuimg\d*$/i.test(hTrim) || /^sku\s*img\s*\d*$/i.test(hTrim) || 
+        /^skuimgdesc\d*$/i.test(hTrim) || /^sku\s*img\s*desc\s*\d*$/i.test(hTrim)) {
       consumedNorm.add(norm);
       continue;
     }
@@ -416,10 +418,13 @@ function rebuildSkuMediaFromRow(doc, row, headerMap, getCellText) {
 
   const extras = [];
   for (const [h, col] of headerMap.entries()) {
-    if (/^skuimg\d+$/i.test(String(h).trim())) {
+    // Support unlimited SKUimg columns (not just 1-6)
+    if (/^skuimg\d*$/i.test(String(h).trim()) || /^sku\s*img\s*\d*$/i.test(String(h).trim())) {
       const cellRaw = getCellText(row, col);
       if (!cellRaw) continue;
-      const n = parseInt(String(h).replace(/^\D+/g, ''), 10) || 0;
+      // Extract number from column name, default to 999 for unnumbered columns
+      const match = String(h).match(/\d+/);
+      const n = match ? parseInt(match[0], 10) : 999;
       for (const u of parseCommaSeparatedImageUrls(cellRaw)) {
         extras.push({ n, u: applySkuImgUrlParams(u) });
       }
@@ -446,9 +451,12 @@ function rebuildSkuMediaFromRow(doc, row, headerMap, getCellText) {
 
   const descs = [];
   for (const [h, col] of headerMap.entries()) {
-    if (/^skuimgdesc\d+$/i.test(String(h).trim())) {
+    // Support unlimited SKUimgDesc columns (not just 1-6)
+    if (/^skuimgdesc\d*$/i.test(String(h).trim()) || /^sku\s*img\s*desc\s*\d*$/i.test(String(h).trim())) {
       const t = getCellText(row, col);
-      const n = parseInt(String(h).replace(/^\D+/g, ''), 10) || 0;
+      // Extract number from column name, default to 999 for unnumbered columns
+      const match = String(h).match(/\d+/);
+      const n = match ? parseInt(match[0], 10) : 999;
       if (t) descs.push({ n, t });
     }
   }

@@ -17,12 +17,28 @@ const cacheService = require('../../../core/services/cache.service');
  * customer app reflects the new layout/categories/banners immediately instead
  * of waiting up to 60s for the TTL to expire.
  */
-async function invalidateCustomerCachesSafely() {
+async function invalidateCustomerCachesSafely(cachePatterns = ['cache:*']) {
   try {
-    await cacheService.delPattern('cache:*');
+    for (const pattern of cachePatterns) {
+      await cacheService.delPattern(pattern);
+    }
   } catch (err) {
     console.error('cache invalidation after upload failed', err);
   }
+}
+
+/**
+ * Invalidate specific cache patterns for CMS-related data
+ */
+async function invalidateCmsCachesSafely() {
+  const cmsPatterns = [
+    'cache:pages:*',
+    'cache:collections:*', 
+    'cache:banners:*',
+    'cache:home-sections:*',
+    'cache:navigation:*'
+  ];
+  await invalidateCustomerCachesSafely(cmsPatterns);
 }
 
 async function listPages(req, res) {
@@ -580,16 +596,24 @@ module.exports = {
       return res.status(400).json({ success: false, counts: {}, errors: [{ message: 'file is required' }] });
     }
     try {
-      const { counts, errors } = await importCmsPages(req.file.buffer);
+      const { counts, errors, warnings, success } = await importCmsPages(req.file.buffer);
+      
+      // Invalidate CMS-specific caches on successful import
+      if (success) {
+        await invalidateCmsCachesSafely();
+      }
+      
       return res.status(200).json({
-        success: errors.length === 0,
+        success,
         counts,
+        warnings: warnings || [],
         errors,
       });
     } catch (err) {
       return res.status(200).json({
         success: false,
         counts: {},
+        warnings: [],
         errors: [{ message: err.message }],
       });
     }

@@ -87,7 +87,7 @@ const productSchema = new mongoose.Schema(
     lowStockThreshold: { type: Number, default: 10 },
     brand: { type: String, default: '' },
     brandCode: { type: String, default: '' },
-    vendorCode: { type: String, default: '' },
+    vendorCode: { type: String, default: '' }, // Now properly mapped from SKU Master
     mfgSkuCode: { type: String, default: '' },
     countryOfOrigin: { type: String, default: 'India' },
 
