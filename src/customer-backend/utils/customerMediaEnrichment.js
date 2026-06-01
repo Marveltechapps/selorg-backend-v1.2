@@ -10,43 +10,46 @@
  * cardImageUrl / bannerImageUrl and they will be used first.
  */
 
+const { isStubImageUrl, pickFirstNonStubString, sanitizeImageFields } = require('./mediaUrl');
+
 function pickFirstString(...vals) {
-  for (const v of vals) {
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return '';
+  return pickFirstNonStubString(...vals);
 }
 
 function enrichCategory(doc) {
   if (!doc || typeof doc !== 'object') return doc;
-  const primary = pickFirstString(doc.thumbnailUrl, doc.cardImageUrl, doc.imageUrl);
+  const base = sanitizeImageFields(doc);
+  const primary = pickFirstString(base.thumbnailUrl, base.cardImageUrl, base.imageUrl);
   return {
-    ...doc,
+    ...base,
     thumbnailUrl: primary,
-    cardImageUrl: pickFirstString(doc.cardImageUrl, doc.thumbnailUrl, doc.imageUrl) || primary,
+    cardImageUrl: pickFirstString(base.cardImageUrl, base.thumbnailUrl, base.imageUrl) || primary,
   };
 }
 
 function enrichProduct(doc) {
   if (!doc || typeof doc !== 'object') return doc;
+  const base = sanitizeImageFields(doc);
   const img0 =
-    Array.isArray(doc.images) && doc.images.length > 0 && typeof doc.images[0] === 'string'
-      ? doc.images[0].trim()
+    Array.isArray(base.images) && base.images.length > 0 && typeof base.images[0] === 'string'
+      ? base.images[0].trim()
       : '';
-  const primary = pickFirstString(doc.thumbnailUrl, doc.cardImageUrl, doc.imageUrl, img0);
+  const primary = pickFirstString(base.thumbnailUrl, base.cardImageUrl, base.imageUrl, img0);
   return {
-    ...doc,
+    ...base,
     thumbnailUrl: primary,
-    cardImageUrl: pickFirstString(doc.cardImageUrl, doc.thumbnailUrl, doc.imageUrl, img0) || primary,
+    cardImageUrl: pickFirstString(base.cardImageUrl, base.thumbnailUrl, base.imageUrl, img0) || primary,
+    imageUrl: isStubImageUrl(base.imageUrl) ? '' : base.imageUrl,
   };
 }
 
 function enrichBanner(doc) {
   if (!doc || typeof doc !== 'object') return doc;
-  const wide = pickFirstString(doc.bannerImageUrl, doc.thumbnailUrl, doc.imageUrl);
-  const thumb = pickFirstString(doc.thumbnailUrl, doc.bannerImageUrl, doc.imageUrl);
+  const base = sanitizeImageFields(doc);
+  const wide = pickFirstString(base.bannerImageUrl, base.thumbnailUrl, base.imageUrl);
+  const thumb = pickFirstString(base.thumbnailUrl, base.bannerImageUrl, base.imageUrl);
   return {
-    ...doc,
+    ...base,
     bannerImageUrl: wide,
     thumbnailUrl: thumb || wide,
   };
@@ -54,21 +57,23 @@ function enrichBanner(doc) {
 
 function enrichLifestyleItem(doc) {
   if (!doc || typeof doc !== 'object') return doc;
-  const primary = pickFirstString(doc.thumbnailUrl, doc.cardImageUrl, doc.imageUrl);
+  const base = sanitizeImageFields(doc);
+  const primary = pickFirstString(base.thumbnailUrl, base.cardImageUrl, base.imageUrl);
   return {
-    ...doc,
+    ...base,
     thumbnailUrl: primary,
-    cardImageUrl: pickFirstString(doc.cardImageUrl, doc.thumbnailUrl, doc.imageUrl) || primary,
+    cardImageUrl: pickFirstString(base.cardImageUrl, base.thumbnailUrl, base.imageUrl) || primary,
   };
 }
 
 function enrichPromoBlockEntry(entry) {
   if (!entry || typeof entry !== 'object') return entry;
-  const wide = pickFirstString(entry.bannerImageUrl, entry.thumbnailUrl, entry.imageUrl);
+  const base = sanitizeImageFields(entry);
+  const wide = pickFirstString(base.bannerImageUrl, base.thumbnailUrl, base.imageUrl);
   return {
-    ...entry,
+    ...base,
     bannerImageUrl: wide,
-    thumbnailUrl: pickFirstString(entry.thumbnailUrl, entry.bannerImageUrl, entry.imageUrl) || wide,
+    thumbnailUrl: pickFirstString(base.thumbnailUrl, base.bannerImageUrl, base.imageUrl) || wide,
   };
 }
 
@@ -154,4 +159,5 @@ module.exports = {
   enrichCategory,
   enrichProduct,
   enrichBanner,
+  isStubImageUrl,
 };

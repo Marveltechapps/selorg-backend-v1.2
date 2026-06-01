@@ -62,6 +62,17 @@ async function enrichWithGeocoding(body) {
   return null;
 }
 
+function toAddressDto(doc) {
+  if (!doc) return null;
+  const o = doc.toObject ? doc.toObject() : doc;
+  return {
+    ...o,
+    _id: String(o._id),
+    landmark: o.landmark || '',
+    line2: o.line2 || '',
+  };
+}
+
 /**
  * List all addresses for a user, ordered by order then createdAt.
  */
@@ -69,7 +80,7 @@ async function getAddressesByUserId(userId) {
   const addresses = await CustomerAddress.find({ userId })
     .sort({ order: 1, createdAt: 1 })
     .lean();
-  return addresses;
+  return addresses.map((a) => ({ ...a, _id: String(a._id), landmark: a.landmark || '' }));
 }
 
 /**
@@ -80,80 +91,69 @@ async function getDefaultAddress(userId) {
   if (!address) {
     address = await CustomerAddress.findOne({ userId }).sort({ order: 1, createdAt: 1 }).lean();
   }
-  return address;
+  return address ? { ...address, _id: String(address._id), landmark: address.landmark || '' } : null;
 }
 
 /**
- * Create a new address for a user.
- * Uses Google Maps Geocoding API to obtain lat/lng from address or exact address from lat/lng.
- * If an address with the same label already exists, update it instead (upsert).
- * Returns { address, wasUpdated } so the caller can distinguish create vs update.
+ * Create a new address for a user (always inserts a new document).
  */
 async function createAddress(userId, body) {
   const enriched = await enrichWithGeocoding(body);
-  const merged = enriched
-    ? { ...body, ...enriched }
-    : body;
+  const merged = enriched ? { ...body, ...enriched } : body;
 
-  const { label, line1, line2, city, state, pincode, latitude, longitude, isDefault } = merged;
-  const normalizedLabel = (label || 'Home').trim();
+  const {
+    label,
+    line1,
+    line2,
+    landmark,
+    city,
+    state,
+    pincode,
+    latitude,
+    longitude,
+    isDefault,
+  } = merged;
 
-  const existing = await CustomerAddress.findOne({
-    userId,
-    label: { $regex: new RegExp(`^${normalizedLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-  });
-
-  if (existing) {
-    if (line1 !== undefined) existing.line1 = line1;
-    if (line2 !== undefined) existing.line2 = line2;
-    if (city !== undefined) existing.city = city;
-    if (state !== undefined) existing.state = state;
-    if (pincode !== undefined) existing.pincode = pincode;
-    if (latitude !== undefined) existing.latitude = latitude;
-    if (longitude !== undefined) existing.longitude = longitude;
-    if (isDefault !== undefined) {
-      existing.isDefault = Boolean(isDefault);
-      if (existing.isDefault) {
-        await CustomerAddress.updateMany(
-          { userId, _id: { $ne: existing._id } },
-          { $set: { isDefault: false } }
-        );
-      }
-    }
-    await existing.save();
-    const result = existing.toObject ? existing.toObject() : existing;
-    return { address: result, wasUpdated: true };
+  if (!line1 || !String(line1).trim()) {
+    return { error: 'VALIDATION', message: 'Address line 1 is required' };
+  }
+  if (!city || !String(city).trim()) {
+    return { error: 'VALIDATION', message: 'City is required' };
   }
 
+  const normalizedLabel = (label || 'Home').trim();
   const count = await CustomerAddress.countDocuments({ userId });
+
   const doc = await CustomerAddress.create({
     userId: new mongoose.Types.ObjectId(userId),
     label: normalizedLabel,
-    line1: line1 || '',
-    line2: line2 || '',
-    city: city || '',
-    state: state || '',
-    pincode: pincode || '',
+    line1: String(line1).trim(),
+    line2: String(line2 || '').trim(),
+    landmark: String(landmark || '').trim(),
+    city: String(city).trim(),
+    state: String(state || '').trim(),
+    pincode: String(pincode || '').trim(),
     latitude,
     longitude,
     isDefault: Boolean(isDefault),
     order: count,
   });
+
   if (isDefault) {
     await CustomerAddress.updateMany(
       { userId, _id: { $ne: doc._id } },
       { $set: { isDefault: false } }
     );
   }
-  const result = doc.toObject ? doc.toObject() : doc;
-  return { address: result, wasUpdated: false };
+
+  return { address: toAddressDto(doc), wasUpdated: false };
 }
 
 /**
  * Update an address. Only the owning user can update.
- * Uses Google Maps Geocoding to enrich lat/lng or address when provided.
  */
 async function updateAddress(userId, addressId, body) {
+  if (!mongoose.Types.ObjectId.isValid(addressId)) return null;
   const address = await CustomerAddress.findOne({ _id: addressId, userId });
   if (!address) return null;
 
@@ -164,13 +164,14 @@ async function updateAddress(userId, addressId, body) {
   const enriched = await enrichWithGeocoding(mergeBody);
   const merged = enriched ? { ...body, ...enriched } : body;
 
-  const { label, line1, line2, city, state, pincode, latitude, longitude, isDefault } = merged;
-  if (label !== undefined) address.label = label;
-  if (line1 !== undefined) address.line1 = line1;
-  if (line2 !== undefined) address.line2 = line2;
-  if (city !== undefined) address.city = city;
-  if (state !== undefined) address.state = state;
-  if (pincode !== undefined) address.pincode = pincode;
+  const { label, line1, line2, landmark, city, state, pincode, latitude, longitude, isDefault } = merged;
+  if (label !== undefined) address.label = String(label).trim() || address.label;
+  if (line1 !== undefined) address.line1 = String(line1).trim();
+  if (line2 !== undefined) address.line2 = String(line2 || '').trim();
+  if (landmark !== undefined) address.landmark = String(landmark || '').trim();
+  if (city !== undefined) address.city = String(city).trim();
+  if (state !== undefined) address.state = String(state || '').trim();
+  if (pincode !== undefined) address.pincode = String(pincode || '').trim();
   if (latitude !== undefined) address.latitude = latitude;
   if (longitude !== undefined) address.longitude = longitude;
   if (isDefault !== undefined) {
@@ -183,13 +184,14 @@ async function updateAddress(userId, addressId, body) {
     }
   }
   await address.save();
-  return address.toObject ? address.toObject() : address;
+  return toAddressDto(address);
 }
 
 /**
  * Delete an address. Only the owning user can delete.
  */
 async function deleteAddress(userId, addressId) {
+  if (!mongoose.Types.ObjectId.isValid(addressId)) return null;
   const result = await CustomerAddress.findOneAndDelete({ _id: addressId, userId });
   return result;
 }
@@ -198,12 +200,13 @@ async function deleteAddress(userId, addressId) {
  * Set an address as default. Only the owning user.
  */
 async function setDefaultAddress(userId, addressId) {
+  if (!mongoose.Types.ObjectId.isValid(addressId)) return null;
   const address = await CustomerAddress.findOne({ _id: addressId, userId });
   if (!address) return null;
   await CustomerAddress.updateMany({ userId }, { $set: { isDefault: false } });
   address.isDefault = true;
   await address.save();
-  return address.toObject ? address.toObject() : address;
+  return toAddressDto(address);
 }
 
 module.exports = {
