@@ -40,7 +40,26 @@ function isCustomerApiPath(req) {
   return path.startsWith('/api/v1/customer') || path.startsWith('/api/payment');
 }
 
+function setPreflightHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (!origin || !isAllowedOrigin(origin)) return false;
+  res.header('Access-Control-Allow-Origin', origin);
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', CORS_OPTIONS.methods.join(', '));
+  res.header('Access-Control-Allow-Headers', CORS_OPTIONS.allowedHeaders.join(', '));
+  res.header('Access-Control-Max-Age', String(CORS_OPTIONS.maxAge));
+  res.header('Vary', 'Origin');
+  return true;
+}
+
 function applyCors(app) {
+  // 0. Answer OPTIONS preflight before other middleware (dashboard login from dashboard.selorg.com)
+  app.use((req, res, next) => {
+    if (req.method !== 'OPTIONS') return next();
+    if (!setPreflightHeaders(req, res)) return next();
+    return res.sendStatus(CORS_OPTIONS.optionsSuccessStatus);
+  });
+
   // 1. Manual header fallback (runs for all requests including those that might skip or fail in the cors middleware)
   app.use((req, res, next) => {
     const origin = req.headers.origin;

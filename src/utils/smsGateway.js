@@ -72,7 +72,7 @@ function buildSmsRequest(mobileNumber, otp) {
   const useCountryCode = config.smsUseCountryCode === true;
   const mobileParam = useCountryCode ? '91' + mobile : mobile;
 
-  const sep = base.includes('?') && !base.endsWith('&') && !base.endsWith('?') ? '&' : '';
+  const sep = base.includes('?') ? (base.endsWith('&') || base.endsWith('?') ? '' : '&') : '?';
   const url = `${base}${sep}${paramMobile}=${encodeURIComponent(mobileParam)}&${paramMessage}=${encodeURIComponent(message)}`;
 
   return { url, mobile, mobileParam, message, paramMobile, paramMessage };
