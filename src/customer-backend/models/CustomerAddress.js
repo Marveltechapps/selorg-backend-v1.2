@@ -21,7 +21,6 @@ const addressSchema = new mongoose.Schema(
 addressSchema.index({ userId: 1 });
 addressSchema.index({ userId: 1, isDefault: 1 });
 addressSchema.index({ latitude: 1, longitude: 1 });
-addressSchema.index({ userId: 1, label: 1 }, { unique: true });
 
 const CustomerAddress =
   mongoose.models.CustomerAddress ||

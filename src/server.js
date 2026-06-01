@@ -482,7 +482,7 @@ if (process.env.NODE_ENV !== 'test') {
     } catch (dbErr) {
       logger.error('Cannot start server without database', {
         error: dbErr.message,
-        hint: 'Check MONGO_URI in selorg-dashboard-backend-v1.1/.env and that MongoDB is reachable',
+        hint: 'Check MONGO_URI in selorg-backend-v1.2/.env and that MongoDB Atlas is reachable (on Windows, DNS_SERVERS=8.8.8.8,1.1.1.1 helps)',
       });
       process.exit(1);
     }

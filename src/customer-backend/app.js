@@ -90,8 +90,18 @@ app.use('/delivery', deliveryRoutes);
 const { getPublicConfig } = require('./controllers/admin/appConfigAdminController');
 app.get('/app-config', getPublicConfig);
 
+const CUSTOMER_BACKEND_PORT = Number(process.env.PORT) || 3333;
+
 app.get('/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    service: 'customer',
+    port: CUSTOMER_BACKEND_PORT,
+    hint: 'If npm run dev shows "Port already in use", another backend instance is already listening on this port.',
+  });
+});
+app.head('/health', (_req, res) => {
+  res.status(200).end();
 });
 
 module.exports = app;

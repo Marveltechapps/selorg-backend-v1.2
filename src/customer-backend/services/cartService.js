@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const { Cart } = require('../models/Cart');
 const { Product } = require('../models/Product');
 const { calculatePricing, compareWithLegacy } = require('./pricingEngineService');
+const { pickFirstNonStubString } = require('../utils/mediaUrl');
 
 const usePricingEngine = true;
 
@@ -10,6 +11,7 @@ const usePricingEngine = true;
  * Supports optional pricing context (coupon/zone/payment) for parity with createOrder.
  */
 async function getCartForUser(userId, options = {}) {
+  await dedupeCartLines(userId);
   const cart = await Cart.findOne({ userId }).lean();
   if (!cart || !cart.items || cart.items.length === 0) {
     return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
@@ -164,10 +166,7 @@ async function formatCartResponse(cart, options = {}) {
 }
 
 function pickFirstString(...vals) {
-  for (const v of vals) {
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return '';
+  return pickFirstNonStubString(...vals);
 }
 
 /** Match customer app + customerMediaEnrichment product image order. */
@@ -273,11 +272,39 @@ async function resolveLineSnapshot(productId, variantId) {
 }
 
 /**
+ * Merge duplicate cart lines (same product + variant) before formatting.
+ */
+async function dedupeCartLines(userId) {
+  const cart = await Cart.findOne({ userId });
+  if (!cart || !Array.isArray(cart.items) || cart.items.length < 2) return;
+
+  const merged = new Map();
+  for (const it of cart.items) {
+    const pid = String(it.productId);
+    const vid = normalizeVariantId(pid, it.variantId);
+    const key = `${pid}::${vid}`;
+    const existing = merged.get(key);
+    if (existing) {
+      existing.quantity += Number(it.quantity) || 0;
+      if (!pickFirstString(existing.image) && pickFirstString(it.image)) {
+        existing.image = it.image;
+      }
+    } else {
+      merged.set(key, { ...it.toObject?.() ?? it, productId: it.productId, variantId: vid });
+    }
+  }
+
+  cart.items = Array.from(merged.values());
+  await cart.save();
+}
+
+/**
  * Add item to cart. If productId/variantId already exists, increment quantity.
  */
 async function addItem(userId, body) {
   const { productId, variantId, quantity } = body;
-  if (!productId || quantity == null || quantity < 1) {
+  const qty = Math.max(1, Number(quantity) || 1);
+  if (!productId) {
     return { error: 'productId and quantity required' };
   }
 
@@ -295,46 +322,49 @@ async function addItem(userId, body) {
     gstRate,
   } = snapshot;
 
-  const productOid = new mongoose.Types.ObjectId(lineProductId);
+  await dedupeCartLines(userId);
 
-  // 1. Try to increment quantity if item already exists in cart
-  let cart = await Cart.findOne({ userId }).lean();
-  if (cart && Array.isArray(cart.items)) {
-    const existing = cart.items.find((it) => matchCartLine(it, lineProductId, lineVariantId));
-    if (existing) {
-      const update =
-        !pickFirstString(existing.image) && pickFirstString(image)
-          ? { $inc: { 'items.$.quantity': quantity }, $set: { 'items.$.image': image } }
-          : { $inc: { 'items.$.quantity': quantity } };
-      cart = await Cart.findOneAndUpdate(
-        { userId, 'items._id': existing._id },
-        update,
-        { new: true },
-      ).lean();
-      if (cart) return formatCartResponse(cart, { userId });
-    }
+  let cart = await Cart.findOne({ userId });
+  if (!cart) {
+    cart = await Cart.create({
+      userId,
+      items: [{
+        productId: new mongoose.Types.ObjectId(lineProductId),
+        variantId: lineVariantId,
+        variantSize,
+        quantity: qty,
+        price: quantityPrice,
+        originalPrice,
+        gstRate: gstRate || 0,
+        productName,
+        image,
+      }],
+    });
+    return formatCartResponse(cart.toObject(), { userId });
   }
 
-  // 2. Item not in cart, push new item
-  const newItem = {
-    productId: productOid,
-    variantId: lineVariantId,
-    variantSize,
-    quantity,
-    price: quantityPrice,
-    originalPrice,
-    gstRate: gstRate || 0,
-    productName,
-    image,
-  };
+  const existing = cart.items.find((it) => matchCartLine(it, lineProductId, lineVariantId));
+  if (existing) {
+    existing.quantity = (Number(existing.quantity) || 0) + qty;
+    if (!pickFirstString(existing.image) && pickFirstString(image)) {
+      existing.image = image;
+    }
+  } else {
+    cart.items.push({
+      productId: new mongoose.Types.ObjectId(lineProductId),
+      variantId: lineVariantId,
+      variantSize,
+      quantity: qty,
+      price: quantityPrice,
+      originalPrice,
+      gstRate: gstRate || 0,
+      productName,
+      image,
+    });
+  }
 
-  const updatedCart = await Cart.findOneAndUpdate(
-    { userId },
-    { $push: { items: newItem } },
-    { upsert: true, new: true },
-  ).lean();
-
-  return formatCartResponse(updatedCart, { userId });
+  await cart.save();
+  return formatCartResponse(cart.toObject(), { userId });
 }
 
 /**
