@@ -2,6 +2,49 @@ const { PricingCoupon: Coupon } = require('../../merch/models/PricingCoupon');
 const { Order } = require('../models/Order');
 const { CouponRedemption } = require('../models/CouponRedemption');
 const mongoose = require('mongoose');
+const DEFAULT_DELIVERY_FEE = Number(process.env.PRICING_DELIVERY_FEE || 40);
+const FREE_DELIVERY_THRESHOLD = Number(process.env.PRICING_FREE_DELIVERY_THRESHOLD || 499);
+
+function toUpper(value, fallback = '') {
+  const v = String(value ?? '').trim();
+  return v ? v.toUpperCase() : fallback;
+}
+
+function deriveDeliveryFee(cartValue = 0) {
+  return Number(cartValue) >= FREE_DELIVERY_THRESHOLD ? 0 : DEFAULT_DELIVERY_FEE;
+}
+
+function mapCouponForCustomer(coupon) {
+  const discountType = String(coupon.discountType || '').toUpperCase();
+  return {
+    _id: coupon._id,
+    code: coupon.code,
+    displayName: coupon.name || coupon.code,
+    title: coupon.name || coupon.code,
+    description: coupon.description || '',
+    couponType: coupon.discountType,
+    discountType: coupon.discountType,
+    discountValue: coupon.discountValue || 0,
+    minOrderValue: coupon.minOrderValue ?? coupon.minOrderAmount ?? 0,
+    maxDiscountCap: coupon.maxDiscount ?? coupon.maxDiscountAmount ?? null,
+    startDate: coupon.startDate || coupon.validFrom || null,
+    endDate: coupon.endDate || coupon.validTo || null,
+    usageLimit: coupon.usageLimit ?? null,
+    usagePerUser: coupon.usagePerUser ?? 1,
+    usageCount: coupon.usageCount ?? 0,
+    applicableCategories: coupon.applicableCategories || [],
+    applicableProducts: coupon.applicableProducts || [],
+    applicableSkuIds: coupon.applicableSkuIds || [],
+    targetZones: coupon.targetZones || [],
+    paymentRestriction: coupon.paymentRestriction || 'ALL',
+    showInSections: coupon.showInSections || ['COUPON_LIST'],
+    priorityRank: coupon.priorityRank ?? 10,
+    termsAndConditions: coupon.termsAndConditions || '',
+    status: coupon.status,
+    isActive: coupon.isActive !== false && String(coupon.status || '').toLowerCase() === 'active',
+    isCashback: discountType === 'CASHBACK',
+  };
+}
 
 /**
  * Validates a coupon based on multiple criteria.
@@ -124,8 +167,10 @@ async function validateCoupon(couponCode, userId, cartItems, cartValue, paymentM
 
   // STEP 7 — Payment method?
   const paymentRestriction = String(coupon.paymentRestriction || 'ALL').toUpperCase();
-  if (paymentRestriction !== 'ALL' &&
-      paymentRestriction !== String(paymentMethod || '').toUpperCase()) {
+  const normalizedPaymentMethod = toUpper(paymentMethod, 'ALL');
+  if (normalizedPaymentMethod !== 'ALL' &&
+      paymentRestriction !== 'ALL' &&
+      paymentRestriction !== normalizedPaymentMethod) {
     return { 
       valid: false, 
       error_code: 'PAYMENT_METHOD_NOT_ELIGIBLE',
@@ -175,12 +220,13 @@ async function validateCoupon(couponCode, userId, cartItems, cartValue, paymentM
  * List active coupons for the customer app.
  */
 async function listActiveCoupons(params = {}) {
-  const { userId, cartValue = 0, zone = '', paymentMethod = 'ALL' } = params;
+  const { userId, cartValue = 0, zone = '', paymentMethod = 'ALL', cartItems = [] } = params;
   const now = new Date();
   
   // Basic filtering for active coupons in the date window
   const coupons = await Coupon.find({
     status: { $in: ['active', 'ACTIVE'] },
+    isActive: { $ne: false },
     $and: [
       { $or: [{ startDate: null }, { startDate: { $lte: now } }] },
       { $or: [{ endDate: null }, { endDate: { $gte: now } }] },
@@ -189,7 +235,36 @@ async function listActiveCoupons(params = {}) {
     .sort({ priorityRank: 1 })
     .lean();
 
-  return coupons;
+  const normalizedUserId = userId && mongoose.Types.ObjectId.isValid(String(userId))
+    ? String(userId)
+    : null;
+  const deliveryFee = deriveDeliveryFee(cartValue);
+  const annotatedCoupons = [];
+
+  for (const coupon of coupons) {
+    const mapped = mapCouponForCustomer(coupon);
+    // Return all active coupons from Admin source; annotate eligibility when context is available.
+    if (!normalizedUserId) {
+      mapped.eligible = true;
+      mapped.ineligibilityReason = null;
+      annotatedCoupons.push(mapped);
+      continue;
+    }
+    const validation = await validateCoupon(
+      coupon.code,
+      normalizedUserId,
+      Array.isArray(cartItems) ? cartItems : [],
+      Number(cartValue) || 0,
+      paymentMethod || 'ALL',
+      zone || '',
+      deliveryFee
+    );
+    mapped.eligible = !!validation.valid;
+    mapped.ineligibilityReason = validation.valid ? null : validation.error_code || 'NOT_ELIGIBLE';
+    annotatedCoupons.push(mapped);
+  }
+
+  return annotatedCoupons;
 }
 
 module.exports = { validateCoupon, listActiveCoupons };

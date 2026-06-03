@@ -5,7 +5,8 @@ const mongoose = require('mongoose');
 const { Category } = require('../models/Category');
 const { Banner } = require('../models/Banner');
 const { Product } = require('../models/Product');
-const { enrichProductsWithVariants } = require('../utils/productVariantsPayload');
+const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
+const { enrichProduct, enrichCategory } = require('../utils/customerMediaEnrichment');
 
 const DEFAULT_PRODUCT_LIMIT = 50;
 
@@ -144,19 +145,27 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
 
   const products = await enrichProductsWithVariants(rawProducts);
 
+  const categoryOut = enrichCategory(category);
   return {
     category: {
       id: String(category._id),
       name: category.name,
       slug: category.slug,
-      imageUrl: category.imageUrl || null,
+      imageUrl: categoryOut.imageUrl || categoryOut.thumbnailUrl || null,
+      thumbnailUrl: categoryOut.thumbnailUrl || null,
+      cardImageUrl: categoryOut.cardImageUrl || null,
     },
-    subcategories: subcategories.map((s) => ({
-      id: String(s._id),
-      name: s.name,
-      slug: s.slug,
-      imageUrl: s.imageUrl || null,
-    })),
+    subcategories: subcategories.map((s) => {
+      const sub = enrichCategory(s);
+      return {
+        id: String(s._id),
+        name: s.name,
+        slug: s.slug,
+        imageUrl: sub.imageUrl || sub.thumbnailUrl || null,
+        thumbnailUrl: sub.thumbnailUrl || null,
+        cardImageUrl: sub.cardImageUrl || null,
+      };
+    }),
     banners: banners.map((b) => ({
       id: String(b._id),
       imageUrl: b.imageUrl,
@@ -165,18 +174,25 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
       redirectValue: b.redirectValue || null,
       title: b.title || null,
     })),
-    products: products.map((p) => ({
-      id: String(p._id),
-      name: p.name,
-      images: Array.isArray(p.images) ? p.images : [],
-      price: p.price,
-      originalPrice: p.originalPrice,
-      discount: p.discount,
-      quantity:
-        p.quantity ||
-        (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : ''),
-      variants: Array.isArray(p.variants) ? p.variants : [],
-    })),
+    products: products.map((p) => {
+      const enriched = enrichProduct(p);
+      const media = pickImageFields(enriched);
+      return {
+        id: String(p._id),
+        name: p.name,
+        imageUrl: media.imageUrl || null,
+        thumbnailUrl: media.thumbnailUrl || null,
+        cardImageUrl: media.cardImageUrl || null,
+        images: Array.isArray(media.images) ? media.images : [],
+        price: p.price,
+        originalPrice: p.originalPrice,
+        discount: p.discount,
+        quantity:
+          p.quantity ||
+          (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : ''),
+        variants: Array.isArray(p.variants) ? p.variants : [],
+      };
+    }),
   };
 }
 

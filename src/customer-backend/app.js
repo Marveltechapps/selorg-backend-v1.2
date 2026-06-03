@@ -48,7 +48,12 @@ app.use(express.json());
 
 const { cacheMiddleware } = require('../core/middleware');
 const appConfig = require('../config/app');
-app.use(cacheMiddleware(appConfig.cache.customer.default, { skipPaths: ['/bootstrap'] }));
+// Cart and addresses are per-user and change often — never cache those GETs.
+app.use(
+  cacheMiddleware(appConfig.cache.customer.default, {
+    skipPaths: ['/bootstrap', '/cart', '/addresses', '/user'],
+  }),
+);
 
 app.use('/onboarding', onboardingRoutes);
 app.use('/auth', authRoutes);

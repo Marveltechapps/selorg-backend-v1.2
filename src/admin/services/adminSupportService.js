@@ -203,6 +203,9 @@ function mapTicketToResponse(doc, notes = []) {
     customerId: d.customerId || '',
     assignedTo: d.assignedTo?.toString(),
     assignedToName: d.assignedToName || d.assignedTo?.name,
+    assignedAt: d.assignedAt,
+    assignedAgentId: d.assignedTo?.toString(),
+    assignedAgentName: d.assignedToName || d.assignedTo?.name,
     orderNumber: d.orderNumber,
     tags: d.tags || [],
     responseTime: d.responseTime,
@@ -307,8 +310,22 @@ async function getTicketById(id) {
   return mapTicketToResponse(ticket, notes);
 }
 
+const VALID_CHANNELS = new Set(['email', 'chat', 'phone', 'in_app', 'customer_app', 'rider_app']);
+
+function normalizeTicketChannel(channel) {
+  const c = String(channel || 'in_app').trim();
+  if (VALID_CHANNELS.has(c)) return c;
+  if (c === 'customer' || c === 'customer_app') return 'in_app';
+  if (c === 'rider' || c === 'rider_app') return 'rider_app';
+  return 'in_app';
+}
+
 async function createTicket(data, agentId, agentName) {
   const ticketNumber = await getNextTicketNumber();
+  const noteAuthorId =
+    agentId || data.customerId || (data.customerEmail ? String(data.customerEmail) : 'customer');
+  const noteAuthorName = agentName || data.customerName || 'Customer';
+
   const doc = await AdminSupportTicket.create({
     ticketNumber,
     subject: data.subject || 'Untitled',
@@ -316,7 +333,7 @@ async function createTicket(data, agentId, agentName) {
     category: data.category || 'order',
     priority: data.priority || 'medium',
     status: 'open',
-    channel: data.channel || 'in_app',
+    channel: normalizeTicketChannel(data.channel),
     customerId: data.customerId,
     customerName: data.customerName || 'Unknown',
     customerEmail: data.customerEmail || 'unknown@email.com',
@@ -341,8 +358,8 @@ async function createTicket(data, agentId, agentName) {
   } else {
     const note = await AdminSupportTicketNote.create({
       ticketId: doc._id,
-      authorId: agentId,
-      authorName: agentName,
+      authorId: String(noteAuthorId),
+      authorName: String(noteAuthorName),
       type: 'customer_reply',
       content: data.description || data.subject,
       isInternal: false,
@@ -360,7 +377,11 @@ async function updateTicket(id, data) {
     const pickerUpdate = {};
     if (data.status) {
       pickerUpdate.status =
-        data.status === 'closed' || data.status === 'resolved' ? 'resolved' : data.status;
+        data.status === 'closed' || data.status === 'resolved'
+          ? 'resolved'
+          : data.status === 'waiting_for_customer'
+            ? 'open'
+            : data.status;
     }
     const doc = await PickerSupportTicket.findByIdAndUpdate(
       rawId,
@@ -378,11 +399,30 @@ async function updateTicket(id, data) {
     { new: true }
   ).populate('assignedTo', 'name email').lean();
   if (!doc) return null;
+  const updateSet = {};
   if (data.status === 'resolved' || data.status === 'closed') {
-    await AdminSupportTicket.findByIdAndUpdate(id, { $set: { resolvedAt: new Date() } });
+    updateSet.resolvedAt = new Date();
+  } else if (data.status) {
+    updateSet.resolvedAt = null;
   }
+  if (Object.keys(updateSet).length > 0) {
+    await AdminSupportTicket.findByIdAndUpdate(id, { $set: updateSet });
+  }
+
+  if (data.status) {
+    await AdminSupportTicketNote.create({
+      ticketId: doc._id,
+      authorId: String(data.updatedById || 'system'),
+      authorName: String(data.updatedByName || 'Support'),
+      type: 'status_change',
+      content: `Status changed to ${String(data.status).replace(/_/g, ' ')}`,
+      isInternal: false,
+    });
+  }
+
+  const fresh = await AdminSupportTicket.findById(id).populate('assignedTo', 'name email').lean();
   const notes = await AdminSupportTicketNote.find({ ticketId: doc._id }).sort({ createdAt: 1 }).lean();
-  return mapTicketToResponse(doc, notes);
+  return mapTicketToResponse(fresh || doc, notes);
 }
 
 async function assignTicket(ticketId, agentId, agentName) {
@@ -392,9 +432,10 @@ async function assignTicket(ticketId, agentId, agentName) {
   if (isPickerTicketId(ticketId)) {
     const rawId = getPickerTicketRawId(ticketId);
     if (!mongoose.Types.ObjectId.isValid(rawId)) return null;
+    const assignedAt = new Date();
     const doc = await PickerSupportTicket.findByIdAndUpdate(
       rawId,
-      { $set: { assignedTo: String(agentId), assignedToName: name, status: 'in_progress' } },
+      { $set: { assignedTo: String(agentId), assignedToName: name, assignedAt, status: 'in_progress' } },
       { new: true }
     ).lean();
     if (!doc) return null;
@@ -408,9 +449,10 @@ async function assignTicket(ticketId, agentId, agentName) {
     return getTicketById(ticketId);
   }
 
+  const assignedAt = new Date();
   const doc = await AdminSupportTicket.findByIdAndUpdate(
     ticketId,
-    { $set: { assignedTo: agentId, assignedToName: name, status: 'in_progress' } },
+    { $set: { assignedTo: agentId, assignedToName: name, assignedAt, status: 'in_progress' } },
     { new: true }
   )
     .populate('assignedTo', 'name email')

@@ -45,6 +45,28 @@ async function auditAdminAction(req, action, entityId, details = {}) {
   }
 }
 
+function enrichCustomerIdentity(customer) {
+  if (!customer) return customer;
+
+  const fallbackName = customer.savedCheckoutContact?.fullName
+    ? String(customer.savedCheckoutContact.fullName).trim()
+    : '';
+  const fallbackEmail = customer.savedCheckoutContact?.email
+    ? String(customer.savedCheckoutContact.email).trim()
+    : '';
+
+  const currentName = customer.name ? String(customer.name).trim() : '';
+  const currentEmail = customer.email ? String(customer.email).trim() : '';
+  const isPlaceholderEmail =
+    !currentEmail || currentEmail.includes('no-email') || currentEmail.startsWith('customer-');
+
+  return {
+    ...customer,
+    name: currentName || fallbackName || '',
+    email: isPlaceholderEmail ? (fallbackEmail || '') : currentEmail,
+  };
+}
+
 const listCustomers = async (req, res, next) => {
   try {
     const {
@@ -89,7 +111,7 @@ const listCustomers = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        customers,
+        customers: customers.map(enrichCustomerIdentity),
         total,
         page: pageNum,
         limit: limitNum,
@@ -150,7 +172,7 @@ const getCustomerById = async (req, res, next) => {
 
     res.json({
       success: true,
-      data: customer,
+      data: enrichCustomerIdentity(customer),
       meta: { requestId: req.id, timestamp: new Date().toISOString() },
     });
   } catch (error) {

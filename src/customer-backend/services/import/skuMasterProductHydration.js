@@ -400,13 +400,23 @@ function parseCommaSeparatedImageUrls(raw) {
 function applySkuImgUrlParams(rawUrl) {
   const u = String(rawUrl || '').trim();
   if (!u) return '';
+  // Static CloudFront PNG/JPEG assets 500 when ?q=&w= are appended — return clean URL.
+  if (/cloudfront\.net/i.test(u) || /\.(png|jpe?g|webp|gif|avif)(\?|$)/i.test(u)) {
+    try {
+      const url = new URL(u);
+      url.searchParams.delete('q');
+      url.searchParams.delete('w');
+      return url.toString();
+    } catch {
+      return u.replace(/([?&])q=\d+(&|$)/gi, '$2').replace(/([?&])w=\d+(&|$)/gi, '$2').replace(/[?&]$/, '');
+    }
+  }
   try {
     const url = new URL(u);
     url.searchParams.set('q', '40');
     url.searchParams.set('w', '400');
     return url.toString();
   } catch {
-    // Fallback for non-absolute URLs: append params safely.
     const joiner = u.includes('?') ? '&' : '?';
     return `${u}${joiner}q=40&w=400`;
   }

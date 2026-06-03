@@ -6,17 +6,36 @@ const { pickFirstNonStubString } = require('../utils/mediaUrl');
 
 const usePricingEngine = true;
 
+function normalizeUserId(userId) {
+  if (userId instanceof mongoose.Types.ObjectId) return userId;
+  const str = String(userId || '').trim();
+  if (mongoose.Types.ObjectId.isValid(str)) return new mongoose.Types.ObjectId(str);
+  return userId;
+}
+
+/** Drop cached GET /cart responses so checkout clears are visible immediately. */
+async function invalidateCartGetCache() {
+  try {
+    const cacheService = require('../../core/services/cache.service');
+    await cacheService.delPattern('cache:*customer/cart*');
+    await cacheService.delPattern('cache:*/cart*');
+  } catch (err) {
+    console.warn('[cart-service] invalidateCartGetCache failed', err?.message || err);
+  }
+}
+
 /**
  * Get cart for user; return shape expected by app.
  * Supports optional pricing context (coupon/zone/payment) for parity with createOrder.
  */
 async function getCartForUser(userId, options = {}) {
-  await dedupeCartLines(userId);
-  const cart = await Cart.findOne({ userId }).lean();
+  const uid = normalizeUserId(userId);
+  await dedupeCartLines(uid);
+  const cart = await Cart.findOne({ userId: uid }).lean();
   if (!cart || !cart.items || cart.items.length === 0) {
     return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
   }
-  return formatCartResponse(cart, { userId, ...options });
+  return formatCartResponse(cart, { userId: uid, ...options });
 }
 
 /** Stable cart line key — empty variantId and productId-only SKUs must match. */
@@ -340,6 +359,7 @@ async function addItem(userId, body) {
         image,
       }],
     });
+    await invalidateCartGetCache();
     return formatCartResponse(cart.toObject(), { userId });
   }
 
@@ -364,6 +384,7 @@ async function addItem(userId, body) {
   }
 
   await cart.save();
+  await invalidateCartGetCache();
   return formatCartResponse(cart.toObject(), { userId });
 }
 
@@ -416,6 +437,7 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
     return { error: 'Item not found' };
   }
 
+  await invalidateCartGetCache();
   return formatCartResponse(cart, { userId });
 }
 
@@ -454,14 +476,20 @@ async function removeItem(userId, itemId, opts = {}) {
 
   if (!cart) return { error: 'Cart not found' };
 
+  await invalidateCartGetCache();
   return formatCartResponse(cart, { userId: uid });
 }
 
 /**
  * Clear all items in cart.
  */
-async function clearCart(userId) {
-  await Cart.findOneAndUpdate({ userId }, { $set: { items: [] } });
+async function clearCart(userId, session) {
+  const uid = normalizeUserId(userId);
+  const opts = session ? { session } : {};
+  await Cart.findOneAndUpdate({ userId: uid }, { $set: { items: [] } }, { ...opts, upsert: true });
+  if (!session) {
+    await invalidateCartGetCache();
+  }
   return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
 }
 
@@ -490,6 +518,7 @@ async function restoreCartFromOrder(userId, order) {
     { $set: { items } },
     { upsert: true, new: true }
   );
+  await invalidateCartGetCache();
   return { ok: true };
 }
 
@@ -500,4 +529,5 @@ module.exports = {
   removeItem,
   clearCart,
   restoreCartFromOrder,
+  invalidateCartGetCache,
 };

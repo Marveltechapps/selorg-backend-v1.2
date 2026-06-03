@@ -28,14 +28,46 @@ function pickFirstNonStubString(...vals) {
   return '';
 }
 
+/** Remove SKU resize query params that break static CloudFront asset URLs in the mobile app. */
+function cleanClientImageUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) return '';
+  const trimmed = url.trim();
+  try {
+    const u = new URL(trimmed);
+    const path = u.pathname.toLowerCase();
+    const isStaticAsset = /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i.test(path);
+    const isCdnHost =
+      u.hostname.includes('cloudfront.net') ||
+      u.hostname.includes('amazonaws.com') ||
+      path.includes('/prod/products/');
+    if (isStaticAsset || isCdnHost) {
+      u.searchParams.delete('q');
+      u.searchParams.delete('w');
+    }
+    return u.toString();
+  } catch {
+    return trimmed
+      .replace(/([?&])q=\d+(&|$)/gi, '$2')
+      .replace(/([?&])w=\d+(&|$)/gi, '$2')
+      .replace(/\?&/, '?')
+      .replace(/[?&]$/, '');
+  }
+}
+
 function sanitizeImageFields(doc) {
   if (!doc || typeof doc !== 'object') return doc;
   const out = { ...doc };
   for (const key of ['thumbnailUrl', 'cardImageUrl', 'imageUrl', 'bannerImageUrl']) {
-    if (isStubImageUrl(out[key])) out[key] = '';
+    if (isStubImageUrl(out[key])) {
+      out[key] = '';
+    } else if (typeof out[key] === 'string' && out[key].trim()) {
+      out[key] = cleanClientImageUrl(out[key]);
+    }
   }
   if (Array.isArray(out.images)) {
-    out.images = out.images.filter((u) => typeof u === 'string' && u.trim() && !isStubImageUrl(u));
+    out.images = out.images
+      .filter((u) => typeof u === 'string' && u.trim() && !isStubImageUrl(u))
+      .map((u) => cleanClientImageUrl(u));
   }
   return out;
 }

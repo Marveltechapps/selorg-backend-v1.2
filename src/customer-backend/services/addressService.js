@@ -50,7 +50,8 @@ function mergeWithEnrichment(body, enriched) {
 }
 
 async function applyExistingAddressUpdate(existing, fields, userObjectId) {
-  const { line1, line2, landmark, city, state, pincode, latitude, longitude, isDefault } = fields;
+  const { label, line1, line2, landmark, city, state, pincode, latitude, longitude, isDefault } = fields;
+  if (label !== undefined) existing.label = String(label).trim() || existing.label;
   if (line1 !== undefined) existing.line1 = line1;
   if (line2 !== undefined) existing.line2 = line2;
   if (landmark !== undefined) existing.landmark = landmark;
@@ -254,8 +255,8 @@ async function updateAddress(userId, addressId, body) {
     ...address.toObject(),
     ...body,
   };
-  const enriched = await enrichWithGeocoding(mergeBody);
-  const merged = mergeWithEnrichment(mergeBody, enriched);
+  // Edits: apply user fields directly — do not reverse-geocode over typed line1/city.
+  const merged = normalizeAddressFields(mergeBody);
 
   const { label, line1, line2, landmark, city, state, pincode, latitude, longitude, isDefault } = merged;
   if (label !== undefined) address.label = String(label).trim() || address.label;
