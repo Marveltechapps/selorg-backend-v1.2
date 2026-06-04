@@ -47,13 +47,15 @@ function apiEnvelopeMiddleware(req, res, next) {
         return origJson(body);
       }
       if (status >= 400) {
-        const raw = body.error ?? body.message ?? body;
         const msg =
-          typeof raw === 'string'
-            ? raw
-            : typeof raw === 'object' && raw !== null && raw.message
-              ? String(raw.message)
-              : 'Request failed';
+          (typeof body.message === 'string' && body.message.trim() ? body.message.trim() : null) ||
+          (typeof body.error === 'object' && body.error !== null && body.error.message
+            ? String(body.error.message)
+            : null) ||
+          (typeof body.error === 'string' && body.error.trim() && body.error !== 'Bad Request'
+            ? body.error.trim()
+            : null) ||
+          'Request failed';
         return origJson(ResponseFormatter.error(msg, status));
       }
       return origJson(ResponseFormatter.success(body, 'Success'));

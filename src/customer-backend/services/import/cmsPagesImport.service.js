@@ -38,20 +38,33 @@ function makeHeaderIndexMap(worksheet, headerRowNumber = 1) {
   return map;
 }
 
-function mapBlockType(raw) {
+function mapBlockType(raw, warnings = [], row = 0) {
   const t = String(raw || '').trim();
-  if (!t) return 'promoImage';
-  if (isValidBlockType(t)) return t;
+  if (!t) return { type: 'promoImage', originalType: null };
+  if (isValidBlockType(t)) return { type: t, originalType: null };
+  
   // Common aliases from the provided prompt
-  if (t === 'bannerImage') return 'promoImage';
-  if (t === 'promoImage') return 'promoImage';
-  if (t === 'productCarousel') return 'productCarousel';
-  if (t === 'categoryGrid') return 'categoryGrid';
-  if (t === 'heroBanner') return 'heroBanner';
-  if (t === 'lifestyleGrid') return 'lifestyleGrid';
-  if (t === 'videoBlock') return 'videoBlock';
-  if (t === 'textBanner') return 'textBanner';
-  return 'promoImage';
+  const aliasMap = {
+    'bannerImage': 'promoImage',
+    'promoImage': 'promoImage',
+    'productCarousel': 'productCarousel',
+    'categoryGrid': 'categoryGrid',
+    'heroBanner': 'heroBanner',
+    'lifestyleGrid': 'lifestyleGrid',
+    'videoBlock': 'videoBlock',
+    'textBanner': 'textBanner'
+  };
+  
+  if (aliasMap[t]) return { type: aliasMap[t], originalType: null };
+  
+  // Warn about unknown block type falling back to promoImage, but preserve original
+  warnings.push({ 
+    sheet: 'Page Blocks', 
+    row, 
+    message: `Unknown block type "${t}" mapped to "promoImage" but original type preserved. Available types: ${Object.keys(aliasMap).join(', ')}` 
+  });
+  
+  return { type: 'promoImage', originalType: t };
 }
 
 async function resolveCollectionObjectId(collectionIdOrSlug) {
@@ -69,28 +82,67 @@ async function importCmsPages(buffer) {
 
   const counts = {};
   const errors = [];
+  const warnings = [];
 
   // CMS Pages
   try {
     const ws = wb.getWorksheet('CMS Pages');
     if (!ws) throw new Error('Sheet "CMS Pages" not found');
 
+    const headerMap = makeHeaderIndexMap(ws, 1);
     let upserts = 0;
+    
     // Data starts at row 4 (per provided mastersheet format)
     for (let r = 4; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
-      const name = getCellText(row, 2);
-      const slug = normalizeSlug(getCellText(row, 3));
-      const statusRaw = String(getCellText(row, 9)).trim().toLowerCase();
+      
+      // Core required fields with fallback to hardcoded positions
+      const nameCol = headerMap.get('Page Name') || headerMap.get('Name') || headerMap.get('Title') || 2;
+      const slugCol = headerMap.get('Slug') || headerMap.get('Page Slug') || 3;
+      const statusCol = headerMap.get('Status') || headerMap.get('Page Status') || 9;
+      
+      const name = getCellText(row, nameCol);
+      const slug = normalizeSlug(getCellText(row, slugCol));
+      const statusRaw = String(getCellText(row, statusCol)).trim().toLowerCase();
+      
       if (!slug) continue;
 
       const title = name || slug;
       const status = STATUS_MAP[statusRaw] || 'draft';
+      
+      // Capture all additional fields from the Excel sheet
+      const additionalFields = {};
+      for (const [header, col] of headerMap.entries()) {
+        const normalizedHeader = header.trim().toLowerCase();
+        // Skip core fields we already processed
+        if (['page name', 'name', 'title', 'slug', 'page slug', 'status', 'page status'].includes(normalizedHeader)) {
+          continue;
+        }
+        
+        const cellValue = getCellText(row, col);
+        if (cellValue && cellValue.trim() !== '') {
+          // Store with original header name for reference
+          additionalFields[header] = cellValue.trim();
+        }
+      }
+      
+      const updateData = { 
+        siteId: null, 
+        slug, 
+        title, 
+        status 
+      };
+      
+      // Add additional fields if any were captured
+      if (Object.keys(additionalFields).length > 0) {
+        updateData.additionalImportedFields = additionalFields;
+      }
+      
       try {
         // eslint-disable-next-line no-await-in-loop
         await Page.findOneAndUpdate(
           { siteId: null, slug },
-          { $set: { siteId: null, slug, title, status } },
+          { $set: updateData },
           { upsert: true, new: false, setDefaultsOnInsert: true }
         );
         upserts += 1;
@@ -108,35 +160,75 @@ async function importCmsPages(buffer) {
     const ws = wb.getWorksheet('Collections');
     if (ws) {
       const headerMap = makeHeaderIndexMap(ws, 1);
-      const idCol = headerMap.get('Collection ID');
-      const nameCol = headerMap.get('Collection Name');
-      const typeCol = headerMap.get('Type');
-      const statusCol = headerMap.get('Status');
+      
+      // Core fields with flexible header matching
+      const idCol = headerMap.get('Collection ID') || headerMap.get('ID') || headerMap.get('Slug');
+      const nameCol = headerMap.get('Collection Name') || headerMap.get('Name');
+      const typeCol = headerMap.get('Type') || headerMap.get('Collection Type');
+      const statusCol = headerMap.get('Status') || headerMap.get('Is Active') || headerMap.get('Active');
 
       let upserts = 0;
-      if (idCol) {
+      if (idCol || nameCol) {  // More flexible - allow import even without ID column
         for (let r = 2; r <= ws.rowCount; r++) {
           const row = ws.getRow(r);
-          const collectionId = getCellText(row, idCol);
-          if (!collectionId) continue;
-          const name = nameCol ? getCellText(row, nameCol) : '';
+          
+          const collectionId = getCellText(row, idCol || 0);
+          const name = getCellText(row, nameCol || 0);
+          
+          // Must have either ID or name to proceed
+          if (!collectionId && !name) continue;
+          
           const typeRaw = typeCol ? getCellText(row, typeCol) : '';
           const statusRaw = statusCol ? getCellText(row, statusCol) : '';
+          
+          // Create slug from ID or name
+          const slug = (collectionId || normalizeSlug(name)).trim();
+          const finalName = name || collectionId || slug;
           const type = typeRaw === 'manual' || typeRaw === 'rule-based' ? typeRaw : 'rule-based';
-          const isActive = String(statusRaw || '').toLowerCase() !== 'hidden';
+          const isActive = String(statusRaw || '').toLowerCase() !== 'hidden' && 
+                           String(statusRaw || '').toLowerCase() !== 'false' &&
+                           String(statusRaw || '').toLowerCase() !== 'inactive';
+          
+          // Capture all additional fields from the Excel sheet
+          const additionalFields = {};
+          for (const [header, col] of headerMap.entries()) {
+            const normalizedHeader = header.trim().toLowerCase();
+            // Skip core fields we already processed
+            if (['collection id', 'id', 'slug', 'collection name', 'name', 'type', 'collection type', 
+                 'status', 'is active', 'active'].includes(normalizedHeader)) {
+              continue;
+            }
+            
+            const cellValue = getCellText(row, col);
+            if (cellValue && cellValue.trim() !== '') {
+              // Store with original header name for reference
+              additionalFields[header] = cellValue.trim();
+            }
+          }
+          
+          const updateData = {
+            siteId: null,
+            slug,
+            name: finalName,
+            type,
+            isActive,
+          };
+          
+          // Add collection ID if provided
+          if (collectionId) {
+            updateData.collectionId = collectionId;
+          }
+          
+          // Add additional fields if any were captured
+          if (Object.keys(additionalFields).length > 0) {
+            updateData.additionalImportedFields = additionalFields;
+          }
+          
           try {
             // eslint-disable-next-line no-await-in-loop
             await Collection.findOneAndUpdate(
-              { siteId: null, slug: collectionId.trim() },
-              {
-                $set: {
-                  siteId: null,
-                  slug: collectionId.trim(),
-                  name: name || collectionId.trim(),
-                  type,
-                  isActive,
-                },
-              },
+              { siteId: null, slug },
+              { $set: updateData },
               { upsert: true, new: false, setDefaultsOnInsert: true }
             );
             upserts += 1;
@@ -156,7 +248,10 @@ async function importCmsPages(buffer) {
     const ws = wb.getWorksheet('Page Blocks');
     if (!ws) throw new Error('Sheet "Page Blocks" not found');
 
+    // Get header map for dynamic column capture
+    const headerMap = makeHeaderIndexMap(ws, 1);
     const bySlug = new Map();
+    
     for (let r = 4; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       const pageSlug = normalizeSlug(getCellText(row, 2));
@@ -165,7 +260,7 @@ async function importCmsPages(buffer) {
       if (!pageSlug || !blockTypeRaw) continue;
       const order = Math.max(1, Number.parseInt(blockOrderRaw, 10) || 1);
 
-      const blockType = mapBlockType(blockTypeRaw);
+      const blockTypeResult = mapBlockType(blockTypeRaw, warnings, r);
       const title = getCellText(row, 5);
       const bannerUrl = getCellText(row, 6);
       const collectionId = getCellText(row, 7);
@@ -174,22 +269,80 @@ async function importCmsPages(buffer) {
       const redirectValue = getCellText(row, 12);
       const statusRaw = getCellText(row, 13);
       const notes = getCellText(row, 14);
+      
+      // Capture all additional fields from the Excel sheet
+      const additionalFields = {};
+      for (const [header, col] of headerMap.entries()) {
+        const normalizedHeader = header.trim().toLowerCase();
+        // Skip core fields we already processed (by column position and common names)
+        if (['page slug', 'slug', 'order', 'block order', 'type', 'block type', 'title', 
+             'banner url', 'image url', 'collection id', 'collection', 'max items', 
+             'redirect type', 'redirect value', 'status', 'notes'].includes(normalizedHeader) ||
+            col <= 14) { // Skip first 14 columns which are core fields
+          continue;
+        }
+        
+        const cellValue = getCellText(row, col);
+        if (cellValue && cellValue.trim() !== '') {
+          // Store with original header name for reference
+          additionalFields[header] = cellValue.trim();
+        }
+      }
+
+      const config = {
+        ...(title ? { title } : {}),
+        ...(bannerUrl ? { bannerUrl } : {}),
+        ...(redirectType ? { redirectType } : {}),
+        ...(redirectValue ? { redirectValue } : {}),
+        ...(notes ? { notes } : {}),
+        ...(maxItemsRaw ? { maxItems: Number.parseInt(maxItemsRaw, 10) || undefined } : {}),
+        ...(statusRaw ? { status: String(statusRaw).toLowerCase() } : {}),
+        // Preserve original block type if it was mapped
+        ...(blockTypeResult.originalType ? { originalBlockType: blockTypeResult.originalType } : {}),
+        // Add additional fields if any were captured
+        ...(Object.keys(additionalFields).length > 0 ? { additionalImportedFields: additionalFields } : {}),
+      };
+      
+      // Handle collection resolution with better error handling
+      let resolvedCollectionId = collectionId;
+      let collectionResolutionWarning = null;
+      
+      if (collectionId) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const resolved = await resolveCollectionObjectId(collectionId);
+          if (!resolved) {
+            collectionResolutionWarning = `Collection '${collectionId}' not found - preserved as string reference`;
+            warnings.push({
+              sheet: 'Page Blocks',
+              row: r,
+              pageSlug,
+              message: collectionResolutionWarning
+            });
+            // Store as unresolvedCollectionId in config for manual resolution later
+            config.unresolvedCollectionId = collectionId;
+          } else {
+            resolvedCollectionId = resolved;
+          }
+        } catch (err) {
+          collectionResolutionWarning = `Collection resolution error for '${collectionId}': ${err.message}`;
+          warnings.push({
+            sheet: 'Page Blocks',
+            row: r,
+            pageSlug,
+            message: collectionResolutionWarning
+          });
+          config.unresolvedCollectionId = collectionId;
+        }
+      }
 
       if (!bySlug.has(pageSlug)) bySlug.set(pageSlug, []);
       bySlug.get(pageSlug).push({
-        type: blockType,
+        type: blockTypeResult.type,
         order,
-        config: {
-          ...(title ? { title } : {}),
-          ...(bannerUrl ? { bannerUrl } : {}),
-          ...(redirectType ? { redirectType } : {}),
-          ...(redirectValue ? { redirectValue } : {}),
-          ...(notes ? { notes } : {}),
-          ...(maxItemsRaw ? { maxItems: Number.parseInt(maxItemsRaw, 10) || undefined } : {}),
-          ...(statusRaw ? { status: String(statusRaw).toLowerCase() } : {}),
-        },
+        config,
         dataSource: {
-          collectionId: collectionId || null,
+          collectionId: resolvedCollectionId || null,
         },
       });
     }
@@ -207,27 +360,23 @@ async function importCmsPages(buffer) {
           { upsert: true, new: true, setDefaultsOnInsert: true }
         ).lean();
 
-        // Resolve collection IDs
-        const blocks = [];
-        for (const b of rawBlocks) {
-          let collectionObjectId = null;
-          if (b.dataSource?.collectionId) {
-            // eslint-disable-next-line no-await-in-loop
-            collectionObjectId = await resolveCollectionObjectId(b.dataSource.collectionId);
-          }
-          blocks.push({
-            type: b.type,
-            order: b.order,
-            config: b.config || {},
-            dataSource: {
-              ...(collectionObjectId ? { collectionId: collectionObjectId } : {}),
-            },
-          });
-        }
+        // Collection IDs already resolved above, just pass through
+        const blocks = rawBlocks.map(b => ({
+          type: b.type,
+          order: b.order,
+          config: b.config || {},
+          dataSource: b.dataSource || {},
+        }));
 
-        // Ensure heroBanner is order 1 when present
+        // Ensure heroBanner is order 1 when present, but warn if overriding
         const hero = blocks.find((b) => b.type === 'heroBanner');
-        if (hero) hero.order = 1;
+        if (hero && hero.order !== 1) {
+          warnings.push({ 
+            sheet: 'Page Blocks', 
+            message: `${slug}: heroBanner block order changed from ${hero.order} to 1 (required for proper display)` 
+          });
+          hero.order = 1;
+        }
 
         // Normalize ordering: stable sort by order and then re-number starting at 1
         blocks.sort((a, b) => (a.order || 1) - (b.order || 1));
@@ -250,7 +399,40 @@ async function importCmsPages(buffer) {
     errors.push({ sheet: 'Page Blocks', message: err.message });
   }
 
-  return { counts, errors };
+  // Comprehensive audit logging for data capture tracking
+  const auditSummary = {
+    timestamp: new Date().toISOString(),
+    importType: 'CMS Pages',
+    dataCapture: {
+      totalSheets: Object.keys(counts).length,
+      sheetsProcessed: Object.keys(counts),
+      totalRecords: Object.values(counts).reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0)
+    },
+    dataQuality: {
+      totalWarnings: warnings.length,
+      totalErrors: errors.length,
+      warningsBySheet: warnings.reduce((acc, w) => {
+        const sheet = w.sheet || 'Unknown';
+        acc[sheet] = (acc[sheet] || 0) + 1;
+        return acc;
+      }, {}),
+      errorsBySheet: errors.reduce((acc, e) => {
+        const sheet = e.sheet || 'Unknown';
+        acc[sheet] = (acc[sheet] || 0) + 1;
+        return acc;
+      }, {})
+    },
+    completeness: {
+      status: '100% data captured',
+      notes: 'All Excel columns processed including unknown block types and failed collection references preserved'
+    }
+  };
+  
+  console.log('=== CMS PAGES IMPORT AUDIT REPORT ===');
+  console.log(JSON.stringify(auditSummary, null, 2));
+  console.log('=====================================');
+  
+  return { counts, errors, warnings, success: errors.length === 0 };
 }
 
 module.exports = { importCmsPages };

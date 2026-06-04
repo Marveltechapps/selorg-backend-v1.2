@@ -22,6 +22,14 @@ function run() {
       } catch (e) {
         // ignore if not present
       }
+
+      const addressColl = conn.collection('customer_addresses');
+      try {
+        await addressColl.dropIndex('userId_1_label_1');
+        logger.info('Dropped legacy userId_1_label_1 index on customer_addresses');
+      } catch (e) {
+        // ignore if not present or non-unique compound index replaced in schema
+      }
     } catch (err) {
       logger.warn('Customer startup index cleanup failed', { error: err.message });
     }

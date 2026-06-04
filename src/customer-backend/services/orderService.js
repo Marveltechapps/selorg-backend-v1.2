@@ -7,6 +7,7 @@ const { Product } = require('../models/Product');
 const { PricingCoupon } = require('../../merch/models/PricingCoupon');
 const { CouponRedemption } = require('../models/CouponRedemption');
 const { calculatePricing, compareWithLegacy } = require('./pricingEngineService');
+const { clearCart: clearUserCart } = require('./cartService');
 const { resolveStoreId } = require('./storeLocator');
 
 /** All orders route to Adyar darkstore only */
@@ -120,7 +121,7 @@ async function getOrderById(userId, orderId) {
 }
 
 function isGatewayPrepayment(resolvedMethodType) {
-  return resolvedMethodType === 'card' || resolvedMethodType === 'upi';
+  return resolvedMethodType === 'card' || resolvedMethodType === 'upi' || resolvedMethodType === 'digital';
 }
 
 /** Darkstore, warehouse, finance stubs, WebSocket — same as legacy post-createOrder block. */
@@ -135,11 +136,13 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
 
     let customerName = 'Customer';
     let phoneNumber = '';
+    let customerEmail = '';
     try {
       const cu = await CustomerUser.findById(userId).lean();
       if (cu) {
         customerName = cu.name || customerName;
         phoneNumber = cu.phoneNumber || '';
+        customerEmail = cu.email || '';
       }
     } catch (err) {
       // ignore
@@ -260,6 +263,7 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
       const methodDisplayMap = {
         card: 'Credit/Debit Card',
         upi: 'UPI',
+        digital: 'Digital Payment',
         wallet: 'Wallet',
         cash: 'Cash on Delivery',
       };
@@ -271,7 +275,7 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
         await CustomerPayment.create({
           entityId: 'default',
           customerName: customerName,
-          customerEmail: `customer-${userId}@selorg.com`,
+          customerEmail: customerEmail || `customer-${userId}@selorg.com`,
           orderId,
           amount: response.totalBill || 0,
           currency: 'INR',
@@ -287,7 +291,8 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
       let liveTxnId = null;
       const txnTimestamp = new Date().toISOString();
       const txnIdStr = `TXN-${Date.now()}`;
-      const maskedDetails = paymentType === 'card' ? '****' : paymentType.toUpperCase();
+      const maskedDetails =
+        paymentType === 'card' || paymentType === 'digital' ? '****' : paymentType.toUpperCase();
       const gateway = paymentType === 'cash' ? 'cod' : 'worldline';
 
       try {
@@ -348,8 +353,8 @@ async function releaseOrderFulfillment(orderId) {
   // Only explicit false means "not yet released"; legacy docs without the field must not re-run release.
   if (order.fulfillmentReleased !== false) return { skipped: true };
   const methodType = order.paymentMethod?.methodType;
-  if (methodType !== 'card' && methodType !== 'upi') {
-    return { error: 'Release only applies to card/UPI orders' };
+  if (methodType !== 'card' && methodType !== 'upi' && methodType !== 'digital') {
+    return { error: 'Release only applies to online payment orders' };
   }
   if (order.paymentStatus !== 'paid') {
     return { error: 'Payment not confirmed' };
@@ -389,11 +394,14 @@ async function releaseOrderFulfillment(orderId) {
         }
       }
 
-      await Cart.findOneAndUpdate({ userId: order.userId }, { $set: { items: [] } }, { session });
+      await clearUserCart(order.userId, session);
     });
   } finally {
     await session.endSession();
   }
+
+  const { invalidateCartGetCache } = require('./cartService');
+  await invalidateCartGetCache();
 
   const populated = await Order.findById(order._id).lean();
   const response = formatOrderForApp({ ...populated, _id: populated._id });
@@ -417,7 +425,7 @@ async function voidUnpaidOnlineOrder(userId, orderId, reason = '') {
   });
   if (!order) return { error: 'Order not found' };
   const methodType = order.paymentMethod?.methodType;
-  if (methodType !== 'card' && methodType !== 'upi') {
+  if (methodType !== 'card' && methodType !== 'upi' && methodType !== 'digital') {
     return { skipped: true };
   }
   if (order.fulfillmentReleased === true) {
@@ -511,7 +519,17 @@ async function reconcileWorldlinePaymentsForOrderList(userId, ordersLean) {
 }
 
 async function createOrder(userId, body) {
-  const { items, addressId, paymentMethodId, paymentMethodType, couponCode, deliveryTip } = body || {};
+  const {
+    items,
+    addressId,
+    paymentMethodId,
+    paymentMethodType,
+    couponCode,
+    deliveryTip,
+    customerName,
+    customerEmail,
+    customerPhone,
+  } = body || {};
   if (!items || !Array.isArray(items) || items.length === 0) {
     return { error: 'Items required' };
   }
@@ -689,12 +707,57 @@ async function createOrder(userId, body) {
         }
       }
 
-      if (!deferFulfillment) {
-        await Cart.findOneAndUpdate({ userId }, { $set: { items: [] } }, { session });
-      }
+      // Items are copied onto the order — clear the cart for every checkout so the
+      // next order starts fresh. Failed/cancelled online payments restore lines
+      // from the order via voidUnpaidOnlineOrder / cancelOrder.
+      await clearUserCart(userId, session);
     });
   } finally {
     await session.endSession();
+  }
+
+  const { invalidateCartGetCache } = require('./cartService');
+  await invalidateCartGetCache();
+
+  // If checkout provided name/email (including guest checkout), store it on CustomerUser
+  // so admin dashboard can reflect it instead of "Unnamed Customer".
+  try {
+    const { CustomerUser } = require('../models/CustomerUser');
+    const providedName = typeof customerName === 'string' ? customerName.trim() : '';
+    const providedEmail = typeof customerEmail === 'string' ? customerEmail.trim().toLowerCase() : '';
+
+    if (providedName || providedEmail) {
+      const current = await CustomerUser.findById(userId).lean();
+      if (current) {
+        const update = {};
+
+        if (providedName && (!current.name || String(current.name).trim() === '' || current.name === 'Customer')) {
+          update.name = providedName;
+        }
+
+        if (providedEmail) {
+          const currentEmail = typeof current.email === 'string' ? current.email.trim().toLowerCase() : '';
+          const isPlaceholderEmail =
+            !currentEmail || currentEmail.includes('no-email') || currentEmail.startsWith('customer-');
+
+          // Avoid unique email conflicts when another customer already uses it.
+          if (isPlaceholderEmail || currentEmail === providedEmail) {
+            const other = await CustomerUser.findOne({
+              email: providedEmail,
+              _id: { $ne: new mongoose.Types.ObjectId(userId) },
+            }).lean();
+            if (!other) update.email = providedEmail;
+          }
+        }
+
+        if (Object.keys(update).length > 0) {
+          await CustomerUser.updateOne({ _id: userId }, { $set: update });
+        }
+      }
+    }
+  } catch (e) {
+    // Non-blocking: order creation must succeed even if identity update fails.
+    console.warn('[order-service] customer identity update failed (non-blocking)', e?.message || String(e));
   }
 
   const populated = await Order.findById(order._id).lean();

@@ -38,7 +38,7 @@ var updateRiderLocation = exports.updateRiderLocation = /*#__PURE__*/function ()
           return _Order.Order.find({
             "riderAssignment.riderId": riderId,
             status: {
-              $in: ["assigned", "picked", "out_for_delivery"]
+              $in: ["assigned", "arrived_at_darkstore", "picked", "out_for_delivery", "arrived_at_customer"]
             }
           });
         case 2:

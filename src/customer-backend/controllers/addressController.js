@@ -44,12 +44,29 @@ async function create(req, res) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const { address, wasUpdated } = await createAddress(userId, req.body);
+    const result = await createAddress(userId, req.body);
+    if (result?.error) {
+      res.status(400).json({ success: false, message: result.message || 'Invalid address' });
+      return;
+    }
+    const { address, wasUpdated } = result;
     const status = wasUpdated ? 200 : 201;
     res.status(status).json({ success: true, data: address, updated: wasUpdated });
   } catch (err) {
+    if (err?.code === 11000) {
+      res.status(400).json({
+        success: false,
+        message: 'Could not save address. Please restart the app and try again.',
+      });
+      return;
+    }
     console.error('address create error:', err);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    const status =
+      err.statusCode ||
+      (err.name === 'ValidationError' ? 400 : err.code === 11000 ? 409 : 500);
+    const message =
+      status === 500 ? 'Internal server error' : err.message || 'Request failed';
+    res.status(status).json({ success: false, message });
   }
 }
 

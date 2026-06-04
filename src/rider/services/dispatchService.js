@@ -516,8 +516,13 @@ function mapV2AvailabilityToLegacy(availability, status) {
  */
 async function mergeRidersWithV2Locations(ridersData) {
   const v2Riders = await RiderV2.find({
-    status: { $in: ['active', 'approved'] },
     deletedAt: { $exists: false },
+    status: { $nin: ['suspended', 'deleted', 'inactive'] },
+    $or: [
+      { status: { $in: ['active', 'approved'] } },
+      { status: 'pending', isVerified: true },
+      { availability: { $in: ['available', 'busy'] } },
+    ],
   })
     .select('riderId name currentLocation availability status')
     .lean();

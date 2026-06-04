@@ -48,7 +48,12 @@ app.use(express.json());
 
 const { cacheMiddleware } = require('../core/middleware');
 const appConfig = require('../config/app');
-app.use(cacheMiddleware(appConfig.cache.customer.default, { skipPaths: ['/bootstrap'] }));
+// Cart and addresses are per-user and change often — never cache those GETs.
+app.use(
+  cacheMiddleware(appConfig.cache.customer.default, {
+    skipPaths: ['/bootstrap', '/cart', '/addresses', '/user'],
+  }),
+);
 
 app.use('/onboarding', onboardingRoutes);
 app.use('/auth', authRoutes);
@@ -90,8 +95,18 @@ app.use('/delivery', deliveryRoutes);
 const { getPublicConfig } = require('./controllers/admin/appConfigAdminController');
 app.get('/app-config', getPublicConfig);
 
+const CUSTOMER_BACKEND_PORT = Number(process.env.PORT) || 3333;
+
 app.get('/health', (_req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    service: 'customer',
+    port: CUSTOMER_BACKEND_PORT,
+    hint: 'If npm run dev shows "Port already in use", another backend instance is already listening on this port.',
+  });
+});
+app.head('/health', (_req, res) => {
+  res.status(200).end();
 });
 
 module.exports = app;

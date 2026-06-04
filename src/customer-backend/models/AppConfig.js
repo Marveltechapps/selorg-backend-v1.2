@@ -183,8 +183,14 @@ const DEFAULT_APP_CONFIG = {
   },
   paymentMethods: [
     { key: 'cash', label: 'Cash on Delivery', description: 'Pay when your order arrives', icon: 'cash', isActive: true, order: 0 },
-    { key: 'card', label: 'Credit/Debit Card', description: 'Visa, Mastercard, Rupay', icon: 'card', isActive: true, order: 1 },
-    { key: 'upi', label: 'UPI', description: 'Google Pay, PhonePe, Paytm', icon: 'upi', isActive: true, order: 2 },
+    {
+      key: 'digital',
+      label: 'Digital Payment',
+      description: 'Card, UPI, net banking, and wallets via Worldline',
+      icon: 'card',
+      isActive: true,
+      order: 1,
+    },
   ],
   featureFlags: {
     showSkipButtonOnLogin: true,

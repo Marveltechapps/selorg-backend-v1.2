@@ -74,11 +74,19 @@ async function createTicket(req, res, next) {
 
     const profile = req.user?.profile;
     const identity = customerIdentityFromRequest(req);
-    const customerName = identity.customerName;
-    const customerPhone = identity.customerPhone;
-    const customerEmail = customerPhone
-      ? `customer-${customerPhone.replace(/\D/g, '')}@selorg.com`
-      : `customer-${userId}@selorg.com`;
+    const customerName =
+      (req.body.customerName && String(req.body.customerName).trim()) || identity.customerName;
+    const customerPhone =
+      (req.body.customerPhone && String(req.body.customerPhone).trim()) ||
+      identity.customerPhone;
+    const bodyEmail = req.body.customerEmail && String(req.body.customerEmail).trim();
+    const profileEmail = profile?.email && String(profile.email).trim();
+    const customerEmail =
+      bodyEmail ||
+      profileEmail ||
+      (customerPhone
+        ? `customer-${customerPhone.replace(/\D/g, '')}@selorg.com`
+        : `customer-${userId}@selorg.com`);
 
     const {
       subject,
@@ -123,6 +131,104 @@ async function createTicket(req, res, next) {
   }
 }
 
+function mapCustomerTicketSummary(ticket, noteCount = 0) {
+  return {
+    id: ticket._id.toString(),
+    ticketNumber: ticket.ticketNumber,
+    subject: ticket.subject,
+    description: ticket.description || '',
+    category: ticket.category,
+    priority: ticket.priority,
+    status: ticket.status,
+    channel: ticket.channel,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+    resolvedAt: ticket.resolvedAt,
+    noteCount,
+    canReopen: ticket.status === 'closed' || ticket.status === 'resolved',
+  };
+}
+
+async function listMyTickets(req, res, next) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const tickets = await AdminSupportTicket.find({
+      customerId: String(userId),
+      channel: { $ne: 'chat' },
+    })
+      .sort({ updatedAt: -1 })
+      .limit(100)
+      .lean();
+
+    const ticketIds = tickets.map((t) => t._id);
+    const noteCounts = {};
+    if (ticketIds.length > 0) {
+      const agg = await AdminSupportTicketNote.aggregate([
+        { $match: { ticketId: { $in: ticketIds }, isInternal: false } },
+        { $group: { _id: '$ticketId', count: { $sum: 1 } } },
+      ]);
+      agg.forEach((row) => {
+        noteCounts[String(row._id)] = row.count;
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: tickets.map((t) =>
+        mapCustomerTicketSummary(t, noteCounts[String(t._id)] || 0)
+      ),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function reopenTicket(req, res, next) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { ticketId } = req.params;
+    const ticket = await AdminSupportTicket.findById(ticketId).lean();
+    if (!ticket) {
+      return res.status(404).json({ success: false, error: 'Ticket not found' });
+    }
+    if (!ticketOwnedByUser(ticket, userId)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+    if (!['closed', 'resolved'].includes(ticket.status)) {
+      return res.status(400).json({ success: false, error: 'Ticket is already open' });
+    }
+
+    await AdminSupportTicket.findByIdAndUpdate(ticketId, {
+      $set: { status: 'open', resolvedAt: null },
+    });
+
+    const identity = customerIdentityFromRequest(req, ticket);
+    await adminSupportService.addTicketNote(ticketId, {
+      authorId: String(userId),
+      authorName: identity.displayName,
+      type: 'customer_reply',
+      content: 'Customer reopened this ticket.',
+      isInternal: false,
+    });
+
+    const updated = await AdminSupportTicket.findById(ticketId).lean();
+    return res.status(200).json({
+      success: true,
+      data: mapCustomerTicketSummary(updated),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getTicketMessages(req, res, next) {
   try {
     const userId = req.user?._id;
@@ -152,6 +258,7 @@ async function getTicketMessages(req, res, next) {
       text: n.content,
       message: n.content,
       sender: n.type === 'customer_reply' ? 'customer' : 'agent',
+      authorName: n.authorName,
       timestamp: n.createdAt,
       createdAt: n.createdAt,
     }));
@@ -200,7 +307,7 @@ async function sendMessage(req, res, next) {
     await AdminSupportTicket.findByIdAndUpdate(ticketId, {
       $set: {
         updatedAt: new Date(),
-        status: ticket.status === 'closed' ? 'open' : ticket.status,
+        status: ticket.status === 'closed' ? 'open' : 'in_progress',
         customerName: identity.customerName,
         customerPhone: identity.customerPhone || ticket.customerPhone || '',
       },
@@ -223,6 +330,8 @@ async function sendMessage(req, res, next) {
 module.exports = {
   getActiveChatTicket,
   createTicket,
+  listMyTickets,
+  reopenTicket,
   getTicketMessages,
   sendMessage,
 };

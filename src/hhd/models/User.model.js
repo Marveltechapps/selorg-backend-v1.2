@@ -13,6 +13,8 @@ const UserSchema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, trim: true },
+    email: { type: String, trim: true, lowercase: true },
+    warehouse: { type: String, trim: true },
     role: {
       type: String,
       enum: Object.values(USER_ROLE),

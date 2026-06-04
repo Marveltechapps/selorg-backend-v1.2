@@ -42,11 +42,16 @@ async function getProfile(req, res, next) {
 
 async function updateProfile(req, res, next) {
   try {
-    const { name, deviceId } = req.body;
+    const { name, email, warehouse, mobile, deviceId } = req.body;
     const user = await HHDUser.findById(req.user?.id);
     if (!user) throw new ErrorResponse('User not found', 404);
-    if (name) user.name = name;
-    if (deviceId) user.deviceId = deviceId;
+    
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
+    if (warehouse !== undefined) user.warehouse = warehouse;
+    if (mobile !== undefined) user.mobile = mobile;
+    if (deviceId !== undefined) user.deviceId = deviceId;
+    
     await user.save();
 
     if (deviceId) {
