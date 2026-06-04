@@ -2,37 +2,22 @@ const { ErrorResponse } = require('../../utils/ErrorResponse');
 const HHDUser = require('../../models/User.model');
 const mongoose = require('mongoose');
 const PickerUser = require('../../../picker/models/user.model');
+const PickerDevice = require('../../../picker/models/device.model');
+const {
+  touchHsdDeviceFromHhdHeartbeat,
+} = require('../../../picker/services/deviceStatus.service');
+const {
+  getPickerUserForHhdUser,
+  recordHhdPickerPresence,
+} = require('../../../picker/helpers/hhdLink.helper');
+const { buildHhdUserProfileResponse } = require('../../services/hhdPickerProfile.service');
 
 async function getProfile(req, res, next) {
   try {
-    const user = await HHDUser.findById(req.user?.id).select('-password');
-    if (!user) throw new ErrorResponse('User not found', 404);
-
-    const linkedPicker = await PickerUser.findOne({ hhdUserId: new mongoose.Types.ObjectId(req.user?.id) })
-      .select('name phone photoUri employment')
-      .lean();
-
-    const profile = user.toObject();
-    if (linkedPicker) {
-      profile.linkedPickerProfile = {
-        name: linkedPicker.name,
-        phone: linkedPicker.phone,
-        photoUri: linkedPicker.photoUri,
-      };
-
-      if (!profile.name && linkedPicker.name) {
-        profile.name = linkedPicker.name;
-      }
-
-      if (!profile.mobile && linkedPicker.phone) {
-        profile.mobile = linkedPicker.phone;
-      }
-
-      if (!profile.department && linkedPicker.employment?.department) {
-        profile.department = linkedPicker.employment.department;
-      }
-    }
-
+    const touchPresence =
+      req.query?.sync === '1' || req.query?.sync === 'true' || req.query?.sync === true;
+    const profile = await buildHhdUserProfileResponse(req.user?.id, { touchPresence });
+    if (!profile) throw new ErrorResponse('User not found', 404);
     res.status(200).json({ success: true, data: profile });
   } catch (error) {
     next(error);
@@ -80,17 +65,11 @@ async function getEmployment(req, res, next) {
 /** Linked Picker profile (same person) for HHD device display. */
 async function getLinkedPickerProfile(req, res, next) {
   try {
-    const pickerUser = await PickerUser.findOne({ hhdUserId: new mongoose.Types.ObjectId(req.user?.id) })
-      .select('name phone photoUri')
-      .lean();
-    if (!pickerUser) return res.status(200).json({ success: true, data: null });
+    const profile = await buildHhdUserProfileResponse(req.user?.id);
+    if (!profile) throw new ErrorResponse('User not found', 404);
     res.status(200).json({
       success: true,
-      data: {
-        name: pickerUser.name,
-        phone: pickerUser.phone,
-        photoUri: pickerUser.photoUri,
-      },
+      data: profile.pickerProfile || { linked: false, picker: null },
     });
   } catch (error) {
     next(error);
@@ -107,24 +86,64 @@ async function postHeartbeat(req, res, next) {
     const hhdUserId = req.user?.id;
     if (!hhdUserId) throw new ErrorResponse('Unauthorized', 401);
 
-    const pickerUser = await PickerUser.findOne({
-      hhdUserId: new mongoose.Types.ObjectId(hhdUserId),
-    });
+    const { deviceId: bodyDeviceId, batteryLevel } = req.body || {};
+
+    const hhdUser = await HHDUser.findById(hhdUserId);
+    const pickerUser = hhdUser ? await getPickerUserForHhdUser(hhdUser) : null;
+
     if (!pickerUser) {
+      if (hhdUser) {
+        const now = new Date();
+        if (bodyDeviceId) hhdUser.deviceId = String(bodyDeviceId).trim();
+        hhdUser.lastLogin = now;
+        await hhdUser.save();
+      }
       return res.status(200).json({
         success: true,
-        data: { lastSeenAt: null, linked: false },
-        message: 'No linked picker; heartbeat recorded but will not affect auto-assign',
+        data: { lastSeenAt: null, linked: false, hsdDeviceOnline: false },
+        message: 'No picker account for this mobile; heartbeat recorded on HHD only',
       });
     }
 
-    const now = new Date();
-    pickerUser.lastSeenAt = now;
-    await pickerUser.save();
+    const now = await recordHhdPickerPresence(pickerUser, {
+      deviceId: bodyDeviceId,
+      batteryLevel,
+      hhdUser,
+    });
+
+    const assignedDevice = await PickerDevice.findOne({
+      assignedPickerId: pickerUser._id,
+      status: 'ASSIGNED',
+    })
+      .select('deviceId')
+      .lean();
+
+    const resolvedDeviceId =
+      (bodyDeviceId && String(bodyDeviceId).trim()) ||
+      assignedDevice?.deviceId ||
+      hhdUser?.deviceId ||
+      null;
+
+    let hsdDevice = null;
+    if (resolvedDeviceId) {
+      try {
+        hsdDevice = await touchHsdDeviceFromHhdHeartbeat({
+          deviceId: resolvedDeviceId,
+          batteryLevel,
+        });
+      } catch (_) {
+        /* non-blocking */
+      }
+    }
 
     res.status(200).json({
       success: true,
-      data: { lastSeenAt: now },
+      data: {
+        lastSeenAt: now,
+        linked: true,
+        deviceId: resolvedDeviceId,
+        hsdDeviceOnline: !!hsdDevice,
+      },
     });
   } catch (error) {
     next(error);

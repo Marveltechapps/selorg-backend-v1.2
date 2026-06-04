@@ -23,25 +23,24 @@ const getAllVideos = async (userId) => {
 
     if (!videos || videos.length === 0) return [];
 
-    // Fetch user's watch history and training progress
-    const [watchHistories, user] = await Promise.all([
-      withTimeout(WatchHistory.find({ userId }).lean(), DB_TIMEOUT_MS, []),
-      withTimeout(User.findById(userId).select('trainingProgress').lean(), DB_TIMEOUT_MS, null)
-    ]);
+    // Fetch user's watch history
+    const watchHistories = await withTimeout(
+      WatchHistory.find({ userId }).lean(),
+      DB_TIMEOUT_MS,
+      []
+    );
 
     const watchHistoryMap = {};
     watchHistories.forEach(history => {
       watchHistoryMap[history.videoId] = history;
     });
 
-    const trainingProgress = (user && user.trainingProgress) || {};
-
-    // Combine video info with progress (completed = WatchHistory OR user.trainingProgress)
+    // Completion is explicit (completedAt set by complete endpoint).
+    // Do not infer completion from trainingProgress values.
     return videos.map(video => {
       const history = watchHistoryMap[video.videoId] || {};
       const fromHistory = !!history.completedAt;
-      const fromProgress = trainingProgress[video.videoId] === 100;
-      const completed = fromHistory || fromProgress;
+      const completed = fromHistory;
       const progress = completed ? 100 : Math.min(99, Math.round((history.watchedSeconds || 0) / video.duration * 100));
 
       return {

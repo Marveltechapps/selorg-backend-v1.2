@@ -8,6 +8,7 @@ const User = require('../models/user.model');
 const PickerSlaConfig = require('../models/slaConfig.model');
 const ShiftAssignment = require('../models/shiftAssignment.model');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
+const { PICKER_SHIFT_GEOFENCE_M, validateReportedGpsAccuracy } = require('../constants/shiftGeofence');
 
 let websocketService;
 try {
@@ -95,6 +96,72 @@ const getAvailable = async (userId, geoFilter = {}) => {
   }
 };
 
+/**
+ * Server-side geofence: device GPS must be within PICKER_SHIFT_GEOFENCE_M of saved darkstore.
+ */
+const validateShiftStartGeofence = async (userId, body) => {
+  const { latitude, longitude, locationId } = body || {};
+  if (latitude == null || longitude == null) {
+    return {
+      ok: false,
+      error:
+        'Location verification required. Enable GPS and ensure you are within 200m of your darkstore.',
+    };
+  }
+
+  const accuracyError = validateReportedGpsAccuracy(body?.accuracyMeters);
+  if (accuracyError) {
+    return { ok: false, error: accuracyError };
+  }
+
+  let locId = locationId ? String(locationId) : null;
+  if (!locId) {
+    const user = await withTimeout(
+      User.findById(userId).select('currentLocationId').lean(),
+      DB_TIMEOUT_MS,
+      null
+    );
+    locId = user?.currentLocationId ? String(user.currentLocationId) : null;
+  }
+
+  if (!locId) {
+    return {
+      ok: false,
+      error: 'No darkstore assigned. Select your work location before starting a shift.',
+    };
+  }
+
+  const parsedRadius = parseFloat(body?.radiusMeters);
+  const radiusM =
+    Number.isFinite(parsedRadius) && parsedRadius > 0 ? parsedRadius : PICKER_SHIFT_GEOFENCE_M;
+
+  try {
+    const locationService = require('./location.service');
+    const validation = await locationService.validateLocation(
+      locId,
+      parseFloat(latitude),
+      parseFloat(longitude),
+      radiusM
+    );
+    if (!validation.valid) {
+      const radiusM = validation.geofenceRadius || PICKER_SHIFT_GEOFENCE_M;
+      const dist = validation.distanceMeters;
+      const error =
+        typeof dist === 'number'
+          ? `Outside work location. You are ${dist}m away. Move within ${radiusM}m of the darkstore to start your shift.`
+          : `Outside work location. Please move within ${radiusM}m of the darkstore to start your shift.`;
+      return { ok: false, error };
+    }
+    return { ok: true };
+  } catch (locErr) {
+    console.warn('[shifts] Location validation error:', locErr?.message);
+    return {
+      ok: false,
+      error: locErr?.message || 'Unable to verify location. Please check your connection and try again.',
+    };
+  }
+};
+
 const selectShifts = async (userId, selectedShifts) => {
   const arr = Array.isArray(selectedShifts) ? selectedShifts : [];
   try {
@@ -107,9 +174,26 @@ const selectShifts = async (userId, selectedShifts) => {
 
 const start = async (userId, body) => {
   try {
+    const shiftReadinessService = require('./shiftReadiness.service');
+    const readiness = await shiftReadinessService.getForUser(userId);
+    if (!readiness?.canStartShift) {
+      return {
+        success: false,
+        error:
+          shiftReadinessService.getBlockingMessage(readiness) ||
+          'Complete your profile before starting your shift',
+        readiness,
+      };
+    }
+
     const existing = await withTimeout(Attendance.findOne({ userId, punchOut: null }), DB_TIMEOUT_MS);
     if (existing) {
       return { success: false, error: 'Already started', shiftStartTime: existing.punchIn?.getTime?.() };
+    }
+
+    const geofenceCheck = await validateShiftStartGeofence(userId, body);
+    if (!geofenceCheck.ok) {
+      return { success: false, error: geofenceCheck.error };
     }
 
     const shiftId = body?.shiftId || null;
@@ -125,40 +209,6 @@ const start = async (userId, body) => {
         const hasShift = await hasShiftForToday(userId, shiftId, new Date());
         if (!hasShift) {
           return { success: false, error: 'You are not assigned to this shift today' };
-        }
-
-        // Server-side geofence: require location validation when shift has a work location
-        const shiftLocationId = shiftDoc.siteId || shiftDoc.site;
-        if (shiftLocationId) {
-          const { locationId, latitude, longitude } = body || {};
-          const locId = locationId ? String(locationId) : shiftLocationId;
-          if (latitude == null || longitude == null) {
-            return {
-              success: false,
-              error: 'Location verification required. Please ensure you are at the work location and grant location access.',
-            };
-          }
-          try {
-            const locationService = require('./location.service');
-            const validation = await locationService.validateLocation(
-              locId,
-              parseFloat(latitude),
-              parseFloat(longitude)
-            );
-            if (!validation.valid) {
-              const radiusM = validation.geofenceRadius || 500;
-              return {
-                success: false,
-                error: `Outside work location. Please move within ${radiusM}m of the store to start your shift.`,
-              };
-            }
-          } catch (locErr) {
-            console.warn('[shifts] Location validation error:', locErr?.message);
-            return {
-              success: false,
-              error: 'Unable to verify location. Please check your connection and try again.',
-            };
-          }
         }
 
         const config = await PickerSlaConfig.getConfig();

@@ -30,6 +30,11 @@ router.patch('/pickers/:id/status', ...adminOrWorkforce, pickerOpsController.upd
 
 // Picker Management list (new picker ops list API)
 router.get('/pickers', ...adminOrWorkforce, pickerOpsController.listPickers);
+router.get(
+  '/pickers/:pickerId/device-request-otp',
+  ...adminOrWorkforce,
+  pickerOpsController.getDeviceRequestOtp
+);
 router.patch('/pickers/:pickerId/assignment', ...adminOrWorkforce, pickerOpsController.updateAssignment);
 router.post('/pickers/:pickerId/push', ...adminOrWorkforce, pickerOpsController.sendPickerPush);
 

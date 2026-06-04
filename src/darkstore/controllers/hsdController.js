@@ -1,4 +1,16 @@
 const Device = require('../models/Device');
+const PickerUser = require('../../picker/models/user.model');
+const PickerDevice = require('../../picker/models/device.model');
+const HHDUser = require('../../hhd/models/User.model');
+const { PICKER_STATUS, DEVICE_STATUS } = require('../../constants/pickerEnums');
+const { HEARTBEAT_OFFLINE_THRESHOLD_MS } = require('../../picker/controllers/heartbeat.controller');
+const {
+  syncAssignFromHsd,
+  syncUnassignFromHsd,
+  isPickerUserType,
+  resolveHsdAssignee,
+  pickerIdMatchesAssignment,
+} = require('../../picker/services/hsdPickerDeviceSync.service');
 const HSDSession = require('../models/HSDSession');
 const HSDDeviceAction = require('../models/HSDDeviceAction');
 const HSDDeviceIssue = require('../models/HSDDeviceIssue');
@@ -71,6 +83,144 @@ const getFleetOverview = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to fetch fleet overview',
+    });
+  }
+};
+
+function isConnectionActive(picker, hhdUser) {
+  const now = Date.now();
+  const lastSeenMs = picker?.lastSeenAt ? new Date(picker.lastSeenAt).getTime() : 0;
+  if (lastSeenMs && now - lastSeenMs < HEARTBEAT_OFFLINE_THRESHOLD_MS) return true;
+  const lastLoginMs = hhdUser?.lastLogin ? new Date(hhdUser.lastLogin).getTime() : 0;
+  return !!(lastLoginMs && now - lastLoginMs < HEARTBEAT_OFFLINE_THRESHOLD_MS);
+}
+
+function findHsdDeviceForPicker(picker, hsdDevices) {
+  if (!picker || !hsdDevices?.length) return null;
+  return (
+    hsdDevices.find(
+      (row) =>
+        row.assigned_to?.userId &&
+        pickerIdMatchesAssignment(picker, row.assigned_to.userId, row.assigned_to.userName)
+    ) || null
+  );
+}
+
+function buildDeviceInformation(hsdDevice, pickerDevice) {
+  const deviceId = hsdDevice?.device_id || pickerDevice?.deviceId || null;
+  const assigned = !!(deviceId && (hsdDevice?.assigned_to || pickerDevice?.assignedPickerId));
+  return {
+    status: assigned ? 'Assigned' : 'Not Assigned',
+    deviceId,
+    serial: hsdDevice?.serial_number || pickerDevice?.serial || null,
+    battery: typeof hsdDevice?.battery_level === 'number' ? hsdDevice.battery_level : null,
+    signal: hsdDevice?.signal_strength || 'no_signal',
+    deviceStatus: hsdDevice?.status || (assigned ? 'offline' : null),
+    lastSync:
+      hsdDevice?.last_sync ||
+      (hsdDevice?.last_seen ? new Date(hsdDevice.last_seen).toISOString() : null),
+    assignedAt: pickerDevice?.assignedAt
+      ? new Date(pickerDevice.assignedAt).toISOString()
+      : null,
+  };
+}
+
+/**
+ * HSD User List — pickers with device assignment for the Device Management screen.
+ * GET /api/darkstore/hsd/users?storeId=&page=&limit=&search=
+ */
+const getHsdUsers = async (req, res) => {
+  try {
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const skip = (page - 1) * limit;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+
+    const query = { status: PICKER_STATUS.ACTIVE };
+    if (search) {
+      const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      query.$or = [{ name: rx }, { phone: rx }, { 'employment.employeeId': rx }];
+    }
+
+    const [pickers, total, hsdDevices, pickerDevices] = await Promise.all([
+      PickerUser.find(query)
+        .select('name phone photoUri status employment hhdUserId lastSeenAt currentLocationId')
+        .sort({ name: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      PickerUser.countDocuments(query),
+      Device.find({
+        store_id: storeId,
+        'assigned_to.userId': { $exists: true, $ne: null },
+      })
+        .select(
+          'device_id serial_number battery_level signal_strength status last_sync last_seen assigned_to'
+        )
+        .lean(),
+      PickerDevice.find({ status: DEVICE_STATUS.ASSIGNED })
+        .select('deviceId serial assignedPickerId assignedAt')
+        .lean(),
+    ]);
+
+    const hhdIds = pickers.map((p) => p.hhdUserId).filter(Boolean);
+    const hhdUsers = hhdIds.length
+      ? await HHDUser.find({ _id: { $in: hhdIds } }).select('lastLogin isActive').lean()
+      : [];
+    const hhdById = Object.fromEntries(hhdUsers.map((u) => [String(u._id), u]));
+
+    const pickerDeviceByPickerId = Object.fromEntries(
+      pickerDevices
+        .filter((d) => d.assignedPickerId)
+        .map((d) => [String(d.assignedPickerId), d])
+    );
+
+    const users = pickers.map((picker) => {
+      const pickerId = String(picker._id);
+      const hhdUser = picker.hhdUserId ? hhdById[String(picker.hhdUserId)] : null;
+      const hsdDevice = findHsdDeviceForPicker(picker, hsdDevices);
+      const pickerDevice = pickerDeviceByPickerId[pickerId] || null;
+      const deviceInformation = buildDeviceInformation(hsdDevice, pickerDevice);
+      const connectionActive = isConnectionActive(picker, hhdUser);
+
+      return {
+        userId: pickerId,
+        userName: picker.name || picker.phone || 'Picker',
+        userType: 'Picker',
+        phone: picker.phone || null,
+        employeeId: picker.employment?.employeeId || null,
+        photoUri: picker.photoUri || null,
+        pickerStatus: picker.status || null,
+        locationId: picker.currentLocationId || null,
+        loginStatus: connectionActive ? 'Active' : 'Offline',
+        deviceInformation,
+        assignedDevice: deviceInformation.status === 'Assigned' ? deviceInformation.deviceId : null,
+        assignedTo: deviceInformation.status === 'Assigned'
+          ? {
+              userId: pickerId,
+              userName: picker.name || picker.phone,
+              userType: 'Picker',
+            }
+          : null,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      users,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
+    });
+  } catch (error) {
+    logger.error('Get HSD users error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch HSD users',
     });
   }
 };
@@ -159,13 +309,48 @@ const assignDevice = async (req, res) => {
       userType: device.assigned_to.userType,
     } : null;
 
+    const assignee = await resolveHsdAssignee(userId, userName, userType);
+    if (isPickerUserType(userType) && !assignee) {
+      return res.status(404).json({
+        success: false,
+        error: 'Picker user not found for assignment',
+      });
+    }
+
+    const assignUserId = assignee?.userId ?? userId;
+    const assignUserName = assignee?.userName ?? userName;
+
     device.assigned_to = {
-      userId: userId,
-      userName: userName,
+      userId: assignUserId,
+      userName: assignUserName,
       userType: userType,
     };
 
     await device.save();
+
+    let pickerSync = null;
+    try {
+      pickerSync = await syncAssignFromHsd({
+        deviceId: device.device_id,
+        userId: assignUserId,
+        userName: assignUserName,
+        userType,
+        serialNumber: device.serial_number,
+        storeId: device.store_id,
+      });
+    } catch (syncErr) {
+      logger.warn('HSD assign: picker_devices sync failed', {
+        deviceId,
+        userId,
+        error: syncErr.message,
+      });
+      if (isPickerUserType(userType)) {
+        return res.status(syncErr.statusCode || 400).json({
+          success: false,
+          error: syncErr.message || 'Failed to sync picker device assignment',
+        });
+      }
+    }
 
     // Log history
     await DeviceHistory.create({
@@ -196,6 +381,7 @@ const assignDevice = async (req, res) => {
           userType: device.assigned_to.userType,
         },
         assignedAt: new Date().toISOString(),
+        pickerSync: pickerSync?.synced ? { pickerId: pickerSync.pickerId } : null,
       },
       message: 'Device assigned successfully',
     });
@@ -233,6 +419,19 @@ const unassignDevice = async (req, res) => {
 
     device.assigned_to = null;
     await device.save();
+
+    try {
+      await syncUnassignFromHsd({
+        deviceId: device.device_id,
+        userId: previousState?.userId,
+        userType: previousState?.userType,
+      });
+    } catch (syncErr) {
+      logger.warn('HSD unassign: picker_devices sync failed', {
+        deviceId,
+        error: syncErr.message,
+      });
+    }
 
     // Log history
     await DeviceHistory.create({
@@ -654,6 +853,19 @@ const bulkResetDevices = async (req, res) => {
         device.assigned_to = null;
         await device.save();
 
+        try {
+          await syncUnassignFromHsd({
+            deviceId: device.device_id,
+            userId: previousState?.userId,
+            userType: previousState?.userType,
+          });
+        } catch (syncErr) {
+          logger.warn('HSD bulk reset: picker_devices sync failed', {
+            deviceId,
+            error: syncErr.message,
+          });
+        }
+
         // Log history
         await DeviceHistory.create({
           device_id: deviceId,
@@ -878,6 +1090,7 @@ const createRequisition = async (req, res) => {
 
 module.exports = {
   getFleetOverview,
+  getHsdUsers,
   registerDevice,
   assignDevice,
   unassignDevice,

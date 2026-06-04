@@ -6,6 +6,8 @@
 const PickerDevice = require('../models/device.model');
 const PickerUser = require('../models/user.model');
 const { DEVICE_STATUS } = require('../../constants/pickerEnums');
+const { buildPickerDeviceStatus, isHhdSessionActive } = require('./deviceStatus.service');
+const { getLinkedHhdUserForPicker } = require('../helpers/hhdLink.helper');
 const mongoose = require('mongoose');
 
 let websocketService;
@@ -23,6 +25,18 @@ try {
 async function returnDevice(pickerUserId, body) {
   const { deviceId, condition, conditionNotes, conditionPhotoUrl } = body;
   if (!deviceId) throw new Error('deviceId is required');
+
+  const pickerUser = await PickerUser.findById(pickerUserId)
+    .select('lastSeenAt phone hhdUserId')
+    .lean();
+  const linkedHhdUser = pickerUser ? await getLinkedHhdUserForPicker(pickerUser) : null;
+  if (isHhdSessionActive(pickerUser, linkedHhdUser)) {
+    const err = new Error(
+      'HHD app is still logged in on this device. Log out of the HHD app before returning it.'
+    );
+    err.statusCode = 409;
+    throw err;
+  }
 
   const device = await PickerDevice.findOne({ deviceId }).populate('assignedPickerId', 'name phone');
   if (!device) throw new Error('Device not found');
@@ -80,20 +94,21 @@ async function returnDevice(pickerUserId, body) {
  * @returns {Promise<Object|null>} - Device or null if none assigned
  */
 async function getAssignedDevice(pickerUserId) {
-  const pickerIdStr = mongoose.Types.ObjectId.isValid(pickerUserId)
-    ? new mongoose.Types.ObjectId(pickerUserId).toString()
-    : String(pickerUserId);
-  const device = await PickerDevice.findOne({ assignedPickerId: pickerIdStr })
-    .populate('assignedPickerId', 'name phone')
-    .lean();
-  if (!device) return null;
-  return {
-    id: device._id.toString(),
-    deviceId: device.deviceId,
-    serial: device.serial || '',
-    status: device.status,
-    assignedAt: device.assignedAt ? device.assignedAt.toISOString() : null,
-  };
+  if (!pickerUserId || !mongoose.Types.ObjectId.isValid(pickerUserId)) {
+    return null;
+  }
+
+  const status = await buildPickerDeviceStatus(pickerUserId);
+  if (!status) {
+    return { assigned: false, status: null, deviceId: null };
+  }
+  if (!status.assigned) {
+    const { assigned, ...rest } = status;
+    return { assigned: false, ...rest };
+  }
+
+  const { assigned, ...payload } = status;
+  return { assigned: true, ...payload };
 }
 
 /**

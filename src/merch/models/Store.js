@@ -24,6 +24,13 @@ const StoreSchema = new Schema({
   pincode: { type: String },
   latitude: { type: Number, min: -90, max: 90 },
   longitude: { type: Number, min: -180, max: 180 },
+  /** When picker device GPS was saved as the official store location */
+  coordinatesCapturedAt: { type: Date },
+  coordinatesSource: {
+    type: String,
+    enum: ['device_gps', 'admin'],
+    default: 'admin',
+  },
   // Legacy
   x: { type: Number },
   y: { type: Number },

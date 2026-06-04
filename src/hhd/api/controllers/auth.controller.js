@@ -4,30 +4,14 @@ const { createOTP, verifyOTP } = require('../../services/otp.service');
 const { logger } = require('../../utils/logger');
 const db = require('../../../config/db');
 const { sendOtpSms, isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../../utils/smsGateway');
-const PickerUser = require('../../../picker/models/user.model');
-
-async function linkPickerAccountByMobile(hhdUser) {
-  try {
-    if (!hhdUser?.mobile) {
-      return null;
-    }
-
-    const pickerUser = await PickerUser.findOne({ phone: hhdUser.mobile });
-    if (!pickerUser) {
-      return null;
-    }
-
-    if (!pickerUser.hhdUserId || pickerUser.hhdUserId.toString() !== hhdUser._id.toString()) {
-      pickerUser.hhdUserId = hhdUser._id;
-      await pickerUser.save();
-    }
-
-    return pickerUser;
-  } catch (error) {
-    logger.warn(`[Verify OTP] Failed to link picker account for ${hhdUser?.mobile}: ${error.message}`);
-    return null;
-  }
-}
+const { recordHhdPickerPresence } = require('../../../picker/helpers/hhdLink.helper');
+const { findPickerByPhone } = require('../../../picker/helpers/hhdLink.helper');
+const {
+  resolveAndLinkPickerForHhdUser,
+  syncHhdUserFromPicker,
+  buildHhdPickerProfilePayload,
+  buildHhdUserProfileResponse,
+} = require('../../services/hhdPickerProfile.service');
 
 async function sendOTP(req, res, next) {
   const { mobile, mobileNumber } = req.body;
@@ -61,6 +45,7 @@ async function sendOTP(req, res, next) {
 
     const testOtp = getTestOtpIfApplicable(normalizedMobile);
     const otp = testOtp || generateOTP();
+    const { picker: registeredPicker } = await findPickerByPhone(normalizedMobile);
 
     if (isOtpDevMode()) {
       try {
@@ -71,7 +56,11 @@ async function sendOTP(req, res, next) {
       return res.status(200).json({
         success: true,
         message: 'OTP sent successfully',
-        data: { mobile: normalizedMobile, otp }, // always return OTP in dev mode for testing
+        data: {
+          mobile: normalizedMobile,
+          otp,
+          pickerRegistered: !!registeredPicker,
+        },
       });
     }
 
@@ -95,7 +84,11 @@ async function sendOTP(req, res, next) {
     return res.status(200).json({
       success: true,
       message: 'OTP sent successfully',
-      ...(includeOtp && { data: { mobile: normalizedMobile, otp } }),
+      data: {
+        mobile: normalizedMobile,
+        pickerRegistered: !!registeredPicker,
+        ...(includeOtp && { otp }),
+      },
     });
   } catch (error) {
     if (!res.headersSent) {
@@ -175,9 +168,21 @@ async function verifyOTPHandler(req, res, next) {
     }
     user.lastLogin = new Date();
     await user.save().catch(() => {});
-    await linkPickerAccountByMobile(user);
+    const { picker: linkedPicker } = await resolveAndLinkPickerForHhdUser(user);
+    if (linkedPicker) {
+      await syncHhdUserFromPicker(user, linkedPicker);
+      try {
+        await recordHhdPickerPresence(linkedPicker, { hhdUser: user });
+      } catch (presenceErr) {
+        logger.warn(
+          `[Verify OTP] Failed to sync picker presence for ${normalizedMobile}: ${presenceErr.message}`
+        );
+      }
+    }
 
+    const pickerProfile = await buildHhdPickerProfilePayload(user, linkedPicker);
     const token = user.getSignedJwtToken();
+    const picker = pickerProfile.picker;
     return res.status(200).json({
       success: true,
       message: 'OTP verified successfully',
@@ -186,9 +191,16 @@ async function verifyOTPHandler(req, res, next) {
         user: {
           id: user._id.toString(),
           mobile: user.mobile,
-          name: user.name,
-          role: user.role,
+          name: user.name || picker?.name || null,
+          role: user.role || picker?.role || 'picker',
+          email: picker?.email || null,
+          warehouse: picker?.locationName || null,
+          department: picker?.department || null,
+          pickerId: picker?.id || null,
+          employeeId: picker?.employeeId || null,
+          photoUri: picker?.photoUri || null,
         },
+        pickerProfile,
       },
     });
   } catch (error) {
@@ -204,9 +216,9 @@ async function verifyOTPHandler(req, res, next) {
 
 async function getMe(req, res, next) {
   try {
-    const user = await HHDUser.findById(req.user?.id).select('-password');
-    if (!user) throw new ErrorResponse('User not found', 404);
-    res.status(200).json({ success: true, data: user });
+    const profile = await buildHhdUserProfileResponse(req.user?.id, { touchPresence: true });
+    if (!profile) throw new ErrorResponse('User not found', 404);
+    res.status(200).json({ success: true, data: profile });
   } catch (error) {
     next(error);
   }

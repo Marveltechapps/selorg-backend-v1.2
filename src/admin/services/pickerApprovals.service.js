@@ -9,6 +9,9 @@ const PickerAttendance = require('../../picker/models/attendance.model');
 const PickerDevice = require('../../picker/models/device.model');
 const WorkLocation = require('../../picker/models/workLocation.model');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
+const {
+  getActiveDeviceRequestOtpsByPickerIds,
+} = require('../../picker/services/managerOtp.service');
 
 /**
  * Derive docs status from picker_documents (aadhar front/back, pan front/back)
@@ -97,11 +100,16 @@ async function listPickers({ status, locationId, search, page = 1, limit = 20 })
     bankAccounts.map((b) => [b.userId.toString(), { verified: b.isVerified }])
   );
 
+  const activeOtps = await getActiveDeviceRequestOtpsByPickerIds(
+    pickers.map((p) => p._id.toString())
+  );
+
   const now = Date.now();
   const shiftMs = 4 * 60 * 1000;
 
   const items = pickers.map((p) => {
     const id = p._id.toString();
+    const otpRow = activeOtps[id];
     const docCount = docMap[id] || 0;
     const lastSeen = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
     const shiftActive = lastSeen > 0 && now - lastSeen < shiftMs;
@@ -130,6 +138,12 @@ async function listPickers({ status, locationId, search, page = 1, limit = 20 })
       approvedAt: p.approvedAt,
       approvedBy: p.approvedBy,
       bankVerified: !!bankMap[id]?.verified,
+      otp: otpRow?.otp || null,
+      deviceRequestOtp: otpRow?.otp || null,
+      deviceRequestOtpExpiresAt: otpRow?.expiresAt
+        ? new Date(otpRow.expiresAt).toISOString()
+        : null,
+      managerOtpVerified: !!p.managerOtpVerifiedAt,
     };
   });
 
@@ -188,6 +202,8 @@ async function getPickerById(id) {
   const trainingPct = getTrainingProgressPercent(picker.trainingProgress);
   const lastSeenMs = picker.lastSeenAt ? new Date(picker.lastSeenAt).getTime() : 0;
   const shiftActive = !!openShift || (lastSeenMs > 0 && Date.now() - lastSeenMs < 4 * 60 * 1000);
+  const activeOtps = await getActiveDeviceRequestOtpsByPickerIds([picker._id.toString()]);
+  const otpRow = activeOtps[picker._id.toString()];
   const distinctDays = new Set(
     attendanceMonth.map((a) => (a.punchIn ? new Date(a.punchIn).toISOString().slice(0, 10) : ''))
   );
@@ -262,6 +278,13 @@ async function getPickerById(id) {
     },
     onboardingStage: getOnboardingStage(picker, docCount),
     hhdUserId: picker.hhdUserId ? picker.hhdUserId.toString() : null,
+    otp: otpRow?.otp || null,
+    deviceRequestOtp: otpRow?.otp || null,
+    deviceRequestOtpExpiresAt: otpRow?.expiresAt
+      ? new Date(otpRow.expiresAt).toISOString()
+      : null,
+    managerOtpVerified: !!picker.managerOtpVerifiedAt,
+    managerOtpVerifiedAt: picker.managerOtpVerifiedAt || null,
   };
 }
 

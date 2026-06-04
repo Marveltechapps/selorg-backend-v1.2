@@ -3,6 +3,7 @@
  * radiusKm from query or picker config (dashboard-managed).
  */
 const shiftsService = require('../services/shifts.service');
+const shiftReadinessService = require('../services/shiftReadiness.service');
 const pickerConfigService = require('../services/pickerConfig.service');
 const { success, error } = require('../utils/response.util');
 
@@ -30,11 +31,25 @@ const select = async (req, res, next) => {
   }
 };
 
+const getReadiness = async (req, res, next) => {
+  try {
+    const readiness = await shiftReadinessService.getForUser(req.userId);
+    if (!readiness) return error(res, 'User not found', 404);
+    success(res, readiness);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const start = async (req, res, next) => {
   try {
     const result = await shiftsService.start(req.userId, req.body);
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({
+        success: false,
+        error: result.error,
+        readiness: result.readiness ?? undefined,
+      });
     }
     success(res, { shiftStartTime: result.shiftStartTime });
   } catch (err) {
@@ -78,4 +93,4 @@ const endBreak = async (req, res, next) => {
   }
 };
 
-module.exports = { getAvailable, select, start, end, startBreak, endBreak };
+module.exports = { getAvailable, select, getReadiness, start, end, startBreak, endBreak };

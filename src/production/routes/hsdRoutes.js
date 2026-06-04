@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   getFleetOverview,
+  getHsdUsers,
   registerDevice,
   assignDevice,
   unassignDevice,
@@ -19,6 +20,9 @@ const {
 
 // GET /api/darkstore/hsd/fleet
 router.get('/fleet', getFleetOverview);
+
+// GET /api/darkstore/hsd/users — HSD User List (Device Management)
+router.get('/users', getHsdUsers);
 
 // POST /api/darkstore/hsd/devices/register
 router.post('/devices/register', registerDevice);

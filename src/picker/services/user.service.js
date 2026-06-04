@@ -8,6 +8,7 @@ const HHDUser = require('../../hhd/models/User.model');
 const Document = require('../models/document.model');
 const BankAccount = require('../models/bankAccount.model');
 const PickerDevice = require('../models/device.model');
+const { DEVICE_STATUS } = require('../../constants/pickerEnums');
 const SupportTicket = require('../models/supportTicket.model');
 const Notification = require('../models/notification.model');
 const TrainingVideo = require('../models/trainingVideo.model');
@@ -138,12 +139,19 @@ const getProfile = async (userId) => {
 const getProfileOverview = async (userId) => {
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return null;
 
+  // HSD → picker_devices sync runs inside buildPickerDeviceStatus for the device block
+
+  const pickerOid = new mongoose.Types.ObjectId(userId);
+
   const [user, documentRecords, bankAccounts, assignedDevice, openTicketsCount, unreadNotificationsCount, activeVideos, watchHistory] =
     await Promise.all([
       User.findById(userId).lean(),
       Document.find({ userId }).lean(),
       BankAccount.find({ userId }).sort({ isDefault: -1, createdAt: -1 }).lean(),
-      PickerDevice.findOne({ assignedPickerId: userId }).lean(),
+      PickerDevice.findOne({
+        assignedPickerId: pickerOid,
+        status: DEVICE_STATUS.ASSIGNED,
+      }).lean(),
       SupportTicket.countDocuments({ userId, status: { $in: ['open', 'in_progress'] } }),
       Notification.countDocuments({ userId, isRead: false }),
       TrainingVideo.find({ isActive: true }).sort({ order: 1 }).lean(),
@@ -211,15 +219,41 @@ const getProfileOverview = async (userId) => {
       totalVideos: totalTrainingVideos,
       completedVideos: completedTrainingVideos,
       progressPercent: trainingProgressPercent,
-      completed: totalTrainingVideos > 0 && completedTrainingVideos === totalTrainingVideos,
+      completed:
+        user?.trainingCompleted === true ||
+        (totalTrainingVideos > 0 && completedTrainingVideos === totalTrainingVideos),
+      trainingCompleted: user?.trainingCompleted === true,
     },
-    device: {
-      assigned: !!assignedDevice,
-      deviceId: assignedDevice?.deviceId || null,
-      serial: assignedDevice?.serial || null,
-      status: assignedDevice?.status || null,
-      assignedAt: assignedDevice?.assignedAt ? new Date(assignedDevice.assignedAt).toISOString() : null,
-    },
+    device: await (async () => {
+      const { buildPickerDeviceStatus } = require('./deviceStatus.service');
+      const status = await buildPickerDeviceStatus(userId);
+      const hhdActive = status?.hhdActive === true || status?.inUseOnHhd === true;
+      const effectivelyAssigned = status?.assigned === true || hhdActive;
+
+      if (!effectivelyAssigned) {
+        return {
+          assigned: false,
+          deviceId: null,
+          serial: null,
+          status: null,
+          assignedAt: null,
+          hhdActive: false,
+          inUseOnHhd: false,
+        };
+      }
+
+      return {
+        assigned: true,
+        deviceId: status.deviceId ?? null,
+        serial: status.serial ?? null,
+        status: status.status ?? 'ASSIGNED',
+        assignedAt: status.assignedAt ?? null,
+        hhdActive,
+        hsdDeviceOnline: status.hsdDeviceOnline ?? false,
+        inUseOnHhd: hhdActive,
+        hsdBatteryLevel: status.hsdBatteryLevel ?? null,
+      };
+    })(),
     support: {
       openTicketsCount,
     },

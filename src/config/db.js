@@ -1,5 +1,19 @@
+const dns = require('dns');
 const mongoose = require('mongoose');
 const logger = require('../core/utils/logger');
+
+function configureMongoDns(uri) {
+  if (!uri.startsWith('mongodb+srv://')) return;
+
+  const configured = (process.env.MONGO_DNS_SERVERS || '8.8.8.8,8.8.4.4,1.1.1.1')
+    .split(',')
+    .map((server) => server.trim())
+    .filter(Boolean);
+
+  if (configured.length > 0) {
+    dns.setServers(configured);
+  }
+}
 
 // Fail fast when DB is down instead of buffering queries for 10s (e.g. login User.findOne).
 mongoose.set('bufferCommands', false);
@@ -39,6 +53,7 @@ function buildConnectOptions(uri) {
 const connectDB = async () => {
   try {
     const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/selorg-admin-ops';
+    configureMongoDns(uri);
 
     // ✅ FIX P0.4: Optimized pool configuration
     const conn = await mongoose.connect(uri, buildConnectOptions(uri));

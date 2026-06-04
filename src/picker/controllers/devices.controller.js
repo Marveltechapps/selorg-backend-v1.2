@@ -26,7 +26,9 @@ async function returnDevice(req, res) {
     const result = await devicesService.returnDevice(pickerUserId, body);
     return success(res, result, 200);
   } catch (err) {
-    const status = err.message.includes('not found') ? 404 : err.message.includes('not assigned') ? 400 : 400;
+    const status =
+      err.statusCode ||
+      (err.message.includes('not found') ? 404 : err.message.includes('not assigned') ? 400 : 400);
     return error(res, err.message, status);
   }
 }
@@ -58,10 +60,7 @@ async function getAssignedDevice(req, res) {
       return error(res, 'Unauthorized', 401);
     }
     const device = await devicesService.getAssignedDevice(pickerUserId);
-    if (!device) {
-      return error(res, 'No device assigned', 404);
-    }
-    return success(res, device, 200);
+    return success(res, device || { assigned: false }, 200);
   } catch (err) {
     return error(res, err.message, 500);
   }

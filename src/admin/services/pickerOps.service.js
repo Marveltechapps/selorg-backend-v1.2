@@ -5,6 +5,9 @@ const PickerShiftSlot = require('../models/PickerShiftSlot');
 const PickerOtRequest = require('../models/PickerOtRequest');
 const PickerShiftChangeRequest = require('../models/PickerShiftChangeRequest');
 const Store = require('../../merch/models/Store');
+const {
+  getActiveDeviceRequestOtpsByPickerIds,
+} = require('../../picker/services/managerOtp.service');
 
 function mapPickerOpsStatus(pickerStatus) {
   // PickerUser.status enum: PENDING|ACTIVE|REJECTED|BLOCKED|SUSPENDED
@@ -41,7 +44,7 @@ async function listPickers({ q, status, page = 1, limit = 50 }) {
 
   const [rows, total] = await Promise.all([
     PickerUser.find(query)
-      .select('_id name phone status agencyId storeId shiftSlotId')
+      .select('_id name phone status agencyId storeId shiftSlotId managerOtpVerifiedAt')
       .sort({ createdAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum)
@@ -63,14 +66,19 @@ async function listPickers({ q, status, page = 1, limit = 50 }) {
   const storeById = Object.fromEntries(stores.map((s) => [String(s._id), s]));
   const slotById = Object.fromEntries(slots.map((s) => [String(s._id), s]));
 
+  const pickerIds = rows.map((p) => String(p._id));
+  const activeOtps = await getActiveDeviceRequestOtpsByPickerIds(pickerIds);
+
   return {
     data: rows.map((p) => {
       const agency = p.agencyId ? agencyById[String(p.agencyId)] : null;
       const store = p.storeId ? storeById[String(p.storeId)] : null;
       const slot = p.shiftSlotId ? slotById[String(p.shiftSlotId)] : null;
       const shiftSlotLabel = slot ? `${String(slot.type).toUpperCase()} • ${slot.startTime} - ${slot.endTime}` : null;
+      const id = String(p._id);
+      const otpRow = activeOtps[id];
       return {
-        pickerId: String(p._id),
+        pickerId: id,
         name: p.name || '',
         phone: p.phone || '',
         agencyId: p.agencyId ? String(p.agencyId) : null,
@@ -80,6 +88,12 @@ async function listPickers({ q, status, page = 1, limit = 50 }) {
         shiftSlotId: p.shiftSlotId ? String(p.shiftSlotId) : null,
         shiftSlotLabel,
         status: mapPickerOpsStatus(p.status),
+        otp: otpRow?.otp || null,
+        deviceRequestOtp: otpRow?.otp || null,
+        deviceRequestOtpExpiresAt: otpRow?.expiresAt
+          ? new Date(otpRow.expiresAt).toISOString()
+          : null,
+        managerOtpVerified: !!p.managerOtpVerifiedAt,
       };
     }),
     total,

@@ -6,10 +6,12 @@ const mongoose = require('mongoose');
 const managerOtpSchema = new mongoose.Schema(
   {
     pickerId: { type: mongoose.Schema.Types.ObjectId, ref: 'PickerUser', required: true, index: true },
+    /** Plain 6-digit code shown on Admin Operations Dashboard (workforce only). */
+    otpCode: { type: String, required: true },
     otpHash: { type: String, required: true },
     expiresAt: { type: Date, required: true, index: true },
     used: { type: Boolean, default: false },
-    managerPhone: { type: String, required: true },
+    managerPhone: { type: String, default: null },
   },
   { timestamps: true, collection: 'picker_manager_otps' }
 );

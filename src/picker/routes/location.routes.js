@@ -26,6 +26,27 @@ router.get('/locations/:locationId', requireAuth, locationController.getLocation
 // Validate if user is within geofence
 router.post('/locations/validate', requireAuth, locationController.validateLocation);
 
+// Set device GPS as darkstore verification anchor (when admin coords are missing/wrong)
+router.post(
+  '/locations/ensure-darkstore-verification',
+  requireAuth,
+  locationController.ensureDarkstoreVerification
+);
+
+// Set nearest darkstore from device GPS (current location)
+router.post(
+  '/locations/set-darkstore-from-current',
+  requireAuth,
+  locationController.setDarkstoreFromCurrent
+);
+
+// Save device GPS as official darkstore coordinates
+router.post(
+  '/locations/save-darkstore-gps',
+  requireAuth,
+  locationController.saveDarkstoreGps
+);
+
 // Set user's work location
 router.post('/locations/set', requireAuth, locationController.setUserLocation);
 

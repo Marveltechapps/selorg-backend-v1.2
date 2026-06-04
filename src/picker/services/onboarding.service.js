@@ -78,8 +78,6 @@ async function getOnboardingState(userId) {
     currentStep = 'verification'; // Redirect handled by status screens
   else if (!hasCompletedTraining) currentStep = 'training';
   else if (!picker.locationType || !picker.currentLocationId) currentStep = 'location';
-  else if (!hasCompletedSetup) currentStep = 'shifts';
-  else if (!managerOtpApproved || !deviceCollectionDone) currentStep = 'collect_device';
   else currentStep = 'home';
 
   return {

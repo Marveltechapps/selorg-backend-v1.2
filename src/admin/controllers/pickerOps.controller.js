@@ -1,4 +1,7 @@
 const pickerOpsService = require('../services/pickerOps.service');
+const {
+  getActiveDeviceRequestOtpsByPickerIds,
+} = require('../../picker/services/managerOtp.service');
 const { getTokensForPicker } = require('../../picker/services/pickerNotification.service');
 const logger = require('../../core/utils/logger');
 
@@ -7,6 +10,27 @@ async function listPickers(req, res, next) {
     const { q, status, page, limit } = req.query;
     const data = await pickerOpsService.listPickers({ q, status: status || 'all', page, limit });
     res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getDeviceRequestOtp(req, res, next) {
+  try {
+    const { pickerId } = req.params;
+    const map = await getActiveDeviceRequestOtpsByPickerIds([pickerId]);
+    const row = map[String(pickerId)] || null;
+    res.json({
+      success: true,
+      data: {
+        pickerId: String(pickerId),
+        otp: row?.otp || null,
+        deviceRequestOtp: row?.otp || null,
+        deviceRequestOtpExpiresAt: row?.expiresAt
+          ? new Date(row.expiresAt).toISOString()
+          : null,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -237,6 +261,7 @@ async function sendPickerPush(req, res, next) {
 
 module.exports = {
   listPickers,
+  getDeviceRequestOtp,
   updateAssignment,
   updateOpsStatus,
   updateStatusUnified,

@@ -30,7 +30,14 @@ const workLocationSchema = new mongoose.Schema({
   zipCode: String,
   coordinates: {
     latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true }
+    longitude: { type: Number, required: true },
+    /** When device GPS was saved as the official hub location */
+    capturedAt: { type: Date },
+    source: {
+      type: String,
+      enum: ['device_gps', 'admin'],
+      default: 'admin',
+    },
   },
   geofence: {
     radius: { 

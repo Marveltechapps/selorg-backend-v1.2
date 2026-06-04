@@ -7,47 +7,102 @@ const User = require('../models/user.model');
 const Store = require('../../merch/models/Store');
 const mongoose = require('mongoose');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
+const { PICKER_SHIFT_GEOFENCE_M } = require('../constants/shiftGeofence');
 
 /**
  * Calculate distance between two coordinates using Haversine formula
- * Returns distance in kilometers
+ * Returns distance in kilometers (rounded for display)
  */
 function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Earth's radius in km
+  const meters = calculateDistanceMeters(lat1, lon1, lat2, lon2);
+  return Math.round((meters / 1000) * 10) / 10;
+}
+
+/** Precise Haversine distance in meters (used for geofence validation). */
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
-  
-  const a = 
+
+  const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distance = R * c;
-  
-  return Math.round(distance * 10) / 10; // Round to 1 decimal
+  return R * c;
 }
 
 function toRad(degrees) {
   return degrees * (Math.PI / 180);
 }
 
+function isValidGeoPair(lat, lng) {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+/** Coordinates used for shift geofence — prefers device-captured darkstore GPS. */
+function resolveVerificationCoordinates(location) {
+  if (!location) return null;
+
+  const coordLat = Number(location.coordinates?.latitude);
+  const coordLng = Number(location.coordinates?.longitude);
+  if (isValidGeoPair(coordLat, coordLng)) {
+    return {
+      latitude: coordLat,
+      longitude: coordLng,
+      source:
+        location.coordinates?.source ||
+        location.coordinatesSource ||
+        (location._source === 'store' ? 'admin' : 'admin'),
+      capturedAt: location.coordinates?.capturedAt ?? location.coordinatesCapturedAt ?? null,
+    };
+  }
+
+  return null;
+}
+
 function normalizePickerLocationFromWorkLocation(location) {
+  const lat = Number(location.coordinates?.latitude);
+  const lng = Number(location.coordinates?.longitude);
+  const hasCoordinates = isValidGeoPair(lat, lng);
+
   return {
     ...location,
     locationId: String(location.locationId),
     type: location.type === 'darkstore' ? 'darkstore' : 'warehouse',
-    coordinates: {
-      latitude: Number(location.coordinates?.latitude),
-      longitude: Number(location.coordinates?.longitude),
-    },
+    coordinates: hasCoordinates
+      ? {
+          latitude: lat,
+          longitude: lng,
+          source: location.coordinates?.source || 'admin',
+          capturedAt: location.coordinates?.capturedAt ?? null,
+        }
+      : null,
+    coordinatesSource: location.coordinates?.source || 'admin',
+    coordinatesCapturedAt: location.coordinates?.capturedAt ?? null,
   };
 }
 
 function normalizePickerLocationFromStore(store) {
-  const latitude = Number(store.latitude ?? store.x);
-  const longitude = Number(store.longitude ?? store.y);
-  const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+  let latitude = Number(store.latitude);
+  let longitude = Number(store.longitude);
+  if (!isValidGeoPair(latitude, longitude)) {
+    const x = Number(store.x);
+    const y = Number(store.y);
+    if (isValidGeoPair(x, y)) {
+      latitude = x;
+      longitude = y;
+    }
+  }
+  const hasCoordinates = isValidGeoPair(latitude, longitude);
 
   return {
     _id: store._id,
@@ -58,9 +113,18 @@ function normalizePickerLocationFromStore(store) {
     city: store.city || null,
     state: store.state || null,
     zipCode: store.pincode || null,
-    coordinates: hasCoordinates ? { latitude, longitude } : null,
+    coordinates: hasCoordinates
+      ? {
+          latitude,
+          longitude,
+          source: store.coordinatesSource || 'admin',
+          capturedAt: store.coordinatesCapturedAt ?? null,
+        }
+      : null,
     geofence: { radius: 500, shape: 'circle' },
     isActive: true,
+    coordinatesCapturedAt: store.coordinatesCapturedAt ?? null,
+    coordinatesSource: store.coordinatesSource || 'admin',
     _source: 'store',
   };
 }
@@ -169,6 +233,43 @@ const getAllLocations = async (latitude, longitude, radiusKm = 50) => {
 };
 
 /**
+ * Get nearest darkstore work location to user coordinates.
+ */
+const getNearestDarkstoreLocation = async (latitude, longitude) => {
+  if (!latitude || !longitude) {
+    throw new Error('Latitude and longitude are required');
+  }
+
+  const locations = await loadActivePickerLocations();
+  const darkstores = (locations || []).filter(
+    (loc) => loc.type === 'darkstore' && loc.coordinates
+  );
+
+  if (!darkstores.length) {
+    throw new Error('No active darkstore locations found');
+  }
+
+  const locationsWithDistance = darkstores.map((location) => {
+    const distance = calculateDistance(
+      latitude,
+      longitude,
+      location.coordinates.latitude,
+      location.coordinates.longitude
+    );
+    const travelTime = estimateTravelTime(distance);
+    return {
+      ...location,
+      distance,
+      travelTime,
+      distanceDisplay: `${distance} km`,
+    };
+  });
+
+  locationsWithDistance.sort((a, b) => a.distance - b.distance);
+  return locationsWithDistance[0];
+};
+
+/**
  * Get nearest work location to user
  */
 const getNearestLocation = async (latitude, longitude) => {
@@ -239,7 +340,9 @@ const getLocationById = async (locationId) => {
   };
   const store = await withTimeout(
     Store.findOne(storeQuery)
-      .select('_id code name type address city state pincode latitude longitude x y')
+      .select(
+        '_id code name type address city state pincode latitude longitude x y coordinatesCapturedAt coordinatesSource'
+      )
       .lean(),
     DB_TIMEOUT_MS,
     null
@@ -257,53 +360,181 @@ const getLocationById = async (locationId) => {
 };
 
 /**
- * Validate if user is within geofence of location
+ * Validate if user is within geofence of a saved work location (darkstore).
  */
-const validateLocation = async (locationId, userLatitude, userLongitude) => {
+const validateLocation = async (locationId, userLatitude, userLongitude, radiusMeters) => {
   const location = await getLocationById(locationId);
-  
-  if (!userLatitude || !userLongitude) {
+
+  const lat = parseFloat(userLatitude);
+  const lng = parseFloat(userLongitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     throw new Error('User coordinates are required');
   }
-  if (!location.coordinates) {
-    throw new Error('Selected location has no coordinates configured');
+
+  const verificationCoords = resolveVerificationCoordinates(location);
+  if (!verificationCoords) {
+    throw new Error(
+      'Dark store verification location is not configured. Re-select your darkstore on site.'
+    );
   }
 
-  const distance = calculateDistance(
-    userLatitude,
-    userLongitude,
-    location.coordinates.latitude,
-    location.coordinates.longitude
+  const distanceMeters = calculateDistanceMeters(
+    lat,
+    lng,
+    verificationCoords.latitude,
+    verificationCoords.longitude
   );
 
-  const distanceMeters = distance * 1000;
-  const geofenceRadius = location.geofence?.radius || 500;
+  const parsedRadius = parseFloat(radiusMeters);
+  const geofenceRadius =
+    Number.isFinite(parsedRadius) && parsedRadius > 0
+      ? parsedRadius
+      : PICKER_SHIFT_GEOFENCE_M;
   const withinRange = distanceMeters <= geofenceRadius;
 
   return {
     valid: withinRange,
     withinRange,
-    distance,
+    distance: Math.round((distanceMeters / 1000) * 10) / 10,
     distanceMeters: Math.round(distanceMeters),
     geofenceRadius,
     location: {
       id: location.locationId,
       name: location.name,
-      type: location.type
-    }
+      type: location.type,
+    },
+  };
+};
+
+function parseGpsPayload(payload = {}) {
+  const lat = parseFloat(payload.latitude);
+  const lng = parseFloat(payload.longitude);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    throw new Error('Valid latitude between -90 and 90 is required');
+  }
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new Error('Valid longitude between -180 and 180 is required');
+  }
+  const capturedAt =
+    payload.capturedAt != null ? new Date(payload.capturedAt) : new Date();
+  if (Number.isNaN(capturedAt.getTime())) {
+    throw new Error('Invalid coordinates timestamp');
+  }
+  const address =
+    typeof payload.address === 'string' && payload.address.trim()
+      ? payload.address.trim()
+      : null;
+  return { latitude: lat, longitude: lng, address, capturedAt };
+}
+
+/**
+ * Persist device GPS as the official darkstore coordinates (WorkLocation or Store).
+ */
+const persistDarkstoreGpsCoordinates = async (locationId, payload = {}) => {
+  const { latitude, longitude, address, capturedAt } = parseGpsPayload(payload);
+  const locKey = String(locationId || '').trim();
+  if (!locKey) {
+    throw new Error('Location ID is required');
+  }
+
+  const workUpdate = {
+    'coordinates.latitude': latitude,
+    'coordinates.longitude': longitude,
+    'coordinates.capturedAt': capturedAt,
+    'coordinates.source': 'device_gps',
+  };
+  if (address) {
+    workUpdate.address = address;
+  }
+
+  const workLocation = await withTimeout(
+    WorkLocation.findOneAndUpdate(
+      { locationId: locKey, type: 'darkstore', isActive: true },
+      { $set: workUpdate },
+      { new: true, runValidators: true }
+    )
+      .select('locationId name address coordinates type')
+      .lean(),
+    DB_TIMEOUT_MS,
+    null
+  );
+
+  if (workLocation) {
+    return {
+      success: true,
+      storage: 'work_location',
+      locationId: workLocation.locationId,
+      name: workLocation.name,
+      address: workLocation.address,
+      latitude: workLocation.coordinates?.latitude ?? latitude,
+      longitude: workLocation.coordinates?.longitude ?? longitude,
+      capturedAt: workLocation.coordinates?.capturedAt ?? capturedAt,
+    };
+  }
+
+  const storeOr = [{ code: locKey.toUpperCase() }];
+  if (mongoose.Types.ObjectId.isValid(locKey)) {
+    storeOr.unshift({ _id: locKey });
+  }
+
+  const storeUpdate = {
+    latitude,
+    longitude,
+    x: latitude,
+    y: longitude,
+    coordinatesCapturedAt: capturedAt,
+    coordinatesSource: 'device_gps',
+  };
+  if (address) {
+    storeUpdate.address = address;
+  }
+
+  const store = await withTimeout(
+    Store.findOneAndUpdate(
+      {
+        $or: storeOr,
+        type: { $in: ['dark_store', 'store'] },
+      },
+      { $set: storeUpdate },
+      { new: true, runValidators: true }
+    )
+      .select('_id code name address latitude longitude coordinatesCapturedAt')
+      .lean(),
+    DB_TIMEOUT_MS,
+    null
+  );
+
+  if (!store) {
+    throw new Error('Darkstore not found or is not active');
+  }
+
+  return {
+    success: true,
+    storage: 'store',
+    locationId: String(store._id),
+    name: store.name,
+    address: store.address,
+    latitude: store.latitude,
+    longitude: store.longitude,
+    capturedAt: store.coordinatesCapturedAt ?? capturedAt,
   };
 };
 
 /**
  * Set user's work location
  */
-const setUserLocation = async (userId, locationId, locationType) => {
+const setUserLocation = async (userId, locationId, locationType, gpsPayload) => {
   // Verify location exists and is active
   const location = await getLocationById(locationId);
 
   // Verify location type matches
   if (location.type !== locationType) {
     throw new Error(`Location type mismatch. Expected ${locationType}, got ${location.type}`);
+  }
+
+  let savedGps = null;
+  if (locationType === 'darkstore' && gpsPayload?.latitude != null && gpsPayload?.longitude != null) {
+    savedGps = await persistDarkstoreGpsCoordinates(locationId, gpsPayload);
   }
 
   // Update user's location
@@ -335,8 +566,12 @@ const setUserLocation = async (userId, locationId, locationType) => {
       id: location.locationId,
       name: location.name,
       type: location.type,
-      address: location.address
-    }
+      address: location.address,
+      latitude: savedGps?.latitude ?? location.coordinates?.latitude ?? null,
+      longitude: savedGps?.longitude ?? location.coordinates?.longitude ?? null,
+      coordinatesCapturedAt: savedGps?.capturedAt ?? null,
+    },
+    savedGps,
   };
 };
 
@@ -358,11 +593,117 @@ const getCurrentLocationForUser = async (userId) => {
       locationType: user.locationType,
     };
   }
+  const verificationCoords = resolveVerificationCoordinates(location);
   return {
     hubId: location.locationId,
     hubName: location.name,
     address: location.address,
     locationType: user.locationType,
+    latitude: verificationCoords?.latitude ?? null,
+    longitude: verificationCoords?.longitude ?? null,
+    coordinatesCapturedAt: verificationCoords?.capturedAt ?? null,
+    coordinatesSource: verificationCoords?.source ?? null,
+  };
+};
+
+/**
+ * Ensure the assigned darkstore has device GPS saved as the verification anchor.
+ * Updates admin/legacy coordinates when they are missing or far from the picker.
+ */
+const ensureDarkstoreVerificationAnchor = async (userId, deviceGps = {}) => {
+  const user = await User.findById(userId).select('currentLocationId locationType').lean();
+  if (!user?.currentLocationId) {
+    throw new Error('No darkstore assigned. Select your work location first.');
+  }
+  if (user.locationType !== 'darkstore') {
+    throw new Error('Location verification applies to darkstore assignments only.');
+  }
+
+  const locationId = String(user.currentLocationId);
+  const location = await getLocationById(locationId);
+  const existing = resolveVerificationCoordinates(location);
+  const { latitude: deviceLat, longitude: deviceLng } = parseGpsPayload(deviceGps);
+
+  const CORRUPT_COORDS_THRESHOLD_M = 1000;
+
+  let needsAnchor = !existing;
+  if (existing && existing.source !== 'device_gps') {
+    const distM = calculateDistanceMeters(
+      deviceLat,
+      deviceLng,
+      existing.latitude,
+      existing.longitude
+    );
+    if (distM > CORRUPT_COORDS_THRESHOLD_M) {
+      needsAnchor = true;
+    }
+  }
+
+  if (!needsAnchor) {
+    return {
+      anchored: false,
+      locationId,
+      name: location.name,
+      address: location.address,
+      verification: existing,
+    };
+  }
+
+  const saved = await persistDarkstoreGpsCoordinates(locationId, deviceGps);
+  return {
+    anchored: true,
+    locationId: saved.locationId,
+    name: saved.name,
+    address: saved.address,
+    verification: {
+      latitude: saved.latitude,
+      longitude: saved.longitude,
+      source: 'device_gps',
+      capturedAt: saved.capturedAt,
+    },
+  };
+};
+
+/**
+ * Resolve nearest darkstore from GPS and persist as the picker's work location.
+ */
+const setDarkstoreFromCurrentLocation = async (userId, latitude, longitude, options = {}) => {
+  const { latitude: lat, longitude: lng, address, capturedAt } = parseGpsPayload({
+    latitude,
+    longitude,
+    address: options.address,
+    capturedAt: options.capturedAt,
+  });
+
+  const nearest = await getNearestDarkstoreLocation(lat, lng);
+  const savedGps = await persistDarkstoreGpsCoordinates(nearest.locationId, {
+    latitude: lat,
+    longitude: lng,
+    address,
+    capturedAt,
+  });
+  await updateUserLastLocation(userId, lat, lng);
+  const assignment = await setUserLocation(userId, nearest.locationId, 'darkstore');
+
+  return {
+    ...assignment,
+    savedGps,
+    nearest: {
+      locationId: nearest.locationId,
+      name: nearest.name,
+      type: nearest.type,
+      address: savedGps.address ?? nearest.address,
+      city: nearest.city,
+      state: nearest.state,
+      coordinates: {
+        latitude: savedGps.latitude,
+        longitude: savedGps.longitude,
+      },
+      distance: nearest.distance,
+      distanceDisplay: nearest.distanceDisplay,
+      travelTime: nearest.travelTime,
+    },
+    coordinates: { latitude: lat, longitude: lng, capturedAt: savedGps.capturedAt },
   };
 };
 
@@ -398,10 +739,15 @@ const updateUserLastLocation = async (userId, latitude, longitude) => {
 module.exports = {
   getAllLocations,
   getNearestLocation,
+  getNearestDarkstoreLocation,
   getLocationById,
   getCurrentLocationForUser,
   validateLocation,
+  ensureDarkstoreVerificationAnchor,
+  resolveVerificationCoordinates,
+  persistDarkstoreGpsCoordinates,
   setUserLocation,
+  setDarkstoreFromCurrentLocation,
   updateUserLastLocation,
   calculateDistance,
   estimateTravelTime,

@@ -102,6 +102,7 @@ const verifyOtp = async (req, res, next) => {
       success: true,
       message: result.message || 'OTP verified',
       ...(result.token && { token: result.token }),
+      ...(typeof result.isNewUser === 'boolean' && { isNewUser: result.isNewUser }),
       ...(result.user && { user: result.user }),
     });
   } catch (err) {

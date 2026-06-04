@@ -13,6 +13,7 @@ const dashboardAuth = [authenticateToken, requireRole('warehouse', 'admin', 'sup
 
 // Mobile picker app
 router.get('/available', requireAuth, shiftsController.getAvailable);
+router.get('/readiness', requireAuth, shiftsController.getReadiness);
 router.post('/select', requireAuth, shiftsController.select);
 router.post('/start', requireAuth, shiftsController.start);
 router.post('/end', requireAuth, shiftsController.end);

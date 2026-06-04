@@ -1,5 +1,6 @@
 /**
- * Manager OTP — 6-digit code to manager phone; verify unlocks device collection in app.
+ * HSD device request / manager approval OTP.
+ * Generated when picker requests approval; displayed on Admin Operations Dashboard picker list.
  */
 const crypto = require('crypto');
 const PickerUser = require('../models/user.model');
@@ -33,6 +34,10 @@ function generateSixDigitOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+function shouldSendManagerSms() {
+  return String(process.env.MANAGER_OTP_SEND_SMS || '').toLowerCase() === 'true';
+}
+
 async function resolveManagerPhoneForPicker(picker) {
   const fallback = normalizePhone10(process.env.PICKER_FALLBACK_MANAGER_PHONE);
   if (picker.currentLocationId) {
@@ -46,6 +51,37 @@ async function resolveManagerPhoneForPicker(picker) {
   return null;
 }
 
+/**
+ * Active OTP codes for admin picker list (pickerId -> { otp, expiresAt }).
+ */
+async function getActiveDeviceRequestOtpsByPickerIds(pickerIds) {
+  const ids = (pickerIds || [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (!ids.length) return {};
+
+  const now = new Date();
+  const rows = await ManagerOTP.find({
+    pickerId: { $in: ids },
+    used: false,
+    expiresAt: { $gt: now },
+  })
+    .select('pickerId otpCode expiresAt createdAt')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const map = {};
+  for (const row of rows) {
+    const key = String(row.pickerId);
+    if (map[key]) continue;
+    map[key] = {
+      otp: row.otpCode,
+      expiresAt: row.expiresAt,
+    };
+  }
+  return map;
+}
+
 async function requestManagerOtp(pickerId) {
   const picker = await PickerUser.findById(pickerId);
   if (!picker) {
@@ -53,48 +89,47 @@ async function requestManagerOtp(pickerId) {
     err.statusCode = 404;
     throw err;
   }
-  const managerPhone = await resolveManagerPhoneForPicker(picker);
-  if (!managerPhone) {
-    const err = new Error(
-      'No manager phone configured for this work location. Ask admin to set manager phone on the hub or set PICKER_FALLBACK_MANAGER_PHONE.'
-    );
-    err.statusCode = 400;
-    throw err;
-  }
 
   const plainOtp = generateSixDigitOtp();
   const otpHash = hashOtp(String(pickerId), plainOtp);
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+  const managerPhone = await resolveManagerPhoneForPicker(picker);
 
   await ManagerOTP.deleteMany({ pickerId, used: false });
   await ManagerOTP.create({
     pickerId,
+    otpCode: plainOtp,
     otpHash,
     expiresAt,
     used: false,
-    managerPhone,
+    managerPhone: managerPhone || null,
   });
 
-  if (isOtpDevMode()) {
-    return {
-      success: true,
-      maskedPhone: maskPhone10(managerPhone),
-      devOtp: plainOtp,
-    };
-  }
-
-  const smsResult = await sendOtpSms(managerPhone, plainOtp);
-  if (!smsResult.sent) {
-    await ManagerOTP.deleteMany({ pickerId, used: false });
-    const err = new Error(smsResult.userMessage || 'Failed to send OTP to manager');
-    err.statusCode = 502;
-    throw err;
-  }
-
-  return {
+  const response = {
     success: true,
-    maskedPhone: maskPhone10(managerPhone),
+    message:
+      'Approval OTP generated. Your supervisor can read the code from the Admin Operations Dashboard.',
+    expiresInMinutes: Math.round(OTP_TTL_MS / 60000),
   };
+
+  if (isOtpDevMode()) {
+    response.devOtp = plainOtp;
+  }
+
+  if (shouldSendManagerSms() && managerPhone) {
+    const smsResult = await sendOtpSms(managerPhone, plainOtp);
+    if (!smsResult.sent) {
+      await ManagerOTP.deleteMany({ pickerId, used: false });
+      const err = new Error(smsResult.userMessage || 'Failed to send OTP to manager');
+      err.statusCode = 502;
+      throw err;
+    }
+    response.maskedPhone = maskPhone10(managerPhone);
+    response.message =
+      'OTP sent to your manager and is visible on the Admin Operations Dashboard.';
+  }
+
+  return response;
 }
 
 async function verifyManagerOtp(pickerId, otpInput) {
@@ -132,12 +167,13 @@ async function verifyManagerOtp(pickerId, otpInput) {
   picker.managerOtpVerifiedAt = new Date();
   await picker.save();
 
-  return { success: true };
+  return { success: true, message: 'OTP verified successfully' };
 }
 
 module.exports = {
   requestManagerOtp,
   verifyManagerOtp,
+  getActiveDeviceRequestOtpsByPickerIds,
   maskPhone10,
   normalizePhone10,
 };

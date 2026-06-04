@@ -3,6 +3,7 @@
  * Handles HTTP requests for work location operations
  */
 const locationService = require('../services/location.service');
+const { validateReportedGpsAccuracy } = require('../constants/shiftGeofence');
 const { success } = require('../utils/response.util');
 
 /**
@@ -76,7 +77,7 @@ const getLocationById = async (req, res, next) => {
 /**
  * POST /locations/validate
  * Validate if user is within geofence of location
- * Body: { locationId, latitude, longitude }
+ * Body: { locationId, latitude, longitude, radiusMeters? } — default 200m geofence
  */
 const validateLocation = async (req, res, next) => {
   try {
@@ -89,17 +90,36 @@ const validateLocation = async (req, res, next) => {
       });
     }
 
-    if (!latitude || !longitude) {
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+    if (
+      latitude == null ||
+      longitude == null ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng)
+    ) {
       return res.status(400).json({
         success: false,
         message: 'User coordinates (latitude, longitude) are required'
       });
     }
 
+    const accuracyError = validateReportedGpsAccuracy(req.body.accuracyMeters);
+    if (accuracyError) {
+      return res.status(400).json({
+        success: false,
+        message: accuracyError,
+      });
+    }
+
+    const radiusMeters =
+      req.body.radiusMeters != null ? parseFloat(req.body.radiusMeters) : undefined;
+
     const validation = await locationService.validateLocation(
       locationId,
-      parseFloat(latitude),
-      parseFloat(longitude)
+      lat,
+      lng,
+      radiusMeters
     );
     
     success(res, validation);
@@ -109,13 +129,108 @@ const validateLocation = async (req, res, next) => {
 };
 
 /**
+ * POST /locations/set-darkstore-from-current
+ * Assign nearest darkstore using device GPS coordinates.
+ * Body: { latitude, longitude }
+ */
+const setDarkstoreFromCurrent = async (req, res, next) => {
+  try {
+    const { latitude, longitude } = req.body;
+
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Latitude and longitude are required',
+      });
+    }
+
+    const { address, capturedAt } = req.body;
+
+    const result = await locationService.setDarkstoreFromCurrentLocation(
+      req.userId,
+      latitude,
+      longitude,
+      { address, capturedAt }
+    );
+
+    success(res, result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /locations/ensure-darkstore-verification
+ * Set device GPS as the darkstore verification anchor when missing or invalid.
+ * Body: { latitude, longitude, address?, capturedAt? }
+ */
+const ensureDarkstoreVerification = async (req, res, next) => {
+  try {
+    const { latitude, longitude, address, capturedAt } = req.body;
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Latitude and longitude are required',
+      });
+    }
+
+    const result = await locationService.ensureDarkstoreVerificationAnchor(req.userId, {
+      latitude,
+      longitude,
+      address,
+      capturedAt,
+    });
+
+    success(res, result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /locations/save-darkstore-gps
+ * Save device GPS as the official darkstore coordinates.
+ * Body: { locationId, latitude, longitude, address?, capturedAt? }
+ */
+const saveDarkstoreGps = async (req, res, next) => {
+  try {
+    const { locationId, latitude, longitude, address, capturedAt } = req.body;
+
+    if (!locationId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Location ID is required',
+      });
+    }
+
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Latitude and longitude are required',
+      });
+    }
+
+    const result = await locationService.persistDarkstoreGpsCoordinates(locationId, {
+      latitude,
+      longitude,
+      address,
+      capturedAt,
+    });
+
+    success(res, result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * POST /locations/set
  * Set user's work location
- * Body: { locationId, locationType }
+ * Body: { locationId, locationType, latitude?, longitude?, address?, capturedAt? }
  */
 const setUserLocation = async (req, res, next) => {
   try {
-    const { locationId, locationType } = req.body;
+    const { locationId, locationType, latitude, longitude, address, capturedAt } = req.body;
     const userId = req.userId; // From auth middleware
 
     if (!locationId || !locationType) {
@@ -125,10 +240,16 @@ const setUserLocation = async (req, res, next) => {
       });
     }
 
+    const gpsPayload =
+      latitude != null && longitude != null
+        ? { latitude, longitude, address, capturedAt }
+        : null;
+
     const result = await locationService.setUserLocation(
       userId,
       locationId,
-      locationType
+      locationType,
+      gpsPayload
     );
     
     success(res, result);
@@ -218,6 +339,9 @@ module.exports = {
   getLocationById,
   getCurrentLocation,
   validateLocation,
+  ensureDarkstoreVerification,
+  setDarkstoreFromCurrent,
+  saveDarkstoreGps,
   setUserLocation,
   trackUserLocation,
 };
