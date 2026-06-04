@@ -65,7 +65,7 @@ async function getOnboardingState(userId) {
     picker.status === 'ACTIVE' || picker.status === 'REJECTED' || picker.status === 'BLOCKED' || picker.status === 'SUSPENDED';
   const hasCompletedTraining = !!picker.trainingCompleted;
   const hasCompletedSetup = Array.isArray(picker.selectedShifts) && picker.selectedShifts.length > 0;
-  const managerOtpApproved = !!picker.managerOtpVerifiedAt;
+  const managerOtpApproved = !!picker.managerOtpVerifiedAt || !!picker.locationOtpVerifiedAt;
   const deviceCollectionDone = !!picker.deviceCollectionCompletedAt || !!deviceAssigned;
   /** Manager approval step (OTP verified); app also needs deviceCollectionDone to finish onboarding. */
   const hasCompletedManagerOTP = managerOtpApproved;

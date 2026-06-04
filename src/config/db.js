@@ -1,5 +1,44 @@
+const dns = require('dns');
 const mongoose = require('mongoose');
 const logger = require('../core/utils/logger');
+
+const PUBLIC_DNS_SERVERS = ['8.8.8.8', '8.8.4.4', '1.1.1.1'];
+
+function isSrvDnsRefusedError(err) {
+  return Boolean(err?.message && /querySrv\s+ECONNREFUSED/i.test(err.message));
+}
+
+/**
+ * Windows and some corporate networks refuse SRV lookups on the default resolver.
+ * MongoDB Atlas mongodb+srv:// URIs require SRV; optional public/custom DNS fixes that.
+ */
+function applyMongoDnsServers() {
+  const custom = process.env.MONGO_DNS_SERVERS;
+  if (custom && String(custom).trim().toLowerCase() !== 'system') {
+    const servers = String(custom)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (servers.length > 0) {
+      dns.setServers(servers);
+    }
+    return;
+  }
+  if (process.env.MONGO_USE_PUBLIC_DNS === 'false') {
+    return;
+  }
+  dns.setServers(PUBLIC_DNS_SERVERS);
+}
+
+function shouldUsePublicDnsForSrv(uri) {
+  if (!uri.startsWith('mongodb+srv://')) return false;
+  if (process.env.MONGO_USE_PUBLIC_DNS === 'true') return true;
+  if (process.env.MONGO_USE_PUBLIC_DNS === 'false') return false;
+  if (process.env.MONGO_DNS_SERVERS && String(process.env.MONGO_DNS_SERVERS).trim().toLowerCase() !== 'system') {
+    return true;
+  }
+  return (process.env.NODE_ENV || 'development') !== 'production';
+}
 
 // Fail fast when DB is down instead of buffering queries for 10s (e.g. login User.findOne).
 mongoose.set('bufferCommands', false);
@@ -39,9 +78,26 @@ function buildConnectOptions(uri) {
 const connectDB = async () => {
   try {
     const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/selorg-admin-ops';
+    const options = buildConnectOptions(uri);
 
-    // ✅ FIX P0.4: Optimized pool configuration
-    const conn = await mongoose.connect(uri, buildConnectOptions(uri));
+    if (shouldUsePublicDnsForSrv(uri)) {
+      applyMongoDnsServers();
+    }
+
+    let conn;
+    try {
+      conn = await mongoose.connect(uri, options);
+    } catch (firstErr) {
+      if (!uri.startsWith('mongodb+srv://') || !isSrvDnsRefusedError(firstErr)) {
+        throw firstErr;
+      }
+      logger.warn('MongoDB SRV lookup failed on system DNS; retrying with public DNS', {
+        error: firstErr.message,
+        hint: 'Set MONGO_USE_PUBLIC_DNS=true or MONGO_DNS_SERVERS=8.8.8.8,1.1.1.1 to avoid this retry',
+      });
+      applyMongoDnsServers();
+      conn = await mongoose.connect(uri, options);
+    }
 
     logger.info('MongoDB Connected', {
       host: conn.connection.host,

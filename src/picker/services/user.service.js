@@ -85,11 +85,20 @@ const getById = async (userId) => {
   return User.findById(userId).lean();
 };
 
+const pickerLocationOtpService = require('./pickerLocationOtp.service');
+
 /** GET profile: return current user profile for app display; include status, rejectedReason, rejectedAt for picker approval flow; include linked HHD profile when same person. */
 const getProfile = async (userId) => {
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) return null;
   const user = await User.findById(userId).lean();
   if (!user) return null;
+  let locationOtp = user.locationOtp || null;
+  try {
+    const otpInfo = await pickerLocationOtpService.ensurePickerLocationOtpStored(user);
+    locationOtp = otpInfo.otp;
+  } catch (_) {
+    /* non-fatal */
+  }
   const profile = {
     id: user._id.toString(),
     name: user.name,
@@ -112,6 +121,9 @@ const getProfile = async (userId) => {
     status: user.status,
     rejectedReason: user.rejectedReason,
     rejectedAt: user.rejectedAt ? user.rejectedAt.toISOString() : null,
+    currentLocationId: user.currentLocationId || null,
+    locationOtp,
+    otp: locationOtp,
   };
   if (user.hhdUserId) {
     try {

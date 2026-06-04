@@ -90,7 +90,15 @@ const verifyOtp = async (req, res, next) => {
         message: 'Phone and OTP are required',
       });
     }
-    const result = await authService.verifyOtp(phone, otp);
+    const storeId = req.body?.storeId ?? req.body?.locationId;
+    const locationType = req.body?.locationType;
+    const deviceId = req.body?.deviceId;
+    const result = await authService.verifyOtp(phone, otp, {
+      storeId,
+      locationId: storeId,
+      locationType,
+      deviceId,
+    });
     if (!result.success) {
       return res.status(400).json({
         success: false,
@@ -103,6 +111,8 @@ const verifyOtp = async (req, res, next) => {
       message: result.message || 'OTP verified',
       ...(result.token && { token: result.token }),
       ...(result.user && { user: result.user }),
+      ...(result.isNewUser != null && { isNewUser: result.isNewUser }),
+      ...(result.darkStoreSession && { darkStoreSession: result.darkStoreSession }),
     });
   } catch (err) {
     next(err);

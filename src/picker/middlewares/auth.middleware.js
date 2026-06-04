@@ -5,6 +5,7 @@
 const jwt = require('jsonwebtoken');
 const { error } = require('../utils/response.util');
 const PickerUser = require('../models/user.model');
+const { attachPickerSessionTouch } = require('../../darkstore/middleware/hsdSessionActivity.middleware');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'picker-app-secret-change-in-production';
 const ALLOW_X_USER_ID_DEV = String(process.env.ALLOW_X_USER_ID_DEV || '').toLowerCase() === 'true';
@@ -96,7 +97,7 @@ const requireAuth = async (req, res, next) => {
   }
 
   req.userId = uid;
-  return next();
+  return attachPickerSessionTouch(req, res, next);
 };
 
 module.exports = { optionalAuth, requireAuth };

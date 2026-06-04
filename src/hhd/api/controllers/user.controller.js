@@ -2,6 +2,7 @@ const { ErrorResponse } = require('../../utils/ErrorResponse');
 const HHDUser = require('../../models/User.model');
 const mongoose = require('mongoose');
 const PickerUser = require('../../../picker/models/user.model');
+const hsdUserLoginService = require('../../../darkstore/services/hsdUserLogin.service');
 
 async function getProfile(req, res, next) {
   try {
@@ -47,6 +48,19 @@ async function updateProfile(req, res, next) {
     if (name) user.name = name;
     if (deviceId) user.deviceId = deviceId;
     await user.save();
+
+    if (deviceId) {
+      try {
+        await hsdUserLoginService.updateActiveSessionDevice(
+          user._id.toString(),
+          deviceId,
+          req.body?.storeId
+        );
+      } catch (trackErr) {
+        // Non-blocking: profile update still succeeds
+      }
+    }
+
     res.status(200).json({ success: true, data: user });
   } catch (error) {
     next(error);
@@ -121,6 +135,19 @@ async function postHeartbeat(req, res, next) {
     const now = new Date();
     pickerUser.lastSeenAt = now;
     await pickerUser.save();
+
+    try {
+      const hhdUser = await HHDUser.findById(hhdUserId).select('mobile name deviceId').lean();
+      await hsdUserLoginService.touchOrEnsureActiveSession({
+        userId: hhdUserId,
+        phoneNumber: hhdUser?.mobile,
+        userName: hhdUser?.name || null,
+        deviceId: hhdUser?.deviceId || null,
+        source: 'hhd',
+      });
+    } catch {
+      // Non-blocking heartbeat
+    }
 
     res.status(200).json({
       success: true,

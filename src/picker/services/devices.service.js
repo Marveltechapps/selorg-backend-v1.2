@@ -103,8 +103,8 @@ async function getAssignedDevice(pickerUserId) {
 async function acknowledgeDeviceCollection(pickerUserId) {
   const doc = await PickerUser.findById(pickerUserId);
   if (!doc) throw new Error('User not found');
-  if (!doc.managerOtpVerifiedAt) {
-    const err = new Error('Manager approval is required before confirming device collection');
+  if (!doc.managerOtpVerifiedAt && !doc.locationOtpVerifiedAt) {
+    const err = new Error('Location OTP approval is required before confirming device collection');
     err.statusCode = 400;
     throw err;
   }

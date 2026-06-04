@@ -10,6 +10,7 @@ const { isDbConnected } = require('./config/db');
 const { errorHandler } = require('./middlewares/error.middleware');
 
 const authRoutes = require('./routes/auth.routes');
+const darkStoreLoginRoutes = require('./routes/darkStoreLogin.routes');
 const userRoutes = require('./routes/user.routes');
 const userController = require('./controllers/user.controller');
 const { requireAuth } = require('./middlewares/auth.middleware');
@@ -31,6 +32,7 @@ const performanceRoutes = require('./routes/performance.routes');
 const devicesRoutes = require('./routes/devices.routes');
 const heartbeatRoutes = require('./routes/heartbeat.routes');
 const managerRoutes = require('./routes/manager.routes');
+const approvalRoutes = require('./routes/approval.routes');
 const presenceRoutes = require('./routes/presence.routes');
 const issueRoutes = require('./routes/issue.routes');
 const { startPickerPresenceMonitor } = require('./jobs/pickerPresenceMonitor.job');
@@ -86,6 +88,7 @@ app.use(
 );
 
 app.use('/auth', authRoutes);
+app.use('/auth', darkStoreLoginRoutes);
 app.get('/me', requireAuth, userController.getProfile);
 app.get('/me/link-status', requireAuth, userController.getLinkStatus);
 app.use('/onboarding', onboardingRoutes);
@@ -109,6 +112,7 @@ app.use('/performance', performanceRoutes);
 app.use('/devices', devicesRoutes);
 app.use('/heartbeat', heartbeatRoutes);
 app.use('/manager', managerRoutes);
+app.use('/approval', approvalRoutes);
 app.use('/presence', presenceRoutes);
 app.use('/issues', issueRoutes);
 app.use('/config', configRoutes);
