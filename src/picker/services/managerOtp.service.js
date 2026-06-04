@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const PickerUser = require('../models/user.model');
 const WorkLocation = require('../models/workLocation.model');
 const ManagerOTP = require('../models/ManagerOTP');
+const pickerApprovalService = require('./pickerApproval.service');
 const { sendOtpSms } = require('./sms.service');
 const { isOtpDevMode } = require('../../utils/smsGateway');
 
@@ -156,9 +157,14 @@ async function verifyManagerOtp(pickerId, otpInput) {
   });
 
   if (!record) {
-    const err = new Error('Invalid or expired OTP');
-    err.statusCode = 400;
-    throw err;
+    try {
+      return await pickerApprovalService.verifyApprovalLocationOtp(pickerId, { otp });
+    } catch (locationErr) {
+      const err = new Error(locationErr.message || 'Invalid or expired OTP');
+      err.statusCode = locationErr.statusCode || 400;
+      err.code = locationErr.code;
+      throw err;
+    }
   }
 
   record.used = true;

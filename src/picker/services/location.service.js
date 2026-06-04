@@ -5,6 +5,8 @@
 const WorkLocation = require('../models/workLocation.model');
 const User = require('../models/user.model');
 const Store = require('../../merch/models/Store');
+const pickerDarkStoreService = require('./pickerDarkStore.service');
+const pickerLocationOtpService = require('./pickerLocationOtp.service');
 const mongoose = require('mongoose');
 const { withTimeout, DB_TIMEOUT_MS } = require('../utils/realtime.util');
 const { PICKER_SHIFT_GEOFENCE_M } = require('../constants/shiftGeofence');
@@ -537,21 +539,55 @@ const setUserLocation = async (userId, locationId, locationType, gpsPayload) => 
     savedGps = await persistDarkstoreGpsCoordinates(locationId, gpsPayload);
   }
 
+  const previous = await withTimeout(
+    User.findById(userId).select('currentLocationId').lean(),
+    DB_TIMEOUT_MS,
+    null
+  );
+  const locationChanged =
+    String(previous?.currentLocationId || '') !== String(locationId || '');
+
+  const userUpdate = {
+    currentLocationId: locationId,
+    locationType: locationType,
+  };
+  if (locationChanged) {
+    userUpdate.locationOtpVerifiedAt = null;
+    userUpdate.managerOtpVerifiedAt = null;
+    userUpdate.locationOtp = null;
+    userUpdate.locationOtpForLocationId = null;
+  }
+
   // Update user's location
   const user = await withTimeout(
-    User.findByIdAndUpdate(
-      userId,
-      {
-        currentLocationId: locationId,
-        locationType: locationType
-      },
-      { new: true, runValidators: true }
-    ).select('currentLocationId locationType name'),
+    User.findByIdAndUpdate(userId, userUpdate, { new: true, runValidators: true }).select(
+      'currentLocationId locationType name'
+    ),
     DB_TIMEOUT_MS
   );
 
   if (!user) {
     throw new Error('Failed to update user location');
+  }
+
+  let darkStoreSession = null;
+  if (locationType === 'darkstore') {
+    try {
+      darkStoreSession = await pickerDarkStoreService.registerPickerAtDarkStore(
+        userId,
+        locationId
+      );
+    } catch (storeErr) {
+      darkStoreSession = { error: storeErr?.message || 'Dark store registration failed' };
+    }
+  }
+
+  let locationOtp = null;
+  try {
+    const otpInfo = await pickerLocationOtpService.ensurePickerLocationOtpStored(userId);
+    locationOtp = otpInfo.otp;
+  } catch (_) {
+    /* non-fatal */
   }
 
   return {
@@ -560,7 +596,8 @@ const setUserLocation = async (userId, locationId, locationType, gpsPayload) => 
       id: user._id,
       name: user.name,
       currentLocationId: user.currentLocationId,
-      locationType: user.locationType
+      locationType: user.locationType,
+      locationOtp,
     },
     location: {
       id: location.locationId,
@@ -572,6 +609,7 @@ const setUserLocation = async (userId, locationId, locationType, gpsPayload) => 
       coordinatesCapturedAt: savedGps?.capturedAt ?? null,
     },
     savedGps,
+    ...(darkStoreSession && { darkStoreSession }),
   };
 };
 

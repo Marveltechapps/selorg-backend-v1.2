@@ -97,6 +97,12 @@ const userSchema = new mongoose.Schema(
     sessionToken: { type: String, default: null },
     /** Manager OTP approved (device collection unlocked in app). */
     managerOtpVerifiedAt: { type: Date, default: null },
+    /** Permanent location OTP verified (admin dashboard OTP during approval request). */
+    locationOtpVerifiedAt: { type: Date, default: null },
+    /** Stored 6-digit permanent OTP (regenerated when assigned dark store changes). */
+    locationOtp: { type: String, default: null },
+    /** Location id this OTP was generated for (or picker id sentinel before assignment). */
+    locationOtpForLocationId: { type: String, default: null },
     /** Picker confirmed handheld collected (app footer). */
     deviceCollectionCompletedAt: { type: Date, default: null },
     /** GDPR/DPDP: soft-delete request timestamp (account not purged immediately). */

@@ -11,6 +11,7 @@ const {
   recordHhdPickerPresence,
 } = require('../../../picker/helpers/hhdLink.helper');
 const { buildHhdUserProfileResponse } = require('../../services/hhdPickerProfile.service');
+const hsdUserLoginService = require('../../../darkstore/services/hsdUserLogin.service');
 
 async function getProfile(req, res, next) {
   try {
@@ -26,12 +27,30 @@ async function getProfile(req, res, next) {
 
 async function updateProfile(req, res, next) {
   try {
-    const { name, deviceId } = req.body;
+    const { name, email, warehouse, mobile, deviceId } = req.body;
     const user = await HHDUser.findById(req.user?.id);
     if (!user) throw new ErrorResponse('User not found', 404);
-    if (name) user.name = name;
-    if (deviceId) user.deviceId = deviceId;
+
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
+    if (warehouse !== undefined) user.warehouse = warehouse;
+    if (mobile !== undefined) user.mobile = mobile;
+    if (deviceId !== undefined) user.deviceId = deviceId;
+
     await user.save();
+
+    if (deviceId) {
+      try {
+        await hsdUserLoginService.updateActiveSessionDevice(
+          user._id.toString(),
+          deviceId,
+          req.body?.storeId
+        );
+      } catch (trackErr) {
+        // Non-blocking: profile update still succeeds
+      }
+    }
+
     res.status(200).json({ success: true, data: user });
   } catch (error) {
     next(error);
@@ -134,6 +153,18 @@ async function postHeartbeat(req, res, next) {
       } catch (_) {
         /* non-blocking */
       }
+    }
+
+    try {
+      await hsdUserLoginService.touchOrEnsureActiveSession({
+        userId: hhdUserId,
+        phoneNumber: hhdUser?.mobile,
+        userName: hhdUser?.name || null,
+        deviceId: resolvedDeviceId || hhdUser?.deviceId || null,
+        source: 'hhd',
+      });
+    } catch {
+      // Non-blocking heartbeat
     }
 
     res.status(200).json({

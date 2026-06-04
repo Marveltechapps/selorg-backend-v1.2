@@ -296,6 +296,17 @@ app.use('/api/v1/rider/orders', riderOrderRoutes);
 const riderShiftRoutes = require('./rider/routes/shiftRoutes');
 app.use('/api/v1/rider/shifts', riderShiftRoutes);
 
+let v2CashRouter;
+try {
+  v2CashRouter = require('./rider_v2_backend/src/modules/cash/cash.router.js').cashRouter;
+} catch (e) {
+  v2CashRouter = null;
+}
+if (v2CashRouter) {
+  app.use('/api/v1/rider/cash', v2CashRouter);
+  logger.info('Mounted rider_v2 cash router at /api/v1/rider/cash');
+}
+
 const riderDashboardNotificationRoutes = require('./rider/routes/dashboardNotificationRoutes');
 app.use(
   '/api/v1/rider/notifications',
@@ -303,6 +314,11 @@ app.use(
   requireRole('rider', 'admin', 'super_admin'),
   riderDashboardNotificationRoutes
 );
+
+const supportChatRoutes = require('./support-chat/supportChat.routes');
+app.use('/api/v1/support-chat/rider', supportChatRoutes.riderRouter);
+app.use('/api/v1/support-chat/admin', supportChatRoutes.adminRouter);
+logger.info('Mounted rider live chat support at /api/v1/support-chat');
 
 // Rider wrapper: health route + main router (v2 exports riderRouter, legacy exports router)
 const riderMain = riderRoutes.riderRouter || riderRoutes;
@@ -482,7 +498,7 @@ if (process.env.NODE_ENV !== 'test') {
     } catch (dbErr) {
       logger.error('Cannot start server without database', {
         error: dbErr.message,
-        hint: 'Check MONGO_URI in selorg-dashboard-backend-v1.1/.env and that MongoDB is reachable',
+        hint: 'Check MONGO_URI in selorg-backend-v1.2/.env, that MongoDB Atlas is reachable, and (for querySrv ECONNREFUSED) set DNS_SERVERS=8.8.8.8,1.1.1.1 or MONGO_USE_PUBLIC_DNS=true',
       });
       process.exit(1);
     }

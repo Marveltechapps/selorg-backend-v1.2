@@ -1,10 +1,14 @@
-const { Coupon } = require('../../models/Coupon');
+const { PricingCoupon: Coupon } = require('../../../merch/models/PricingCoupon');
 
 exports.list = async (req, res) => {
   try {
     const { search, isActive, page = 1, limit = 50 } = req.query;
     const filter = {};
-    if (isActive !== undefined) filter.isActive = isActive === 'true';
+    if (isActive !== undefined) {
+      const active = isActive === 'true';
+      filter.isActive = active;
+      filter.status = active ? 'active' : { $ne: 'active' };
+    }
     if (search) {
       filter.$or = [
         { code: { $regex: search, $options: 'i' } },
@@ -34,7 +38,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { code, description, discountType, discountValue, minOrderAmount, maxDiscountAmount, validFrom, validTo, isActive, usageLimit } = req.body;
+    const { code, description, discountType, discountValue, minOrderAmount, maxDiscountAmount, validFrom, validTo, isActive, usageLimit, name } = req.body;
     if (!code || discountValue === undefined) {
       return res.status(400).json({ success: false, error: 'code and discountValue are required' });
     }
@@ -44,14 +48,20 @@ exports.create = async (req, res) => {
     }
     const created = await Coupon.create({
       code: code.toUpperCase(),
+      name: name || code.toUpperCase(),
       description,
       discountType: discountType || 'percent',
       discountValue,
+      minOrderValue: minOrderAmount || 0,
       minOrderAmount: minOrderAmount || 0,
+      maxDiscount: maxDiscountAmount || null,
       maxDiscountAmount: maxDiscountAmount || null,
+      startDate: validFrom || new Date(),
+      endDate: validTo || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       validFrom: validFrom || null,
       validTo: validTo || null,
       isActive: isActive !== false,
+      status: isActive === false ? 'paused' : 'active',
       usageLimit: usageLimit || null,
     });
     res.status(201).json({ success: true, data: created });
@@ -65,6 +75,21 @@ exports.update = async (req, res) => {
     const body = { ...req.body };
     delete body._id;
     if (body.code) body.code = body.code.toUpperCase();
+    if (body.minOrderAmount !== undefined && body.minOrderValue === undefined) {
+      body.minOrderValue = body.minOrderAmount;
+    }
+    if (body.maxDiscountAmount !== undefined && body.maxDiscount === undefined) {
+      body.maxDiscount = body.maxDiscountAmount;
+    }
+    if (body.validFrom !== undefined && body.startDate === undefined) {
+      body.startDate = body.validFrom;
+    }
+    if (body.validTo !== undefined && body.endDate === undefined) {
+      body.endDate = body.validTo;
+    }
+    if (body.isActive !== undefined && body.status === undefined) {
+      body.status = body.isActive ? 'active' : 'paused';
+    }
     const updated = await Coupon.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ success: false, error: 'Coupon not found' });
     res.json({ success: true, data: updated });
@@ -87,8 +112,8 @@ exports.stats = async (req, res) => {
   try {
     const [total, active, expired] = await Promise.all([
       Coupon.countDocuments(),
-      Coupon.countDocuments({ isActive: true }),
-      Coupon.countDocuments({ validTo: { $lt: new Date() } }),
+      Coupon.countDocuments({ status: 'active', isActive: true }),
+      Coupon.countDocuments({ $or: [{ endDate: { $lt: new Date() } }, { validTo: { $lt: new Date() } }] }),
     ]);
     const totalRedemptions = await Coupon.aggregate([
       { $group: { _id: null, count: { $sum: '$usageCount' } } },

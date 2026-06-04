@@ -40,7 +40,14 @@ function initSocketIO(httpServer) {
     transports: ['websocket', 'polling'],
   });
 
-  // JWT auth for dashboard clients (optional: HHD/Picker may connect without token for legacy flows)
+  let verifyRiderToken = null;
+  try {
+    verifyRiderToken = require('../rider_v2_backend/src/utils/token').verifyToken;
+  } catch {
+    verifyRiderToken = null;
+  }
+
+  // JWT auth: dashboard users and rider app (shared Socket.IO path)
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
     if (!token) return next();
@@ -49,20 +56,42 @@ function initSocketIO(httpServer) {
       socket.userId = decoded.id || decoded.userId;
       socket.role = decoded.role || decoded.roleId;
       socket.primaryStoreId = decoded.primaryStoreId || (decoded.assignedStores && decoded.assignedStores[0]) || '';
-      next();
+      return next();
     } catch {
+      if (verifyRiderToken) {
+        try {
+          const riderPayload = verifyRiderToken(token);
+          socket.riderId = riderPayload.sub;
+          socket.riderName = riderPayload.name;
+          socket.role = 'rider';
+          return next();
+        } catch {
+          /* fall through */
+        }
+      }
       next();
     }
   });
 
+  const { joinSupportRooms } = require('../../support-chat/supportChat.socket');
+
   io.on('connection', async (socket) => {
-    logger.info(`Socket connected: ${socket.id} (user=${socket.userId}, role=${socket.role})`);
+    logger.info(`Socket connected: ${socket.id} (user=${socket.userId}, rider=${socket.riderId}, role=${socket.role})`);
     if (socket.userId) socket.join(`user:${socket.userId}`);
     if (socket.role) socket.join(`role:${String(socket.role).toLowerCase()}`);
+    joinSupportRooms(socket);
     socket.on('subscribe', (room) => { socket.join(room); });
     socket.on('unsubscribe', (room) => { socket.leave(room); });
     socket.on('join:user', (userId) => { socket.join(`user:${userId}`); });
     socket.on('join:order', (orderId) => { socket.join(`order:${orderId}`); });
+    socket.on('support:join', (payload) => {
+      const conversationId = payload?.conversationId;
+      if (conversationId) socket.join(`support:conversation:${conversationId}`);
+    });
+    socket.on('support:leave', (payload) => {
+      const conversationId = payload?.conversationId;
+      if (conversationId) socket.leave(`support:conversation:${conversationId}`);
+    });
     socket.on('get:live_orders', async (params) => {
       const storeId = params?.storeId || socket.primaryStoreId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
       const status = params?.status || 'all';

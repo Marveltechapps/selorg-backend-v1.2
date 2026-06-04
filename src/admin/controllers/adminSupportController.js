@@ -30,7 +30,11 @@ const createTicket = asyncHandler(async (req, res) => {
 });
 
 const updateTicket = asyncHandler(async (req, res) => {
-  const data = await adminSupportService.updateTicket(req.params.id, req.body);
+  const data = await adminSupportService.updateTicket(req.params.id, {
+    ...req.body,
+    updatedById: req.user?.userId || req.user?.id || req.user?._id || 'admin',
+    updatedByName: req.user?.name || req.user?.email || 'Admin',
+  });
   if (!data) return res.status(404).json({ success: false, error: 'Ticket not found' });
   res.json({ success: true, data });
 });

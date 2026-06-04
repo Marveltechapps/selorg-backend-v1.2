@@ -5,9 +5,20 @@ const storage = multer.memoryStorage();
 
 function excelFileFilter(_req, file, cb) {
   const ext = path.extname(file.originalname || '').toLowerCase();
-  if (ext !== '.xlsx') {
-    return cb(new Error('Only .xlsx files allowed'), false);
+  const mimeType = file.mimetype || '';
+  
+  // Check both extension and MIME type for better security
+  const validExtension = ext === '.xlsx';
+  const validMimeType = mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  
+  if (!validExtension) {
+    return cb(new Error('Only .xlsx files allowed (invalid file extension)'), false);
   }
+  
+  if (!validMimeType) {
+    return cb(new Error('Only .xlsx files allowed (invalid MIME type)'), false);
+  }
+  
   cb(null, true);
 }
 

@@ -7,6 +7,8 @@
 const PickerUser = require('../models/user.model');
 const websocketService = require('../../utils/websocket');
 const { WORKER_STATUS } = require('../../constants/pickerEnums');
+const { getHhdUserIdForPickerUser } = require('../helpers/hhdLink.helper');
+const hsdUserLoginService = require('../../darkstore/services/hsdUserLogin.service');
 
 const HEARTBEAT_OFFLINE_THRESHOLD_MS = 60 * 1000; // 60 seconds - picker becomes OFFLINE after this
 
@@ -50,6 +52,25 @@ async function postHeartbeat(req, res) {
       };
     }
     await picker.save();
+
+    try {
+      const hhdUserId = await getHhdUserIdForPickerUser(pickerId);
+      if (hhdUserId) {
+        await hsdUserLoginService.touchOrEnsureActiveSession({
+          userId: hhdUserId.toString(),
+          phoneNumber: picker.phone,
+          userName: picker.name || null,
+          deviceId: req.body?.deviceId || null,
+          storeId:
+            picker.currentLocationId ||
+            process.env.DEFAULT_STORE_ID ||
+            'DS-Adyar-01',
+          source: 'picker',
+        });
+      }
+    } catch {
+      /* non-blocking: picker heartbeat still succeeds */
+    }
 
     const newStatus = deriveWorkerStatus(picker, now);
     const statusChanged = previousStatus !== newStatus;

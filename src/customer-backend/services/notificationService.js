@@ -1,4 +1,4 @@
-const { NotificationHistory } = require('../../admin/models/NotificationHistory');
+const NotificationHistory = require('../../admin/models/NotificationHistory');
 const { PushToken } = require('../models/PushToken');
 const { Notification } = require('../models/Notification');
 const logger = require('../../core/utils/logger');
@@ -116,13 +116,11 @@ async function sendPushNotification(customerId, type, data = {}) {
     }).catch(err => logger.warn('In-app notification save failed', { err: err.message }));
 
     await NotificationHistory.create({
-      recipientId: customerId,
-      recipientType: 'customer',
+      userId: String(customerId),
+      templateName: type,
       channel: 'push',
-      templateId: type,
       title,
       body,
-      data: { type, ...data },
       status: 'sent',
       sentAt: new Date(),
     }).catch(err => logger.warn('NotificationHistory save failed', { err: err.message }));

@@ -40,6 +40,44 @@ function parsePrice(val) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parsePriceCell(raw) {
+  const str = String(raw ?? '').trim();
+  if (!str) return null;
+  const n = parsePrice(str);
+  return n != null && Number.isFinite(n) ? n : null;
+}
+
+/** Sale price with fallbacks: Sale Price → MRP → Price incl. GST → hydrated doc → existing DB row. */
+function resolveProductPrices({ doc, rawSalePrice, rawMrp, rawPriceInclGst, existing }) {
+  const fromSale = parsePriceCell(rawSalePrice);
+  const fromMrp = parsePriceCell(rawMrp);
+  const fromGst = parsePriceCell(rawPriceInclGst);
+
+  let price =
+    fromSale ??
+    (doc.price > 0 ? doc.price : null) ??
+    fromMrp ??
+    fromGst ??
+    (existing ? Number(existing.price) || null : null) ??
+    0;
+
+  let mrp =
+    fromMrp ??
+    (doc.mrp > 0 ? doc.mrp : null) ??
+    (existing ? Number(existing.mrp) || null : null) ??
+    price;
+
+  if (mrp < price) mrp = price;
+
+  return {
+    price,
+    mrp,
+    originalPrice: mrp,
+    hadSalePriceColumn: String(rawSalePrice ?? '').trim() !== '',
+    hadAnyPriceInSheet: fromSale != null || fromMrp != null || fromGst != null,
+  };
+}
+
 function parseNumberCell(val, fallback = 0) {
   if (val == null || val === '') return fallback;
   const n = Number.parseFloat(String(val).replace(/,/g, '').replace(/[^\d.-]/g, ''));
@@ -49,7 +87,11 @@ function parseNumberCell(val, fallback = 0) {
 function getCellText(row, colIndex1Based) {
   const cell = row.getCell(colIndex1Based);
   const v = cell?.value;
-  if (v == null) return '';
+  if (v == null) {
+    if (cell?.result != null) return String(cell.result).trim();
+    return '';
+  }
+  if (typeof v === 'object' && v.result != null) return String(v.result).trim();
   if (typeof v === 'object' && v.text) return String(v.text).trim();
   return String(v).trim();
 }
@@ -535,8 +577,13 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 'varchar(20)',
                 'varchar(100)',
               ]);
-              const salePriceCol = findHeaderCol(headerMap, ['Sale Price']);
+              const salePriceCol = findHeaderCol(headerMap, ['Sale Price', 'Sale price', 'Selling Price']);
               const mrpCol = findHeaderCol(headerMap, ['MSRP/MRP', 'MRP', 'MSRP']);
+              const priceInclGstCol = findHeaderCol(headerMap, [
+                'Price incl. GST (₹)',
+                'Price incl. GST',
+                'Price incl GST',
+              ]);
               const baseCostCol = findHeaderCol(headerMap, ['Base Cost']);
               const isSaleableCol = findHeaderCol(headerMap, ['Is Saleable']);
 
@@ -580,7 +627,6 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 doc.baseCost = doc.baseCost == null || Number.isNaN(Number(doc.baseCost)) ? 0 : Number(doc.baseCost);
                 if (doc.mrp < doc.price) {
                   doc.mrp = doc.price;
-                  warnings.push({ row: r, sku, message: 'MRP was lower than price, adjusted to match sale price' });
                 }
                 doc.originalPrice = doc.mrp;
                 doc.costPrice = doc.baseCost || 0;
@@ -629,10 +675,12 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 const existing = await Product.findOne({ sku: doc.sku }).session(txnSession).lean();
                 const rawSalePrice = salePriceCol ? getCellText(row, salePriceCol) : '';
                 const rawMrp = mrpCol ? getCellText(row, mrpCol) : '';
+                const rawPriceInclGst = priceInclGstCol ? getCellText(row, priceInclGstCol) : '';
                 const rawBaseCost = baseCostCol ? getCellText(row, baseCostCol) : '';
                 const rawIsSaleable = isSaleableCol ? getCellText(row, isSaleableCol) : '';
                 const hasSalePrice = String(rawSalePrice || '').trim() !== '';
                 const hasMrp = String(rawMrp || '').trim() !== '';
+                const hasPriceInclGst = String(rawPriceInclGst || '').trim() !== '';
                 const hasBaseCost = String(rawBaseCost || '').trim() !== '';
                 const hasIsSaleable = String(rawIsSaleable || '').trim() !== '';
                 if (!doc.imageUrl && existing?.imageUrl) {
@@ -653,17 +701,10 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   }
                 }
 
-                if (!doc.imageUrl) {
-                  // Data-quality skip, not a system failure: log as warning and continue with the rest of the sheet.
-                  warnings.push({ sheet: 'SKU Master', row: r, sku, message: 'Skipped: missing Image URL (row was not imported)' });
-                  counts.products.skipped += 1;
-                  continue;
-                }
-
-                if (existing && !hasSalePrice) {
+                if (existing && !hasSalePrice && !hasMrp && !hasPriceInclGst) {
                   doc.price = Number(existing.price) || 0;
                 }
-                if (existing && !hasMrp) {
+                if (existing && !hasMrp && !hasSalePrice) {
                   doc.mrp = Number(existing.mrp) || doc.price || 0;
                   doc.originalPrice = doc.mrp;
                 }
@@ -677,20 +718,30 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   doc.isSaleable = true;
                 }
 
-                if (!existing && !hasSalePrice) {
-                  // Cannot create a brand-new product with no price. This is a data-quality skip
-                  // (not a run-level failure) — report as warning so the import still succeeds overall.
+                const resolved = resolveProductPrices({
+                  doc,
+                  rawSalePrice,
+                  rawMrp,
+                  rawPriceInclGst,
+                  existing,
+                });
+                if (!existing || hasSalePrice || hasMrp || hasPriceInclGst) {
+                  doc.price = resolved.price;
+                  doc.mrp = resolved.mrp;
+                  doc.originalPrice = resolved.originalPrice;
+                }
+                if (!existing && !resolved.hadAnyPriceInSheet && resolved.price === 0) {
                   warnings.push({
                     sheet: 'SKU Master',
                     row: r,
                     sku,
-                    message: 'Skipped new SKU: Sale Price is empty. Add Sale Price in the sheet to create this product.',
+                    message:
+                      'Created without price in sheet (Sale Price / MRP empty); product marked inactive until a price is added.',
                   });
-                  counts.products.skipped += 1;
-                  continue;
                 }
 
-                if (doc.price === 0 || doc.isSaleable === false) {
+                const hasImage = Boolean(String(doc.imageUrl || '').trim());
+                if (doc.price === 0 || doc.isSaleable === false || !hasImage) {
                   doc.isActive = false;
                   doc.status = 'inactive';
                 } else {

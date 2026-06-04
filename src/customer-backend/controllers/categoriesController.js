@@ -8,6 +8,8 @@ const {
   productTaxonomyOrForSubcategory,
   productTaxonomyOrForMainCategory,
 } = require('../services/categoriesService');
+const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
+const { enrichProduct } = require('../utils/customerMediaEnrichment');
 
 function isValidObjectId(id) {
   if (!id || typeof id !== 'string') return false;
@@ -125,15 +127,18 @@ async function getCategoryProductsBySlug(req, res) {
     };
     const dbSort = sortMap[sort] || sortMap.sortOrder;
     const skip = (page - 1) * limit;
-    const [products, total] = await Promise.all([
+    const [rawProducts, total] = await Promise.all([
       Product.find(query)
         .sort(dbSort)
         .skip(skip)
         .limit(limit)
-        .select('_id sku name size tag price mrp taxPercent imageUrl isSaleable stock stockQuantity categoryId')
+        .select(
+          '_id sku name size tag price mrp taxPercent imageUrl thumbnailUrl cardImageUrl images isSaleable stock stockQuantity categoryId subcategoryId',
+        )
         .lean(),
       Product.countDocuments(query),
     ]);
+    const products = await enrichProductsWithVariants(rawProducts, { dedupeProductLines: false });
 
     const productCountEntries = await Promise.all(
       subcategories.map(async (s) => {
@@ -167,7 +172,23 @@ async function getCategoryProductsBySlug(req, res) {
           emoji: s.emoji || '',
           productCount: countMap.get(String(s._id)) || 0,
         })),
-        products: products.map((p) => ({ ...p, id: String(p._id) })),
+        products: products.map((p) => {
+          const enriched = enrichProduct(p);
+          const media = pickImageFields(enriched);
+          return {
+            id: String(p._id),
+            name: p.name,
+            size: p.size,
+            tag: p.tag,
+            price: p.price,
+            mrp: p.mrp,
+            imageUrl: media.imageUrl || null,
+            thumbnailUrl: media.thumbnailUrl || null,
+            cardImageUrl: media.cardImageUrl || null,
+            images: Array.isArray(media.images) ? media.images : [],
+            variants: Array.isArray(p.variants) ? p.variants : [],
+          };
+        }),
         pagination: {
           page,
           limit,

@@ -103,13 +103,48 @@ async function listPickers({ q, status, page = 1, limit = 50 }) {
 }
 
 async function updatePickerAssignment(pickerId, { agencyId, storeId, shiftSlotId }) {
+  const existing = await PickerUser.findById(pickerId).select('currentLocationId storeId').lean();
+  if (!existing) throw new Error('Picker not found');
+
+  const nextStoreId = storeId || null;
+  const storeIdStr = nextStoreId ? String(nextStoreId) : null;
+  const locationChanged = storeIdStr && String(existing.currentLocationId || '') !== storeIdStr;
+
   const update = {
     agencyId: agencyId || null,
-    storeId: storeId || null,
+    storeId: nextStoreId,
     shiftSlotId: shiftSlotId || null,
   };
+  if (storeIdStr) {
+    update.currentLocationId = storeIdStr;
+    update.locationType = 'darkstore';
+    if (locationChanged) {
+      update.locationOtpVerifiedAt = null;
+      update.managerOtpVerifiedAt = null;
+      update.locationOtp = null;
+      update.locationOtpForLocationId = null;
+    }
+  }
+
   const picker = await PickerUser.findByIdAndUpdate(pickerId, { $set: update }, { new: true }).lean();
   if (!picker) throw new Error('Picker not found');
+
+  if (storeIdStr) {
+    try {
+      const pickerDarkStoreService = require('../../picker/services/pickerDarkStore.service');
+      await pickerDarkStoreService.registerPickerAtDarkStore(pickerId, storeIdStr);
+    } catch (_) {
+      /* non-fatal: assignment still saved */
+    }
+  }
+
+  try {
+    const pickerLocationOtpService = require('../../picker/services/pickerLocationOtp.service');
+    await pickerLocationOtpService.ensurePickerLocationOtpStored(pickerId);
+  } catch (_) {
+    /* non-fatal */
+  }
+
   return picker;
 }
 

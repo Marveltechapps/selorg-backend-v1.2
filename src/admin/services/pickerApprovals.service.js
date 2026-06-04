@@ -8,6 +8,7 @@ const BankAccount = require('../../picker/models/bankAccount.model');
 const PickerAttendance = require('../../picker/models/attendance.model');
 const PickerDevice = require('../../picker/models/device.model');
 const WorkLocation = require('../../picker/models/workLocation.model');
+const pickerLocationOtpService = require('../../picker/services/pickerLocationOtp.service');
 const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const {
   getActiveDeviceRequestOtpsByPickerIds,
@@ -82,7 +83,26 @@ async function listPickers({ status, locationId, search, page = 1, limit = 20 })
   ]);
 
   const pickerIds = pickers.map((p) => p._id);
-  const locIds = [...new Set(pickers.map((p) => p.currentLocationId).filter(Boolean))];
+  const resolvedLocByPickerId = Object.fromEntries(
+    await Promise.all(
+      pickers.map(async (p) => {
+        const pid = p._id.toString();
+        const resolved =
+          (await pickerLocationOtpService.resolveAssignedLocationIdAsync(p)) ||
+          p.currentLocationId ||
+          (p.storeId ? String(p.storeId) : null);
+        return [pid, resolved || null];
+      })
+    )
+  );
+  const locIds = [
+    ...new Set(
+      [
+        ...pickers.map((p) => p.currentLocationId).filter(Boolean),
+        ...Object.values(resolvedLocByPickerId).filter(Boolean),
+      ].map(String)
+    ),
+  ];
   const locations = locIds.length
     ? await WorkLocation.find({ locationId: { $in: locIds } }).select('locationId name').lean()
     : [];
@@ -107,13 +127,23 @@ async function listPickers({ status, locationId, search, page = 1, limit = 20 })
   const now = Date.now();
   const shiftMs = 4 * 60 * 1000;
 
-  const items = pickers.map((p) => {
+  const items = await Promise.all(
+    pickers.map(async (p) => {
     const id = p._id.toString();
     const otpRow = activeOtps[id];
     const docCount = docMap[id] || 0;
     const lastSeen = p.lastSeenAt ? new Date(p.lastSeenAt).getTime() : 0;
     const shiftActive = lastSeen > 0 && now - lastSeen < shiftMs;
-    const locId = p.currentLocationId || '';
+    const locId = resolvedLocByPickerId[id] || '';
+    let otpInfo = await pickerLocationOtpService.resolveDisplayOtp(p);
+    if (!otpInfo?.otp) {
+      const otpKey = pickerLocationOtpService.locationKeyForOtp(id, locId || null);
+      otpInfo = {
+        otp: pickerLocationOtpService.derivePermanentOtp(id, locId || otpKey),
+        locationId: locId || null,
+        locationName: locId ? locNameById[locId] || locId : null,
+      };
+    }
     return {
       id,
       pickerId: id,
@@ -122,6 +152,8 @@ async function listPickers({ status, locationId, search, page = 1, limit = 20 })
       status: p.status,
       currentLocationId: locId || null,
       locationName: locId ? locNameById[locId] || locId : '—',
+      otp: otpInfo.otp,
+      otpLocationId: otpInfo.locationId || locId || null,
       onboardingStep: getOnboardingStage(p, docCount),
       createdAt: p.createdAt,
       lastSeenAt: p.lastSeenAt || null,
@@ -145,7 +177,8 @@ async function listPickers({ status, locationId, search, page = 1, limit = 20 })
         : null,
       managerOtpVerified: !!p.managerOtpVerifiedAt,
     };
-  });
+  })
+  );
 
   const pages = Math.max(1, Math.ceil(total / perPage) || 1);
   return {
@@ -199,6 +232,20 @@ async function getPickerById(id) {
     }
   });
 
+  const resolvedLocId =
+    (await pickerLocationOtpService.resolveAssignedLocationIdAsync(picker)) ||
+    picker.currentLocationId ||
+    (picker.storeId ? String(picker.storeId) : null);
+  let otpInfo = await pickerLocationOtpService.resolveDisplayOtp(picker);
+  if (!otpInfo?.otp) {
+    const pickerIdStr = picker._id.toString();
+    const otpKey = pickerLocationOtpService.locationKeyForOtp(pickerIdStr, resolvedLocId || null);
+    otpInfo = {
+      otp: pickerLocationOtpService.derivePermanentOtp(pickerIdStr, resolvedLocId || otpKey),
+      locationId: resolvedLocId || null,
+      locationName: resolvedLocId || null,
+    };
+  }
   const trainingPct = getTrainingProgressPercent(picker.trainingProgress);
   const lastSeenMs = picker.lastSeenAt ? new Date(picker.lastSeenAt).getTime() : 0;
   const shiftActive = !!openShift || (lastSeenMs > 0 && Date.now() - lastSeenMs < 4 * 60 * 1000);
@@ -213,8 +260,10 @@ async function getPickerById(id) {
     ordersCompletedThisMonth: attendanceMonth.reduce((s, a) => s + (a.ordersCompleted || 0), 0),
   };
 
+  const pickerIdStr = picker._id.toString();
   return {
-    pickerId: picker._id.toString(),
+    id: pickerIdStr,
+    pickerId: pickerIdStr,
     name: picker.name,
     phone: picker.phone,
     email: picker.email,
@@ -222,8 +271,10 @@ async function getPickerById(id) {
     gender: picker.gender,
     photoUri: picker.photoUri,
     locationType: picker.locationType,
-    currentLocationId: picker.currentLocationId,
-    locationName: workLoc?.name || picker.currentLocationId || null,
+    currentLocationId: resolvedLocId || picker.currentLocationId || null,
+    locationName: workLoc?.name || (resolvedLocId ? resolvedLocId : null) || picker.currentLocationId || null,
+    otp: otpInfo.otp,
+    otpLocationId: otpInfo.locationId || resolvedLocId || picker.currentLocationId || null,
     selectedShifts: picker.selectedShifts || [],
     trainingProgress: trainingPct,
     trainingProgressObj: picker.trainingProgress || {},

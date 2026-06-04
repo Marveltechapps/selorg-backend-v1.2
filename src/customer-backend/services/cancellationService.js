@@ -100,7 +100,9 @@ async function executeCancellation(userId, orderId, reason = '') {
 
   const isUnreleasedGateway =
     order.fulfillmentReleased === false &&
-    (order.paymentMethod?.methodType === 'card' || order.paymentMethod?.methodType === 'upi');
+    (order.paymentMethod?.methodType === 'card' ||
+      order.paymentMethod?.methodType === 'upi' ||
+      order.paymentMethod?.methodType === 'digital');
   if (isUnreleasedGateway) {
     order.paymentStatus = 'failed';
   }

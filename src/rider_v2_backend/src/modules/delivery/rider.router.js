@@ -610,6 +610,7 @@ riderRouter.get("/riders/:riderId/stats", _authenticate.authenticate, /*#__PURE_
 var updateProfileSchema = _zod.z.object({
   name: _zod.z.string().min(2).optional(),
   email: _zod.z.string().email().optional(),
+  phoneNumber: _zod.z.string().min(10).max(20).optional(),
   vehicle: _zod.z.object({
     type: _zod.z.string().optional(),
     registrationNumber: _zod.z.string().optional(),
@@ -668,7 +669,7 @@ riderRouter.patch("/riders/:riderId", _authenticate.authenticate, /*#__PURE__*/f
             }
             parseResult.data.upiDetails = Object.assign({}, parseResult.data.upiDetails, upiCheck.normalized);
           }
-          if (parseResult.data.name !== undefined || parseResult.data.email !== undefined) {
+          if (parseResult.data.name !== undefined || parseResult.data.email !== undefined || parseResult.data.phoneNumber !== undefined) {
             profileCheck = _profileValidation.validateProfileFields(parseResult.data);
             if (!profileCheck.valid) {
               res.status(400).json({
@@ -683,6 +684,9 @@ riderRouter.patch("/riders/:riderId", _authenticate.authenticate, /*#__PURE__*/f
             }
             if (profileCheck.normalized.email !== undefined) {
               parseResult.data.email = profileCheck.normalized.email;
+            }
+            if (profileCheck.normalized.phoneNumber !== undefined) {
+              parseResult.data.phoneNumber = profileCheck.normalized.phoneNumber;
             }
           }
           if (!(!req.user || req.params.riderId !== req.user.id)) {
@@ -717,6 +721,14 @@ riderRouter.patch("/riders/:riderId", _authenticate.authenticate, /*#__PURE__*/f
           _context8.p = 5;
           _t8 = _context8.v;
           console.error("Failed to update rider profile:", _t8);
+          if (_t8 && _t8.message && String(_t8.message).includes("Phone number already registered")) {
+            res.status(400).json({
+              success: false,
+              message: _t8.message,
+              errors: { phoneNumber: _t8.message }
+            });
+            return _context8.a(2);
+          }
           res.status(500).json({
             error: "Failed to update rider profile"
           });

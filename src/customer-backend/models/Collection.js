@@ -32,6 +32,11 @@ const collectionSchema = new mongoose.Schema(
     sortBy: { type: String, enum: ['manual', 'price', 'priceDesc', 'price_asc', 'price_desc', 'createdAt', 'name', 'sortOrder'], default: 'manual' },
     isActive: { type: Boolean, default: true },
     schedule: scheduleSchema,
+    /**
+     * Collections Excel columns that have no dedicated schema field (exact header string → cell text).
+     * Ensures 100% data capture from Excel imports without losing any column data.
+     */
+    additionalImportedFields: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   },
   { timestamps: true }
 );

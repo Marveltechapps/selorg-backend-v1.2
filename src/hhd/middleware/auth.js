@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { ErrorResponse } = require('../utils/ErrorResponse');
 const HHDUser = require('../models/User.model');
+const { attachHhdSessionTouch } = require('../../darkstore/middleware/hsdSessionActivity.middleware');
 
 async function protect(req, res, next) {
   try {
@@ -20,7 +21,7 @@ async function protect(req, res, next) {
         mobile: user.mobile,
         role: user.role,
       };
-      next();
+      return attachHhdSessionTouch(req, res, next);
     } catch (e) {
       throw new ErrorResponse('Not authorized to access this route', 401);
     }

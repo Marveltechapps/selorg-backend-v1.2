@@ -100,7 +100,7 @@ router.post("/request", _authenticate.authenticate, /*#__PURE__*/function () {
 }());
 router.get("/summary", _authenticate.authenticate, /*#__PURE__*/function () {
   var _refSummary = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeSummary(req, res) {
-    var riderId, period, summary, _tSummary;
+    var riderId, period, customStart, customEnd, summary, _tSummary;
     return _regenerator().w(function (_contextSummary) {
       while (1) switch (_contextSummary.p = _contextSummary.n) {
         case 0:
@@ -112,6 +112,16 @@ router.get("/summary", _authenticate.authenticate, /*#__PURE__*/function () {
           return _contextSummary.a(2);
         case 1:
           riderId = req.user.id;
+          if (req.query.startDate && req.query.endDate) {
+            customStart = new Date(req.query.startDate);
+            customEnd = new Date(req.query.endDate);
+            if (isNaN(customStart.getTime()) || isNaN(customEnd.getTime())) {
+              res.status(400).json({ error: "Invalid date range" });
+              return _contextSummary.a(2);
+            }
+            _contextSummary.n = 2;
+            return payoutService.getEarningsSummaryForRange(riderId, customStart, customEnd);
+          }
           period = (req.query.period && ['today', 'week', 'month', 'lifetime'].includes(req.query.period)) ? req.query.period : 'today';
           _contextSummary.n = 2;
           return payoutService.getEarningsSummary(riderId, period);

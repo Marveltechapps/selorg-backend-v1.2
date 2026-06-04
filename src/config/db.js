@@ -2,16 +2,78 @@ const dns = require('dns');
 const mongoose = require('mongoose');
 const logger = require('../core/utils/logger');
 
-function configureMongoDns(uri) {
-  if (!uri.startsWith('mongodb+srv://')) return;
-
-  const configured = (process.env.MONGO_DNS_SERVERS || '8.8.8.8,8.8.4.4,1.1.1.1')
+/**
+ * Windows and some corporate DNS resolvers refuse SRV lookups for mongodb+srv://
+ * (querySrv ECONNREFUSED). Use public resolvers unless DNS_SERVERS is set in .env.
+ */
+function configureDnsResolvers() {
+  const fromEnv = (process.env.DNS_SERVERS || process.env.MONGO_DNS_SERVERS || '')
     .split(',')
-    .map((server) => server.trim())
-    .filter(Boolean);
+    .map((s) => s.trim())
+    .filter((s) => s && s.toLowerCase() !== 'system');
+  const usePublicDns =
+    process.env.MONGO_USE_PUBLIC_DNS === 'true' ||
+    (process.env.MONGO_USE_PUBLIC_DNS !== 'false' &&
+      process.platform === 'win32' &&
+      fromEnv.length === 0);
+  const defaults = usePublicDns ? ['8.8.8.8', '1.1.1.1'] : [];
+  const servers = fromEnv.length > 0 ? fromEnv : defaults;
+  if (servers.length === 0) return;
+  dns.setServers(servers);
+  logger.info('DNS resolvers configured for MongoDB', { servers });
+}
 
-  if (configured.length > 0) {
-    dns.setServers(configured);
+/**
+ * Pre-resolve mongodb+srv to mongodb:// with explicit shard hosts (avoids driver SRV lookup).
+ */
+async function resolveSrvMongoUri(srvUri) {
+  if (!srvUri || !srvUri.startsWith('mongodb+srv://')) return srvUri;
+
+  const withoutScheme = srvUri.slice('mongodb+srv://'.length);
+  const atIndex = withoutScheme.lastIndexOf('@');
+  const credsPart = atIndex >= 0 ? withoutScheme.slice(0, atIndex) : '';
+  const hostAndRest = atIndex >= 0 ? withoutScheme.slice(atIndex + 1) : withoutScheme;
+  const slashIndex = hostAndRest.indexOf('/');
+  const hostname =
+    slashIndex >= 0 ? hostAndRest.slice(0, slashIndex) : hostAndRest.split('?')[0];
+  const pathAndQuery = slashIndex >= 0 ? hostAndRest.slice(slashIndex) : '';
+
+  const srvRecords = await dns.promises.resolveSrv(`_mongodb._tcp.${hostname}`);
+  const hosts = srvRecords.map((r) => `${r.name}:${r.port}`).join(',');
+
+  const pathOnly = pathAndQuery.split('?')[0] || '';
+  const params = new URLSearchParams(
+    pathAndQuery.includes('?') ? pathAndQuery.slice(pathAndQuery.indexOf('?') + 1) : ''
+  );
+  if (!params.has('ssl')) params.set('ssl', 'true');
+  if (credsPart && !params.has('authSource')) params.set('authSource', 'admin');
+  if (!params.has('retryWrites')) params.set('retryWrites', 'true');
+  if (!params.has('w')) params.set('w', 'majority');
+
+  const query = params.toString();
+  const prefix = credsPart ? `mongodb://${credsPart}@` : 'mongodb://';
+  return `${prefix}${hosts}${pathOnly}${query ? `?${query}` : ''}`;
+}
+
+async function prepareMongoUri(uri) {
+  configureDnsResolvers();
+  if (!uri.startsWith('mongodb+srv://')) return uri;
+  // On Windows, always convert SRV → standard URI; elsewhere convert when DNS_SERVERS is set.
+  const shouldResolve =
+    process.platform === 'win32' ||
+    Boolean(process.env.DNS_SERVERS?.trim()) ||
+    Boolean(process.env.MONGO_DNS_SERVERS?.trim());
+  if (!shouldResolve) return uri;
+
+  try {
+    const resolved = await resolveSrvMongoUri(uri);
+    logger.info('Resolved mongodb+srv URI to standard connection string');
+    return resolved;
+  } catch (err) {
+    logger.warn('SRV pre-resolve failed; connecting with mongodb+srv and alternate DNS', {
+      error: err.message,
+    });
+    return uri;
   }
 }
 
@@ -52,10 +114,10 @@ function buildConnectOptions(uri) {
  */
 const connectDB = async () => {
   try {
-    const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/selorg-admin-ops';
-    configureMongoDns(uri);
+    const rawUri =
+      process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/selorg-admin-ops';
+    const uri = await prepareMongoUri(rawUri);
 
-    // ✅ FIX P0.4: Optimized pool configuration
     const conn = await mongoose.connect(uri, buildConnectOptions(uri));
 
     logger.info('MongoDB Connected', {
@@ -71,9 +133,14 @@ const connectDB = async () => {
     setupPoolMonitoring();
 
   } catch (err) {
+    const srvHint =
+      String(err.message).includes('querySrv') || String(err.message).includes('ECONNREFUSED')
+        ? 'Windows DNS blocked mongodb+srv. Restart after this fix, or set DNS_SERVERS=8.8.8.8,1.1.1.1 (or MONGO_USE_PUBLIC_DNS=true) in .env'
+        : undefined;
     logger.error('Database connection error', {
       error: err.message,
       stack: err.stack,
+      hint: srvHint,
     });
     if (process.env.NODE_ENV === 'test') {
       logger.warn('Test mode: continuing without database');

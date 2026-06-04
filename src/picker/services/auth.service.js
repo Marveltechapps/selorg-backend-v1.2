@@ -12,6 +12,9 @@ const { createOTP, verifyOTP } = require('./otp.service');
 const { sendOtpSms } = require('./sms.service');
 const { isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../utils/smsGateway');
 const { OTP_ERROR_CODES } = require('../config/otp.constants');
+const pickerDarkStoreService = require('./pickerDarkStore.service');
+const pickerLocationOtpService = require('./pickerLocationOtp.service');
+const hsdUserLoginService = require('../../darkstore/services/hsdUserLogin.service');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'picker-app-secret-change-in-production';
 
@@ -122,7 +125,7 @@ const resendOtp = async (phone) => {
 /**
  * Verify OTP – HHD flow: verifyOTP then find/create user, return JWT and user.
  */
-const verifyOtp = async (phone, otp) => {
+const verifyOtp = async (phone, otp, options = {}) => {
   if (phone === undefined || phone === null || otp === undefined || otp === null) {
     return { success: false, message: 'Phone and OTP are required' };
   }
@@ -156,7 +159,7 @@ const verifyOtp = async (phone, otp) => {
   let user = await User.findOne({ phone: trimmed });
   const isNewUser = !user;
   if (!user) user = await User.create({ phone: trimmed });
-  await ensureLinkedHhdUser(user, trimmed);
+  const hhdUser = await ensureLinkedHhdUser(user, trimmed);
 
   const sessionToken = crypto.randomUUID();
   user.sessionToken = sessionToken;
@@ -174,12 +177,58 @@ const verifyOtp = async (phone, otp) => {
   );
 
   logPickerOtp('info', `[Picker OTP] verifyOtp: Success - user authenticated, token generated for ${trimmed}`);
+
+  const storeId = pickerDarkStoreService.normalizeStoreId(
+    options.storeId ?? options.locationId
+  );
+  let darkStoreSession = null;
+  if (storeId) {
+    try {
+      darkStoreSession = await pickerDarkStoreService.registerPickerAtDarkStore(
+        user._id,
+        storeId
+      );
+    } catch (storeErr) {
+      logPickerOtp('warn', `[Picker OTP] verifyOtp: dark store registration skipped – ${storeErr?.message}`);
+      darkStoreSession = {
+        error: storeErr?.message || 'Dark store registration failed',
+      };
+    }
+  }
+
+  try {
+    await pickerLocationOtpService.ensurePickerLocationOtpStored(user._id);
+  } catch (otpErr) {
+    logPickerOtp('warn', `[Picker OTP] verifyOtp: location OTP ensure skipped – ${otpErr?.message}`);
+  }
+
+  if (hhdUser) {
+    try {
+      const resolvedStoreId =
+        storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+      await hsdUserLoginService.recordLogin({
+        phoneNumber: trimmed,
+        userId: hhdUser._id.toString(),
+        userName: user.name || hhdUser.name || null,
+        deviceId: options.deviceId || hhdUser.deviceId || null,
+        storeId: resolvedStoreId,
+        source: 'picker',
+      });
+    } catch (loginTrackErr) {
+      logPickerOtp(
+        'warn',
+        `[Picker OTP] verifyOtp: HSD login tracking failed – ${loginTrackErr?.message}`
+      );
+    }
+  }
+
   return {
     success: true,
     message: 'OTP verified',
     token,
     isNewUser,
     user: { phone: user.phone, id: user._id.toString() },
+    ...(darkStoreSession && { darkStoreSession }),
   };
 };
 

@@ -22,7 +22,11 @@ const DEFAULTS = {
   documentAllowedExtensions: ['.jpg', '.jpeg', '.png', '.pdf'],
 
   // Timeouts & intervals (ms)
-  heartbeatIntervalMs: 30 * 1000, // 30 seconds
+  heartbeatIntervalMs: 30 * 1000, // 30 seconds — POST /api/v1/picker/heartbeat
+  /** Same cadence as heartbeat; throttles HSD login session touches on authenticated API calls */
+  hsdSessionTouchIntervalMs: 30 * 1000,
+  /** HHD handheld: POST /api/v1/hhd/users/heartbeat (keeps HSD User List Active) */
+  hhdHeartbeatIntervalMs: 30 * 1000,
   websocketTimeoutMs: 10000,
   websocketReconnectionAttempts: 3,
   websocketReconnectionDelayMs: 5000,

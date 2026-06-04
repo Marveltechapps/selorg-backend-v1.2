@@ -41,7 +41,8 @@ async function createTicket(req, res, next) {
       customerEmail: String(customerEmail).trim(),
       customerPhone: customerPhone ? String(customerPhone).trim() : '',
       orderNumber: orderNumber ? String(orderNumber).trim() : undefined,
-      channel: source === 'rider' ? 'rider_app' : 'customer_app',
+      channel: source === 'rider' ? 'rider_app' : 'in_app',
+      customerId: req.body.customerId ? String(req.body.customerId).trim() : undefined,
     };
 
     const ticket = await adminSupportService.createTicket(data, 'system', 'Customer/Rider');

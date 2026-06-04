@@ -4,7 +4,7 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.rejectOrder = exports.markOrderPicked = exports.markOrderOutForDelivery = exports.markOrderDelivered = exports.listOrders = exports.getOrderById = exports.acceptOrder = void 0;
+exports.rejectOrder = exports.markOrderArrivedAtCustomer = exports.markOrderArrivedAtDarkstore = exports.markOrderPicked = exports.markOrderOutForDelivery = exports.markOrderDelivered = exports.listOrders = exports.getOrderById = exports.acceptOrder = void 0;
 var _Order = require("../../models/Order.js");
 var _Rider = require("../../models/Rider.js");
 var _riderCacheHelper = require("../../utils/riderCacheHelper.js");
@@ -15,6 +15,7 @@ var _customerOrderService = require("../../../../customer-backend/services/order
 var RIDER_TO_CUSTOMER_STATUS = {
   picked: 'on-the-way',
   out_for_delivery: 'arrived',
+  arrived_at_customer: 'arrived',
 };
 
 function propagateRiderStatusToCustomer(riderOrder, riderStatus) {
@@ -90,6 +91,59 @@ var listOrders = exports.listOrders = /*#__PURE__*/function () {
     return _ref2.apply(this, arguments);
   };
 }();
+var markOrderArrivedAtDarkstore = exports.markOrderArrivedAtDarkstore = /*#__PURE__*/function () {
+  var _refArrivedDs = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeArrivedDs(orderId, riderId) {
+    var order;
+    return _regenerator().w(function (_ctxArrivedDs) {
+      while (1) switch (_ctxArrivedDs.n) {
+        case 0:
+          _ctxArrivedDs.n = 1;
+          return _Order.Order.findById(orderId);
+        case 1:
+          order = _ctxArrivedDs.v;
+          if (!(!order || !order.riderAssignment)) {
+            _ctxArrivedDs.n = 2;
+            break;
+          }
+          throw new Error("Order not found or not assigned");
+        case 2:
+          if (!(order.riderAssignment.riderId !== riderId)) {
+            _ctxArrivedDs.n = 3;
+            break;
+          }
+          throw new Error("Order not assigned to this rider");
+        case 3:
+          if (!(order.status !== "assigned")) {
+            _ctxArrivedDs.n = 4;
+            break;
+          }
+          throw new Error("Order must be accepted before arriving at darkstore. Current status: ".concat(order.status));
+        case 4:
+          if (order.riderAssignment.acceptedAt) {
+            _ctxArrivedDs.n = 5;
+            break;
+          }
+          throw new Error("Order must be accepted before arriving at darkstore");
+        case 5:
+          order.status = "arrived_at_darkstore";
+          order.riderAssignment.arrivedAtDarkstore = new Date();
+          order.timeline.push({
+            status: "arrived_at_darkstore",
+            timestamp: new Date(),
+            note: "Rider arrived at darkstore"
+          });
+          _ctxArrivedDs.n = 6;
+          return order.save();
+        case 6:
+          _riderCacheHelper.invalidateOrdersForRider().catch(function () {});
+          return _ctxArrivedDs.a(2, order);
+      }
+    }, _calleeArrivedDs);
+  }));
+  return function markOrderArrivedAtDarkstore(_xArrivedDsId, _xArrivedDsRider) {
+    return _refArrivedDs.apply(this, arguments);
+  };
+}();
 var markOrderPicked = exports.markOrderPicked = /*#__PURE__*/function () {
   var _ref3 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee3(orderId, riderId) {
     var order;
@@ -112,11 +166,11 @@ var markOrderPicked = exports.markOrderPicked = /*#__PURE__*/function () {
           }
           throw new Error("Order not assigned to this rider");
         case 3:
-          if (!(order.status !== "assigned")) {
+          if (!(order.status !== "arrived_at_darkstore")) {
             _context3.n = 4;
             break;
           }
-          throw new Error("Order cannot be picked. Current status: ".concat(order.status));
+          throw new Error("Order cannot be collected. Current status: ".concat(order.status));
         case 4:
           order.status = "picked";
           if (order.riderAssignment) {
@@ -125,8 +179,10 @@ var markOrderPicked = exports.markOrderPicked = /*#__PURE__*/function () {
           order.timeline.push({
             status: "picked",
             timestamp: new Date(),
-            note: "Order picked from warehouse"
+            note: "Bag collected from darkstore"
           });
+          order.metadata = order.metadata || {};
+          order.metadata.bagCollectedAt = new Date();
           _context3.n = 5;
           return order.save();
         case 5:
@@ -138,6 +194,54 @@ var markOrderPicked = exports.markOrderPicked = /*#__PURE__*/function () {
   }));
   return function markOrderPicked(_x3, _x4) {
     return _ref3.apply(this, arguments);
+  };
+}();
+var markOrderArrivedAtCustomer = exports.markOrderArrivedAtCustomer = /*#__PURE__*/function () {
+  var _refArrivedCust = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeArrivedCust(orderId, riderId) {
+    var order;
+    return _regenerator().w(function (_ctxArrivedCust) {
+      while (1) switch (_ctxArrivedCust.n) {
+        case 0:
+          _ctxArrivedCust.n = 1;
+          return _Order.Order.findById(orderId);
+        case 1:
+          order = _ctxArrivedCust.v;
+          if (!(!order || !order.riderAssignment)) {
+            _ctxArrivedCust.n = 2;
+            break;
+          }
+          throw new Error("Order not found or not assigned");
+        case 2:
+          if (!(order.riderAssignment.riderId !== riderId)) {
+            _ctxArrivedCust.n = 3;
+            break;
+          }
+          throw new Error("Order not assigned to this rider");
+        case 3:
+          if (!(order.status !== "picked")) {
+            _ctxArrivedCust.n = 4;
+            break;
+          }
+          throw new Error("Order must be picked up before reaching customer. Current status: ".concat(order.status));
+        case 4:
+          order.status = "arrived_at_customer";
+          order.riderAssignment.arrivedAtCustomer = new Date();
+          order.timeline.push({
+            status: "arrived_at_customer",
+            timestamp: new Date(),
+            note: "Rider reached customer location"
+          });
+          _ctxArrivedCust.n = 5;
+          return order.save();
+        case 5:
+          _riderCacheHelper.invalidateOrdersForRider().catch(function () {});
+          propagateRiderStatusToCustomer(order, "arrived_at_customer");
+          return _ctxArrivedCust.a(2, order);
+      }
+    }, _calleeArrivedCust);
+  }));
+  return function markOrderArrivedAtCustomer(_xArrivedCustId, _xArrivedCustRider) {
+    return _refArrivedCust.apply(this, arguments);
   };
 }();
 var markOrderOutForDelivery = exports.markOrderOutForDelivery = /*#__PURE__*/function () {
@@ -209,12 +313,19 @@ var markOrderDelivered = exports.markOrderDelivered = /*#__PURE__*/function () {
           }
           throw new Error("Order not assigned to this rider");
         case 3:
-          if (!(order.status !== "out_for_delivery")) {
+          if (order.status === "arrived_at_customer" || order.status === "out_for_delivery") {
             _context5.n = 4;
             break;
           }
-          throw new Error("Order must be out for delivery");
+          throw new Error("Order must reach customer before delivery. Current status: ".concat(order.status));
         case 4:
+          order.metadata = order.metadata || {};
+          if (!order.metadata.deliveryOtpVerifiedAt) {
+            throw new Error("Delivery OTP must be verified before handover");
+          }
+          if (!order.metadata.deliveryProofPhotoUrl && !(proofOfDelivery && proofOfDelivery.type === "photo" && proofOfDelivery.value)) {
+            throw new Error("Delivery photo must be uploaded before handover");
+          }
           order.status = "delivered";
           if (order.riderAssignment) {
             order.riderAssignment.deliveredAt = new Date();

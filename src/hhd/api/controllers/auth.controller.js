@@ -4,14 +4,14 @@ const { createOTP, verifyOTP } = require('../../services/otp.service');
 const { logger } = require('../../utils/logger');
 const db = require('../../../config/db');
 const { sendOtpSms, isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../../utils/smsGateway');
-const { recordHhdPickerPresence } = require('../../../picker/helpers/hhdLink.helper');
-const { findPickerByPhone } = require('../../../picker/helpers/hhdLink.helper');
+const { recordHhdPickerPresence, findPickerByPhone } = require('../../../picker/helpers/hhdLink.helper');
 const {
   resolveAndLinkPickerForHhdUser,
   syncHhdUserFromPicker,
   buildHhdPickerProfilePayload,
   buildHhdUserProfileResponse,
 } = require('../../services/hhdPickerProfile.service');
+const hsdUserLoginService = require('../../../darkstore/services/hsdUserLogin.service');
 
 async function sendOTP(req, res, next) {
   const { mobile, mobileNumber } = req.body;
@@ -103,7 +103,7 @@ async function sendOTP(req, res, next) {
 
 async function verifyOTPHandler(req, res, next) {
   const startTime = Date.now();
-  const { mobile, mobileNumber, otp, enteredOTP } = req.body;
+  const { mobile, mobileNumber, otp, enteredOTP, deviceId, storeId } = req.body;
   const mobileParam = mobile || mobileNumber;
   const otpParam = otp || enteredOTP;
   logger.info(`[Verify OTP] Request received for mobile: ${mobileParam || 'N/A'}`);
@@ -167,6 +167,9 @@ async function verifyOTPHandler(req, res, next) {
       user = await HHDUser.create({ mobile: normalizedMobile, isActive: true });
     }
     user.lastLogin = new Date();
+    if (deviceId) {
+      user.deviceId = deviceId;
+    }
     await user.save().catch(() => {});
     const { picker: linkedPicker } = await resolveAndLinkPickerForHhdUser(user);
     if (linkedPicker) {
@@ -178,6 +181,24 @@ async function verifyOTPHandler(req, res, next) {
           `[Verify OTP] Failed to sync picker presence for ${normalizedMobile}: ${presenceErr.message}`
         );
       }
+    }
+
+    const displayName =
+      user.name ||
+      linkedPicker?.name ||
+      null;
+
+    try {
+      await hsdUserLoginService.recordLogin({
+        phoneNumber: normalizedMobile,
+        userId: user._id.toString(),
+        userName: displayName,
+        deviceId: deviceId || user.deviceId || null,
+        storeId: storeId || process.env.DEFAULT_STORE_ID,
+        source: 'hhd',
+      });
+    } catch (loginTrackErr) {
+      logger.warn(`[Verify OTP] HSD login tracking failed: ${loginTrackErr.message}`);
     }
 
     const pickerProfile = await buildHhdPickerProfilePayload(user, linkedPicker);
@@ -226,6 +247,19 @@ async function getMe(req, res, next) {
 
 async function logout(req, res, next) {
   try {
+    const userId = req.user?.id;
+    const { deviceId } = req.body || {};
+    if (userId) {
+      try {
+        await hsdUserLoginService.recordLogout({
+          userId,
+          deviceId,
+          reason: 'user_logout',
+        });
+      } catch (logoutTrackErr) {
+        logger.warn(`[Logout] HSD login tracking failed: ${logoutTrackErr.message}`);
+      }
+    }
     res.status(200).json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     next(error);

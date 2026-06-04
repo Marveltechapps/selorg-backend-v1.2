@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getAvailablePickers,
   getPickersLive,
+  getPickerRegistry,
   getPickerPerformance,
   listPickers,
   getPerformanceSummary,
@@ -10,6 +11,8 @@ const {
 
 // GET /api/darkstore/pickers/performance/summary — KPI summary (must be before /:id)
 router.get('/performance/summary', getPerformanceSummary);
+// GET /api/darkstore/pickers/registry — store picker list with permanent OTPs
+router.get('/registry', getPickerRegistry);
 // GET /api/darkstore/pickers/available
 router.get('/available', getAvailablePickers);
 // GET /api/darkstore/pickers/live — Live Picker Board (PickerUser + heartbeat)

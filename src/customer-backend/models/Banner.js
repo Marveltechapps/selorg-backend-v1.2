@@ -61,7 +61,7 @@ const bannerSchema = new mongoose.Schema(
     redirectType: {
       type: String,
       enum: ['url', 'category', 'subcategory', 'collection', 'section', 'product', 'search', 'none', 'page', 'screen', 'banner'],
-      default: null,
+      default: 'none',
     },
     redirectValue: String,
     /** Per-banner display ratio hint for customer app rendering. */
@@ -95,10 +95,52 @@ bannerSchema.index({ slot: 1, isActive: 1, order: 1 });
 bannerSchema.index({ slot: 1, categoryId: 1, isActive: 1, order: 1 });
 bannerSchema.index({ bannerId: 1 }, { sparse: true });
 
+const ALLOWED_REDIRECT_TYPES = new Set([
+  'url',
+  'category',
+  'subcategory',
+  'collection',
+  'section',
+  'product',
+  'search',
+  'none',
+  'page',
+  'screen',
+  'banner',
+]);
+
+function normalizeRedirectTypeValue(value) {
+  const v = value == null ? '' : String(value).trim();
+  if (!v || !ALLOWED_REDIRECT_TYPES.has(v)) return 'none';
+  return v;
+}
+
+function sanitizeRedirectTypeInUpdate(update) {
+  if (!update || typeof update !== 'object') return;
+  const targets = [];
+  if (update.$set && typeof update.$set === 'object') targets.push(update.$set);
+  if (Object.prototype.hasOwnProperty.call(update, 'redirectType')) targets.push(update);
+  for (const target of targets) {
+    if (Object.prototype.hasOwnProperty.call(target, 'redirectType')) {
+      target.redirectType = normalizeRedirectTypeValue(target.redirectType);
+    }
+  }
+}
+
+bannerSchema.pre('validate', function coerceBannerRedirectType(next) {
+  this.redirectType = normalizeRedirectTypeValue(this.redirectType);
+  next();
+});
+
 bannerSchema.pre('validate', function validateBannerDates(next) {
   if (this.startDate && this.endDate && this.endDate <= this.startDate) {
     return next(new Error('endDate must be greater than startDate'));
   }
+  next();
+});
+
+bannerSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function sanitizeBannerRedirectTypeUpdate(next) {
+  sanitizeRedirectTypeInUpdate(this.getUpdate());
   next();
 });
 const Banner = mongoose.models.CustomerBanner || mongoose.model('CustomerBanner', bannerSchema, 'customer_banners');

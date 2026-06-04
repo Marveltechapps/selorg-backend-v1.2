@@ -11,6 +11,25 @@ var _Order = require("../../models/Order.js");
 var _City = _interopRequireDefault(require("../../../../merch/models/City.js"));
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 var _riderCacheHelper = require("../../utils/riderCacheHelper.js");
+var _websocket = require("../../../../utils/websocket.js");
+var ACTIVE_ORDER_STATUSES = ["assigned", "picked", "picked_up", "out_for_delivery", "in_transit"];
+function broadcastFleetRiderUpdate(riderId, patch) {
+  try {
+    _websocket.broadcast("rider:fleet_updated", Object.assign({
+      riderId: riderId,
+      updated_at: new Date().toISOString()
+    }, patch || {}));
+  } catch (_wsErr) {
+    // Non-blocking
+  }
+}
+function dashboardRiderListFilter() {
+  return {
+    deletedAt: { $exists: false },
+    status: { $nin: ["suspended", "deleted", "inactive"] },
+    $or: [{ status: { $in: ["approved", "active"] } }, { status: "pending", isVerified: true }, { availability: { $in: ["available", "busy"] } }]
+  };
+}
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -230,6 +249,12 @@ var setAvailability = exports.setAvailability = /*#__PURE__*/function () {
         case 1:
           rider = _context7.v;
           _riderCacheHelper.invalidateRider(riderId).catch(function () {});
+          if (rider) {
+            broadcastFleetRiderUpdate(riderId, {
+              availability: rider.availability,
+              status: rider.availability || "offline"
+            });
+          }
           return _context7.a(2, rider);
       }
     }, _callee7);
@@ -318,12 +343,14 @@ var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
           update = {};
           if (updates.name) update.name = updates.name;
           if (updates.email !== undefined) update.email = updates.email;
+          if (updates.phoneNumber !== undefined) update.phoneNumber = updates.phoneNumber;
           if (updates.vehicle) {
             if (updates.vehicle.type) update["vehicle.type"] = updates.vehicle.type;
             if (updates.vehicle.registrationNumber) update["vehicle.registrationNumber"] = updates.vehicle.registrationNumber;
             if (updates.vehicle.model) update["vehicle.model"] = updates.vehicle.model;
           }
           if (updates.bankDetails) {
+            update.primaryPayoutMethod = "bank";
             if (updates.bankDetails.accountNumber !== undefined) {
               update["bankDetails.accountNumber"] = updates.bankDetails.accountNumber;
             }
@@ -338,6 +365,7 @@ var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
             }
           }
           if (updates.upiDetails) {
+            update.primaryPayoutMethod = "upi";
             if (updates.upiDetails.upiId !== undefined) {
               update["upiDetails.upiId"] = updates.upiDetails.upiId;
             }
@@ -346,7 +374,12 @@ var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
             }
           }
           _context9.n = 1;
-          return _Rider.Rider.findOneAndUpdate({ riderId: riderId }, { $set: update }, { "new": true });
+          return _Rider.Rider.findOneAndUpdate({ riderId: riderId }, { $set: update }, { "new": true }).catch(function (err) {
+            if (err && err.code === 11000) {
+              throw new Error("Phone number already registered to another account");
+            }
+            throw err;
+          });
         case 1:
           rider = _context9.v;
           _riderCacheHelper.invalidateRider(riderId).catch(function () {});
@@ -445,40 +478,68 @@ var getCities = exports.getCities = /*#__PURE__*/function () {
 // Returns a lightweight shape compatible with /delivery/riders expectations.
 var listRiders = /*#__PURE__*/function () {
   var _refList = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeList() {
-    var docs;
+    var docs, riderIds, activeOrders, orderByRider, _tListOrders;
     return _regenerator().w(function (_contextList) {
       while (1) switch (_contextList.n) {
         case 0:
-          // For dashboard assignment we want all operational riders who can work today.
-          // Include:
-          // - status: 'approved' or 'active' (fully onboarded)
-          // - status: 'pending' but already verified (early access like Giridharan)
-          // The dashboard will then filter further by availability/zone/etc.
           _contextList.n = 1;
-          return _Rider.Rider.find({
-            $or: [
-              { status: { $in: ["approved", "active"] } },
-              { status: "pending", isVerified: true }
-            ]
-          }).lean();
+          return _Rider.Rider.find(dashboardRiderListFilter()).sort({ availability: 1, name: 1 }).lean();
         case 1:
           docs = _contextList.v;
+          riderIds = docs.map(function (d) {
+            return d.riderId;
+          }).filter(Boolean);
+          orderByRider = {};
+          if (!(riderIds.length > 0)) {
+            _contextList.n = 3;
+            break;
+          }
+          _contextList.n = 2;
+          return _Order.Order.find({
+            "riderAssignment.riderId": { $in: riderIds },
+            status: { $in: ACTIVE_ORDER_STATUSES }
+          }).select("riderAssignment.riderId orderId").lean()["catch"](function () {
+            return [];
+          });
+        case 2:
+          activeOrders = _contextList.v;
+          activeOrders.forEach(function (o) {
+            var rid = o.riderAssignment && o.riderAssignment.riderId;
+            if (!rid || orderByRider[rid]) return;
+            orderByRider[rid] = o.orderId || o._id && String(o._id) || null;
+          });
+          _contextList.n = 3;
+          break;
+        case 3:
           return _contextList.a(2, docs.map(function (doc) {
-            var _doc$currentLocation, _doc$currentLocation2;
+            var _doc$currentLocation, _doc$currentLocation2, _doc$preferredLocatio, _doc$preferredLocatio2, _doc$currentShift, _doc$vehicle, _doc$currentShift2, _doc$currentShift3, _doc$currentShift4;
+            var availability = doc.availability || "offline";
+            var activeOrderId = orderByRider[doc.riderId] || null;
+            var currentLoad = activeOrderId ? 1 : 0;
             return {
               id: doc.riderId,
               name: doc.name,
               phoneNumber: doc.phoneNumber,
-              // Map operational availability ('available' | 'busy' | 'offline') into status field
-              status: doc.availability || "offline",
-              // Current order assignment is managed by dispatch stack; default to null here.
-              currentOrderId: null,
+              accountStatus: doc.status,
+              availability: availability,
+              status: availability,
+              currentOrderId: activeOrderId,
+              hubId: (_doc$preferredLocatio = doc.preferredLocation) === null || _doc$preferredLocatio === void 0 ? void 0 : _doc$preferredLocatio.hubId,
+              hubName: (_doc$preferredLocatio2 = doc.preferredLocation) === null || _doc$preferredLocatio2 === void 0 ? void 0 : _doc$preferredLocatio2.hubName,
+              cityName: doc.preferredLocation && doc.preferredLocation.cityName,
+              currentShift: doc.currentShift ? {
+                shiftId: doc.currentShift.shiftId,
+                warehouseCode: doc.currentShift.warehouseCode,
+                startedAt: (_doc$currentShift = doc.currentShift.startedAt) === null || _doc$currentShift === void 0 ? void 0 : _doc$currentShift.toISOString()
+              } : null,
+              shiftLabel: doc.currentShift ? (_doc$currentShift2 = (_doc$currentShift3 = doc.currentShift.warehouseCode) !== null && _doc$currentShift3 !== void 0 ? _doc$currentShift3 : (_doc$currentShift4 = doc.currentShift.shiftId) === null || _doc$currentShift4 === void 0 ? void 0 : _doc$currentShift4.slice(0, 8)) : null,
+              vehicleType: (_doc$vehicle = doc.vehicle) === null || _doc$vehicle === void 0 ? void 0 : _doc$vehicle.type,
               location: doc.currentLocation ? {
                 lat: (_doc$currentLocation = doc.currentLocation.lat) !== null && _doc$currentLocation !== void 0 ? _doc$currentLocation : 0,
                 lng: (_doc$currentLocation2 = doc.currentLocation.lng) !== null && _doc$currentLocation2 !== void 0 ? _doc$currentLocation2 : 0
               } : null,
               capacity: {
-                currentLoad: 0,
+                currentLoad: currentLoad,
                 maxLoad: 5
               },
               avgEtaMins: 0

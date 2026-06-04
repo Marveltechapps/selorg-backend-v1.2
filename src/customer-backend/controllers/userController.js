@@ -1,8 +1,25 @@
 const bcrypt = require('bcryptjs');
 const { CustomerUser } = require('../models/CustomerUser');
+const cacheService = require('../../core/services/cache.service');
+
+function noStore(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+}
+
+async function invalidateCustomerProfileCache() {
+  try {
+    await cacheService.delPattern('cache:*/user/profile*');
+  } catch (err) {
+    console.warn('profile cache invalidation failed', err?.message);
+  }
+}
 
 async function getProfile(req, res) {
   try {
+    noStore(res);
     if (!req.user?._id) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
@@ -21,14 +38,39 @@ async function getProfile(req, res) {
 
 async function updateProfile(req, res) {
   try {
+    noStore(res);
     if (!req.user?._id) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const allowed = ['name', 'email'];
+    const allowed = ['name', 'email', 'phoneNumber'];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    // Backward-compatible aliases from older/mobile payloads.
+    if (req.body.mobileNumber !== undefined && updates.phoneNumber === undefined) {
+      updates.phoneNumber = req.body.mobileNumber;
+    } else if (req.body.phone !== undefined && updates.phoneNumber === undefined) {
+      updates.phoneNumber = req.body.phone;
+    }
+
+    if (updates.phoneNumber !== undefined) {
+      const digits = String(updates.phoneNumber || '').replace(/\D/g, '');
+      if (digits.length !== 10) {
+        res.status(400).json({ success: false, message: 'phoneNumber must be exactly 10 digits' });
+        return;
+      }
+      updates.phoneNumber = digits;
+    }
+
+    if (updates.email !== undefined) {
+      const normalizedEmail = String(updates.email || '').trim().toLowerCase();
+      updates.email = normalizedEmail || undefined;
+    }
+
+    if (updates.name !== undefined) {
+      updates.name = String(updates.name || '').trim();
     }
     if (req.body.savedCheckoutContact !== undefined) {
       const sc = req.body.savedCheckoutContact;
@@ -59,6 +101,7 @@ async function updateProfile(req, res) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
+    await invalidateCustomerProfileCache();
     res.status(200).json({ success: true, data: user });
   } catch (err) {
     console.error('updateProfile error:', err);

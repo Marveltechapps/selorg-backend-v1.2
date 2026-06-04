@@ -17,6 +17,7 @@ const HSDDeviceIssue = require('../models/HSDDeviceIssue');
 const DeviceHistory = require('../models/DeviceHistory');
 const AuditLog = require('../models/AuditLog');
 const OutboundTransferRequest = require('../models/OutboundTransferRequest');
+const hsdUserLoginService = require('../services/hsdUserLogin.service');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
 
@@ -1088,6 +1089,40 @@ const createRequisition = async (req, res) => {
   }
 };
 
+/**
+ * Get HSD User List (users who logged in on HSD devices)
+ * GET /api/darkstore/hsd/users
+ */
+const getHSDUserList = async (req, res) => {
+  try {
+    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const search = req.query.search || '';
+    const status = req.query.status || 'all';
+
+    const { users, pagination } = await hsdUserLoginService.getHSDUserList({
+      storeId,
+      page,
+      limit,
+      search,
+      status,
+    });
+
+    res.status(200).json({
+      success: true,
+      users,
+      pagination,
+    });
+  } catch (error) {
+    logger.error('Get HSD user list error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch HSD user list',
+    });
+  }
+};
+
 module.exports = {
   getFleetOverview,
   getHsdUsers,
@@ -1104,5 +1139,6 @@ module.exports = {
   getHSDLogs,
   sessionAction,
   createRequisition,
+  getHSDUserList,
 };
 

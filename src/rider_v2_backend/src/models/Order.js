@@ -140,7 +140,7 @@ var OrderSchema = new _mongoose.Schema({
   },
   status: {
     type: String,
-    "enum": ["placed", "confirmed", "assigned", "picked", "out_for_delivery", "delivered", "cancelled"],
+    "enum": ["placed", "confirmed", "assigned", "arrived_at_darkstore", "picked", "out_for_delivery", "arrived_at_customer", "delivered", "cancelled"],
     required: true,
     "default": "placed",
     index: true
@@ -149,7 +149,9 @@ var OrderSchema = new _mongoose.Schema({
     riderId: String,
     assignedAt: Date,
     acceptedAt: Date,
+    arrivedAtDarkstore: Date,
     pickedAt: Date,
+    arrivedAtCustomer: Date,
     deliveredAt: Date
   },
   timeline: [{

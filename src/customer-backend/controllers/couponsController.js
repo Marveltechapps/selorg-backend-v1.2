@@ -5,12 +5,12 @@ const mongoose = require('mongoose');
 
 async function list(req, res) {
   try {
-    const { userId, cartValue, zone, paymentMethod } = req.query;
+    const { userId, user_id, cartValue, cart_value, zone, paymentMethod, payment_method } = req.query;
     const data = await listActiveCoupons({
-      userId,
-      cartValue: parseFloat(cartValue) || 0,
+      userId: userId || user_id || req.user?._id,
+      cartValue: parseFloat(cartValue ?? cart_value) || 0,
       zone,
-      paymentMethod
+      paymentMethod: paymentMethod || payment_method || 'ALL'
     });
     res.status(200).json({ success: true, coupons: data });
   } catch (err) {

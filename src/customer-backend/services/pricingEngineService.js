@@ -10,6 +10,7 @@
 const PRICING_VERSION = 'v1';
 const { Product } = require('../models/Product');
 const { PricingCoupon } = require('../../merch/models/PricingCoupon');
+const { validateCoupon } = require('./couponsService');
 const FREE_DELIVERY_THRESHOLD = Number(process.env.PRICING_FREE_DELIVERY_THRESHOLD || 499);
 const DEFAULT_DELIVERY_FEE = Number(process.env.PRICING_DELIVERY_FEE || 40);
 const DEFAULT_HANDLING_CHARGE = Number(process.env.PRICING_HANDLING_CHARGE || 5);
@@ -74,6 +75,10 @@ function ensureZeroTotals(totals) {
     tax: toNumber(safeTotals.tax, 0),
     finalAmount: toNumber(safeTotals.finalAmount, 0),
   };
+}
+
+function computeBaseDeliveryFee(itemTotal) {
+  return toNumber(itemTotal, 0) >= FREE_DELIVERY_THRESHOLD ? 0 : DEFAULT_DELIVERY_FEE;
 }
 
 function buildInitialContext(input) {
@@ -210,6 +215,7 @@ async function applyCoupon(context) {
   }
 
   const itemTotal = toNumber(next.totals.itemTotal, 0);
+  const deliveryFeeForValidation = computeBaseDeliveryFee(itemTotal);
   try {
     const coupon = await PricingCoupon.findOne({ code: String(couponCode).toUpperCase() }).lean();
     if (!coupon) {
@@ -218,36 +224,37 @@ async function applyCoupon(context) {
       return next;
     }
 
-    const now = new Date();
-    const statusActive = Boolean(coupon.isActive) && String(coupon.status || '').toLowerCase() === 'active';
-    const start = coupon.startDate || coupon.validFrom || null;
-    const end = coupon.endDate || coupon.validTo || null;
-    const withinDateRange = (!start || now >= new Date(start)) && (!end || now <= new Date(end));
-    const minOrderValue = toNumber(coupon.minOrderValue ?? coupon.minOrderAmount, 0);
+    const cartItemsForValidation = (next.items || []).map((item) => ({
+      productId: item.productId || null,
+      sku_id: item.variantId || null,
+      skuId: item.variantId || null,
+      category: item.metadata?.category || null,
+      price: toNumber(item.baseUnitPrice ?? item.unitPrice, 0),
+      qty: toNumber(item.quantity, 1),
+      quantity: toNumber(item.quantity, 1),
+      isOnSale: false,
+    }));
+    const validation = await validateCoupon(
+      coupon.code,
+      next?.input?.userId,
+      cartItemsForValidation,
+      itemTotal,
+      next?.input?.paymentMethod || 'ALL',
+      next?.input?.zone || '',
+      deliveryFeeForValidation
+    );
 
-    if (!statusActive || !withinDateRange || itemTotal < minOrderValue) {
+    if (!validation.valid) {
       next.appliedCoupon = {
         code: coupon.code,
         status: 'invalid',
-        reason: !statusActive ? 'inactive' : !withinDateRange ? 'expired_or_not_started' : 'min_order_not_met',
+        reason: validation.error_code || 'not_eligible',
       };
       debugLog('applyCoupon', next, { appliedCoupon: next.appliedCoupon });
       return next;
     }
 
-    const discountValue = toNumber(coupon.discountValue, 0);
-    const discountType = String(coupon.discountType || '').toUpperCase();
-    const maxDiscount = toNumber(coupon.maxDiscount ?? coupon.maxDiscountAmount, 0);
-    let discountAmount = 0;
-    if (discountType === 'FLAT' || discountType === 'FIXED' || discountType === 'FLAT_DISCOUNT') {
-      discountAmount = discountValue;
-    } else if (discountType === 'PERCENTAGE' || discountType === 'PERCENT' || discountType === 'PERCENTAGE_DISCOUNT') {
-      discountAmount = (itemTotal * discountValue) / 100;
-    }
-    if (maxDiscount > 0) {
-      discountAmount = Math.min(discountAmount, maxDiscount);
-    }
-    discountAmount = Math.min(itemTotal, Math.max(0, toNumber(discountAmount, 0)));
+    const discountAmount = Math.max(0, toNumber(validation.discount_amount, 0));
 
     next.adjustments = Array.isArray(next.adjustments) ? [...next.adjustments] : [];
     next.adjustments.push({
@@ -264,6 +271,7 @@ async function applyCoupon(context) {
       discountType: coupon.discountType,
       discountValue: coupon.discountValue,
       amount: discountAmount,
+      source: 'couponsService.validateCoupon',
     };
   } catch (error) {
     next.appliedCoupon = {
@@ -280,13 +288,13 @@ async function applyCoupon(context) {
 
 async function applyFees(context) {
   const safeContext = context || buildInitialContext({});
+  const itemTotal = toNumber(safeContext?.totals?.itemTotal, 0);
+  const baseDeliveryFee = computeBaseDeliveryFee(itemTotal);
   const next = {
     ...safeContext,
     totals: {
       ...ensureZeroTotals(safeContext.totals),
-      // Fullstack change: force free delivery for customer app.
-      // (Backend pricing engine feeds both cart and order billing totals.)
-      deliveryFee: 0,
+      deliveryFee: baseDeliveryFee,
       handlingCharge: DEFAULT_HANDLING_CHARGE,
     },
   };

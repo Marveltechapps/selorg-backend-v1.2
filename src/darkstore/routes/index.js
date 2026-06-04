@@ -53,7 +53,12 @@ router.use(
 // All other routes require JWT and role: darkstore, admin, super_admin; cache GET responses
 const protectedRouter = express.Router();
 protectedRouter.use(authenticateToken, requireRole('darkstore', 'admin', 'super_admin'));
-protectedRouter.use(cacheMiddleware(appConfig.cache.darkstore));
+protectedRouter.use(
+  cacheMiddleware(appConfig.cache.darkstore, {
+    // Live HSD / fleet data must not be cached (dashboard polls every 15s)
+    skipPaths: ['/hsd/users', '/hsd/fleet', '/hsd/sessions'],
+  })
+);
 protectedRouter.use('/dashboard', dashboardRoutes);
 protectedRouter.use('/inventory', inventoryRoutes);
 protectedRouter.use('/orders', orderRoutes);

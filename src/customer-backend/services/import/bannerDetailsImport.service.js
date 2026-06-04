@@ -23,9 +23,29 @@ function getCellText(row, col) {
   if (col == null) return '';
   const cell = row.getCell(col);
   const v = cell?.value;
-  if (v == null) return '';
+  if (v == null) {
+    if (cell?.result != null) return String(cell.result).trim();
+    return '';
+  }
+  if (typeof v === 'object' && v.result != null) return String(v.result).trim();
   if (typeof v === 'object' && v.text) return String(v.text).trim();
   return String(v).trim();
+}
+
+/** Normalize sheet URLs (protocol-relative, bare host) for banner image fields. */
+function normalizeMediaUrl(raw) {
+  const u = String(raw || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.startsWith('//')) return `https:${u}`;
+  if (/^[\w.-]+\.[a-z]{2,}/i.test(u)) return `https://${u}`;
+  return u;
+}
+
+function isUsableMediaUrl(url) {
+  const u = String(url || '').trim();
+  if (!u) return false;
+  return /^https?:\/\//i.test(u) || u.startsWith('//');
 }
 
 function parseBoolean(raw, fallback = false) {
@@ -91,16 +111,29 @@ function findCol(headerMap, aliases) {
  *   - "slot" anywhere → legacy
  */
 function detectBannerSheet(ws) {
+  // Prefer Selorg template (Banner ID) even when an earlier row has legacy "slot" headers.
   for (let r = 1; r <= Math.min(3, ws.rowCount); r += 1) {
     const headerMap = rowToHeaderMap(ws, r);
     if (findCol(headerMap, ['Banner ID', 'BannerID', 'bannerId']) != null) {
       return { format: 'new', headerRow: r, headerMap };
     }
+  }
+  for (let r = 1; r <= Math.min(3, ws.rowCount); r += 1) {
+    const headerMap = rowToHeaderMap(ws, r);
     if (findCol(headerMap, ['slot', 'Slot']) != null) {
       return { format: 'legacy', headerRow: r, headerMap };
     }
   }
   return null;
+}
+
+function normalizeRedirectType(raw) {
+  const allowed = new Set([
+    'url', 'category', 'subcategory', 'collection', 'section', 'product',
+    'search', 'none', 'page', 'screen', 'banner',
+  ]);
+  const v = String(raw ?? '').trim();
+  return v && allowed.has(v) ? v : 'none';
 }
 
 // ─── Legacy slot-based parser ───────────────────────────────────────────────
@@ -144,8 +177,8 @@ async function applyLegacyBanners(ws, headerMap, ctx) {
         isNavigable: parseBoolean(getCellText(row, isNavigableCol), true),
         title: getCellText(row, titleCol),
         imageUrl,
-        redirectType: getCellText(row, redirectTypeCol) || null,
-        redirectValue: getCellText(row, redirectValueCol) || null,
+        redirectType: normalizeRedirectType(getCellText(row, redirectTypeCol)),
+        redirectValue: getCellText(row, redirectValueCol) || undefined,
         isActive: parseBoolean(getCellText(row, isActiveCol), true),
         startDate: parseDateCell(row.getCell(startDateCol)?.value),
         endDate: parseDateCell(row.getCell(endDateCol)?.value),
@@ -169,11 +202,6 @@ async function applyLegacyBanners(ws, headerMap, ctx) {
       });
     }
   }
-
-  const allowedRedirectTypes = new Set([
-    'url', 'category', 'subcategory', 'collection', 'section', 'product',
-    'search', 'none', 'page', 'screen', 'banner',
-  ]);
 
   const resolveCategoryId = async (value) => {
     const v = String(value || '').trim();
@@ -206,8 +234,8 @@ async function applyLegacyBanners(ws, headerMap, ctx) {
         isNavigable: group.isNavigable,
         title: group.title,
         imageUrl: group.imageUrl,
-        redirectType: group.redirectType && allowedRedirectTypes.has(group.redirectType) ? group.redirectType : null,
-        redirectValue: group.redirectValue || null,
+        redirectType: normalizeRedirectType(group.redirectType),
+        redirectValue: group.redirectValue || undefined,
         categoryId: categoryId || null,
         isActive: group.isActive,
         ...(group.startDate ? { startDate: group.startDate } : {}),
@@ -219,7 +247,13 @@ async function applyLegacyBanners(ws, headerMap, ctx) {
       await Banner.findOneAndUpdate(
         { slot: group.slot, order: group.order },
         { $set: update },
-        { upsert: true, new: false, session: session || undefined }
+        {
+          upsert: true,
+          new: false,
+          session: session || undefined,
+          setDefaultsOnInsert: true,
+          runValidators: true,
+        }
       );
       counts.banners.upserted += 1;
     } catch (e) {
@@ -251,15 +285,10 @@ async function applyNewBanners(ws, headerMap, headerRow, ctx) {
   for (let r = headerRow + 1; r <= ws.rowCount; r += 1) {
     const row = ws.getRow(r);
     const bannerId = getCellText(row, bannerIdCol);
-    const imageUrl = getCellText(row, bannerUrlCol);
+    const rawBannerUrl = getCellText(row, bannerUrlCol);
 
     if (!bannerId) continue;
     if (!/^Ban[-_]/i.test(bannerId)) continue; // skip rows where col 1 isn't a banner code
-
-    if (!imageUrl || !imageUrl.toLowerCase().includes('http')) {
-      warnings.push({ sheet: 'Banner Details', row: r, bannerId, message: 'Skipped: missing/invalid Banner URL' });
-      continue;
-    }
 
     const bannerType = bannerTypeCol ? getCellText(row, bannerTypeCol) : '';
     const bannerName = bannerNameCol ? getCellText(row, bannerNameCol) : '';
@@ -268,31 +297,39 @@ async function applyNewBanners(ws, headerMap, headerRow, ctx) {
     const isNavigable = /click/i.test(bannerType);
 
     try {
-      const update = {
+      const existing = await Banner.findOne({ bannerId }).session(session || null).lean();
+      let imageUrl = normalizeMediaUrl(rawBannerUrl);
+      if (!isUsableMediaUrl(imageUrl)) {
+        const fromDb = normalizeMediaUrl(existing?.imageUrl || existing?.bannerImageUrl || '');
+        imageUrl = isUsableMediaUrl(fromDb) ? fromDb : '';
+      }
+      const hasImage = isUsableMediaUrl(imageUrl);
+
+      const $set = {
         bannerId,
         imageUrl,
         title: bannerName || fallbackName || bannerId,
         bannerType: bannerType || '',
         bannerImageUrl: imageUrl,
-        slot: 'mid',
         isNavigable,
-        isActive: true,
+        isActive: hasImage,
+        redirectType: 'none',
         ...(bannerSize ? { sectionCode: bannerSize } : {}),
       };
-      // Preserve any custom slot/order set in the DB by previous imports/manual edits:
-      // upsert by bannerId, but don't override slot/order on existing rows.
-      const existing = await Banner.findOne({ bannerId }).session(session || null).lean();
-      if (existing) {
-        const updateExisting = { ...update };
-        delete updateExisting.slot;
-        await Banner.updateOne(
-          { _id: existing._id },
-          { $set: updateExisting },
-          { session: session || undefined }
-        );
-      } else {
-        await Banner.create([update], { session: session || undefined });
+      // Preserve slot/order on existing rows; set slot only when inserting.
+      if (!existing) {
+        $set.slot = 'mid';
       }
+      await Banner.findOneAndUpdate(
+        { bannerId },
+        { $set },
+        {
+          upsert: true,
+          session: session || undefined,
+          setDefaultsOnInsert: true,
+          runValidators: true,
+        }
+      );
       counts.banners.upserted += 1;
     } catch (e) {
       errors.push({ sheet: 'Banner Details', row: r, bannerId, message: e.message });
