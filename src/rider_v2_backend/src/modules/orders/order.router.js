@@ -12,7 +12,7 @@ var _authenticate = require("../../middleware/authenticate.js");
 var _multer = _interopRequireDefault(require("multer"));
 var _crypto = _interopRequireDefault(require("crypto"));
 var _s3 = require("../../services/s3.service.js");
-var _appConfig = require("../../config/appConfig.js");
+var _smsGateway = require("../../../../utils/smsGateway.js");
 function _interopRequireWildcard(e, t) { if ("function" == typeof WeakMap) var r = new WeakMap(), n = new WeakMap(); return (_interopRequireWildcard = function _interopRequireWildcard(e, t) { if (!t && e && e.__esModule) return e; var o, i, f = { __proto__: null, "default": e }; if (null === e || "object" != _typeof(e) && "function" != typeof e) return f; if (o = t ? n : r) { if (o.has(e)) return o.get(e); o.set(e, f); } for (var _t8 in e) "default" !== _t8 && {}.hasOwnProperty.call(e, _t8) && ((i = (o = Object.defineProperty) && Object.getOwnPropertyDescriptor(e, _t8)) && (i.get || i.set) ? o(f, _t8, i) : f[_t8] = e[_t8]); return f; })(e, t); }
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
@@ -37,44 +37,37 @@ var upload = (0, _multer["default"])({
 
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 
-// Delivery OTP helpers (stored in order.metadata to avoid schema/migrations)
+// Delivery OTP helpers — same SMS gateway + 4-digit OTP as /api/signin (login)
 var DELIVERY_OTP_EXPIRY_MINUTES = 5;
-var DELIVERY_OTP_MESSAGE = "Your Selorg delivery OTP for order {orderNumber} is {otp}. It is valid for 5 minutes.";
-function generateDeliveryOtp() {
-  return Math.floor(1000 + Math.random() * 9000).toString();
+function normalizeCustomerMobile(raw) {
+  var digits = String(raw || "").replace(/\D/g, "").trim();
+  var mobile = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits.length === 10 ? digits : digits.slice(-10);
+  if (mobile.length !== 10 || /^0+$/.test(mobile) || !/^[6-9]\d{9}$/.test(mobile)) return null;
+  return mobile;
 }
-function buildDeliveryOtpSmsUrl(mobileNumber, otp, orderNumber) {
-  var base = (0, _appConfig.getSmsVendorUrl)();
-  if (!base) return null;
-  var mobile = String(mobileNumber || "").replace(/\D/g, "").slice(-10);
-  if (mobile.length !== 10) return null;
-  var message = DELIVERY_OTP_MESSAGE.replace("{otp}", otp).replace("{orderNumber}", String(orderNumber || ""));
-  var mobileParam = (0, _appConfig.getSmsToParam)();
-  var msgParam = (0, _appConfig.getSmsMessageParam)();
-  var sep = base.includes("?") && !base.endsWith("&") && !base.endsWith("?") ? "&" : "";
-  return base + sep + mobileParam + "=" + encodeURIComponent(mobile) + "&" + msgParam + "=" + encodeURIComponent(message);
+function isValidCustomerMobile(digits) {
+  return normalizeCustomerMobile(digits) != null;
 }
-function sendDeliveryOtpSms(mobileNumber, otp, orderNumber) {
-  var url = buildDeliveryOtpSmsUrl(mobileNumber, otp, orderNumber);
-  if (!url) return Promise.resolve({ success: false, reason: "No SMS vendor URL or invalid mobile" });
-  return fetch(url, { method: "GET" })
-    .then(function (res) { return res.text().then(function (text) { return { status: res.status, ok: res.ok, body: text }; }); })
-    .then(function (_ref) {
-      var status = _ref.status, ok = _ref.ok, body = _ref.body;
-      var bodyStr = (body || "").trim();
-      var bodyLower = bodyStr.toLowerCase();
-      var looksSuccess = /success|sent|submit|ok|accepted/.test(bodyLower) && !/fail|error|invalid|denied|reject/.test(bodyLower);
-      try {
-        var data = JSON.parse(bodyStr);
-        var s = data && (data.status || data.Status || data.result);
-        if (s != null && String(s).toLowerCase() === "success") looksSuccess = true;
-        if (s != null && (/fail|error|invalid|denied/.test(String(s).toLowerCase()))) looksSuccess = false;
-      } catch (_) {}
-      return { success: !!(ok && looksSuccess), body: bodyStr, status: status };
-    })
-    .catch(function (err) {
-      return { success: false, body: String(err && err.message || err), status: 0 };
-    });
+function generateDeliveryOtp(mobile) {
+  var testOtp = _smsGateway.getTestOtpIfApplicable(mobile);
+  if (testOtp) return testOtp;
+  return _smsGateway.generateOTP();
+}
+function sendDeliveryOtpSms(mobileNumber, otp) {
+  return _smsGateway.sendOtpSms(mobileNumber, otp);
+}
+function persistOrderMetadata(order) {
+  order.metadata = order.metadata || {};
+  if (typeof order.markModified === "function") {
+    order.markModified("metadata");
+  }
+}
+function normalizeOtpDigits(value) {
+  return String(value != null ? value : "").replace(/\D/g, "").trim();
+}
+function riderIdsMatch(assignedId, tokenRiderId) {
+  if (assignedId == null || tokenRiderId == null) return false;
+  return String(assignedId) === String(tokenRiderId);
 }
 
 // Get order by ID
@@ -107,18 +100,20 @@ orderRouter.get("/:orderId", _authenticate.authenticate, /*#__PURE__*/function (
           });
           return _context.a(2);
         case 3:
-          res.json({
-            order: order
-          });
           _context.n = 5;
-          break;
+          return require("./orderMapEnrichment.js").ensureOrderMapMetadata(order);
+        case 5:
+          res.json({
+            order: _context.v
+          });
+          return _context.a(2);
         case 4:
           _context.p = 4;
           _t = _context.v;
           res.status(500).json({
             error: "Failed to fetch order"
           });
-        case 5:
+        case 6:
           return _context.a(2);
       }
     }, _callee, null, [[0, 4]]);
@@ -180,6 +175,72 @@ orderRouter.get("/admin/orders", _authenticate.authenticate, /*#__PURE__*/functi
   }));
   return function (_x3, _x4) {
     return _ref2.apply(this, arguments);
+  };
+}());
+
+// Mark rider arrived at darkstore
+orderRouter.post("/:orderId/arrived-at-darkstore", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refArrivedDs = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeArrivedDs(req, res) {
+    var order, _tArrivedDs;
+    return _regenerator().w(function (_ctxArrivedDs) {
+      while (1) switch (_ctxArrivedDs.p = _ctxArrivedDs.n) {
+        case 0:
+          if (req.user) { _ctxArrivedDs.n = 1; break; }
+          res.status(401).json({ error: "Unauthorized" });
+          return _ctxArrivedDs.a(2);
+        case 1:
+          _ctxArrivedDs.p = 1;
+          _ctxArrivedDs.n = 2;
+          return orderService.markOrderArrivedAtDarkstore(req.params.orderId, req.user.id);
+        case 2:
+          order = _ctxArrivedDs.v;
+          res.json({ order: order });
+          _ctxArrivedDs.n = 4;
+          break;
+        case 3:
+          _ctxArrivedDs.p = 3;
+          _tArrivedDs = _ctxArrivedDs.v;
+          res.status(400).json({ error: _tArrivedDs instanceof Error ? _tArrivedDs.message : "Failed to update status" });
+        case 4:
+          return _ctxArrivedDs.a(2);
+      }
+    }, _calleeArrivedDs, null, [[1, 3]]);
+  }));
+  return function (_xArrivedDsReq, _xArrivedDsRes) {
+    return _refArrivedDs.apply(this, arguments);
+  };
+}());
+
+// Mark rider arrived at customer
+orderRouter.post("/:orderId/arrived-at-customer", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refArrivedCust = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeArrivedCust(req, res) {
+    var order, _tArrivedCust;
+    return _regenerator().w(function (_ctxArrivedCust) {
+      while (1) switch (_ctxArrivedCust.p = _ctxArrivedCust.n) {
+        case 0:
+          if (req.user) { _ctxArrivedCust.n = 1; break; }
+          res.status(401).json({ error: "Unauthorized" });
+          return _ctxArrivedCust.a(2);
+        case 1:
+          _ctxArrivedCust.p = 1;
+          _ctxArrivedCust.n = 2;
+          return orderService.markOrderArrivedAtCustomer(req.params.orderId, req.user.id);
+        case 2:
+          order = _ctxArrivedCust.v;
+          res.json({ order: order });
+          _ctxArrivedCust.n = 4;
+          break;
+        case 3:
+          _ctxArrivedCust.p = 3;
+          _tArrivedCust = _ctxArrivedCust.v;
+          res.status(400).json({ error: _tArrivedCust instanceof Error ? _tArrivedCust.message : "Failed to update status" });
+        case 4:
+          return _ctxArrivedCust.a(2);
+      }
+    }, _calleeArrivedCust, null, [[1, 3]]);
+  }));
+  return function (_xArrivedCustReq, _xArrivedCustRes) {
+    return _refArrivedCust.apply(this, arguments);
   };
 }());
 
@@ -522,7 +583,7 @@ orderRouter.post("/:orderId/proof/photo", _authenticate.authenticate, upload.sin
             res.status(404).json({ error: "Order not found" });
             return _contextPhoto.a(2);
           }
-          if (!order.riderAssignment || order.riderAssignment.riderId !== riderId) {
+          if (!order.riderAssignment || !riderIdsMatch(order.riderAssignment.riderId, riderId)) {
             res.status(403).json({ error: "Access denied" });
             return _contextPhoto.a(2);
           }
@@ -539,17 +600,25 @@ orderRouter.post("/:orderId/proof/photo", _authenticate.authenticate, upload.sin
           return (0, _s3.uploadToS3)(file.buffer, key, file.mimetype, { bucket: "documents" });
         case 5:
           url = _contextPhoto.v;
-          res.json({ url: url, key: key });
-          _contextPhoto.n = 7;
-          break;
+          order.metadata = order.metadata || {};
+          order.metadata.deliveryProofPhotoUrl = url;
+          order.metadata.deliveryProofPhotoKey = key;
+          order.metadata.deliveryProofPhotoUploadedAt = new Date();
+          persistOrderMetadata(order);
+          _contextPhoto.n = 6;
+          return order.save();
         case 6:
-          _contextPhoto.p = 6;
+          res.json({ success: true, url: url, key: key, message: "Delivery photo saved to cloud storage" });
+          _contextPhoto.n = 8;
+          break;
+        case 7:
+          _contextPhoto.p = 7;
           _tPhoto = _contextPhoto.v;
           res.status(500).json({ error: "Failed to upload proof photo" });
-        case 7:
+        case 8:
           return _contextPhoto.a(2);
       }
-    }, _calleePhoto, null, [[2, 6]]);
+    }, _calleePhoto, null, [[2, 7]]);
   }));
   return function (_xPhotoReq, _xPhotoRes) {
     return _refPhoto.apply(this, arguments);
@@ -560,9 +629,9 @@ orderRouter.post("/:orderId/proof/photo", _authenticate.authenticate, upload.sin
  * Send delivery OTP to the customer's phone number for this order.
  * Stores OTP + expiry in order.metadata.deliveryOtp / deliveryOtpExpiry.
  */
-orderRouter.post("/:orderId/otp/send", _authenticate.authenticate, /*#__PURE__*/function () {
+var deliveryOtpSendHandler = /*#__PURE__*/function () {
   var _refOtpSend = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeOtpSend(req, res) {
-    var orderId, riderId, order, otp, expiry, smsResult, _tOtpSend;
+    var orderId, riderId, order, targetPhone, otp, expiry, smsResult, _tOtpSend;
     return _regenerator().w(function (_contextOtpSend) {
       while (1) switch (_contextOtpSend.p = _contextOtpSend.n) {
         case 0:
@@ -584,55 +653,48 @@ orderRouter.post("/:orderId/otp/send", _authenticate.authenticate, /*#__PURE__*/
             res.status(404).json({ error: "Order not found" });
             return _contextOtpSend.a(2);
           }
-          if (!order.riderAssignment || order.riderAssignment.riderId !== riderId) {
+          if (!order.riderAssignment || !riderIdsMatch(order.riderAssignment.riderId, riderId)) {
             res.status(403).json({ error: "Access denied" });
             return _contextOtpSend.a(2);
           }
           // Prefer the phone stored on the order. If missing, allow client to supply it (fallback).
           // This mirrors the signin OTP flows where the client provides the target number.
-          var targetPhone = order.customerPhoneNumber || (req.body && (req.body.mobileNumber || req.body.phoneNumber || req.body.phone));
-          if (targetPhone) {
-            var digits = String(targetPhone).replace(/\D/g, "").slice(-10);
-            if (digits.length === 10) {
-              targetPhone = digits;
-              if (!order.customerPhoneNumber) {
-                order.customerPhoneNumber = digits;
-              }
-            } else {
-              targetPhone = null;
-            }
-          }
+          var rawPhone = order.customerPhoneNumber || (req.body && (req.body.mobileNumber || req.body.phoneNumber || req.body.phone));
+          targetPhone = normalizeCustomerMobile(rawPhone);
           if (!targetPhone) {
-            res.status(400).json({ error: "Customer phone number missing" });
+            res.status(400).json({ error: "Customer phone number missing or invalid" });
             return _contextOtpSend.a(2);
           }
-          otp = generateDeliveryOtp();
-          expiry = new Date(Date.now() + DELIVERY_OTP_EXPIRY_MINUTES * 60 * 1000);
-
-          if (process.env.NODE_ENV === "development") {
-            console.info("\x1b[36m%s\x1b[0m", "----------------------------------------");
-            console.info("\x1b[36m%s\x1b[0m", "DELIVERY OTP (DEV LOG)");
-            console.info("\x1b[36m%s\x1b[0m", "Order: " + order.orderNumber);
-            console.info("\x1b[36m%s\x1b[0m", "Mobile: " + order.customerPhoneNumber);
-            console.info("\x1b[36m%s\x1b[0m", "OTP: " + otp);
-            console.info("\x1b[36m%s\x1b[0m", "----------------------------------------");
+          if (!order.customerPhoneNumber) {
+            order.customerPhoneNumber = targetPhone;
           }
+          otp = generateDeliveryOtp(targetPhone);
+          expiry = new Date(Date.now() + DELIVERY_OTP_EXPIRY_MINUTES * 60 * 1000);
+          var devOrSkipSms = process.env.NODE_ENV === "development" || _smsGateway.isOtpDevMode();
+
+          console.info("\x1b[36m%s\x1b[0m", "----------------------------------------");
+          console.info("\x1b[36m%s\x1b[0m", "DELIVERY OTP (login SMS gateway)");
+          console.info("\x1b[36m%s\x1b[0m", "Order: " + order.orderNumber);
+          console.info("\x1b[36m%s\x1b[0m", "Mobile: " + targetPhone);
+          console.info("\x1b[36m%s\x1b[0m", "OTP: " + otp);
+          console.info("\x1b[36m%s\x1b[0m", "----------------------------------------");
 
           _contextOtpSend.n = 3;
-          return sendDeliveryOtpSms(targetPhone, otp, order.orderNumber);
+          return sendDeliveryOtpSms(targetPhone, otp);
         case 3:
           smsResult = _contextOtpSend.v;
           if (!smsResult.success) {
-            if (smsResult.body) console.warn("[orders] Delivery OTP SMS gateway failure — status:", smsResult.status, "body:", String(smsResult.body).substring(0, 200));
-            if (process.env.NODE_ENV !== "development") {
+            if (smsResult.body) console.warn("[orders] Delivery OTP SMS gateway failure — body:", String(smsResult.body).substring(0, 200));
+            if (!devOrSkipSms) {
               res.status(500).json({ error: "Failed to send OTP via SMS" });
               return _contextOtpSend.a(2);
             }
           }
           order.metadata = order.metadata || {};
-          order.metadata.deliveryOtp = otp;
+          order.metadata.deliveryOtp = normalizeOtpDigits(otp);
           order.metadata.deliveryOtpExpiry = expiry;
           order.metadata.deliveryOtpSentAt = new Date();
+          persistOrderMetadata(order);
           order.timeline.push({
             status: "delivery_otp_sent",
             timestamp: new Date(),
@@ -641,7 +703,14 @@ orderRouter.post("/:orderId/otp/send", _authenticate.authenticate, /*#__PURE__*/
           _contextOtpSend.n = 4;
           return order.save();
         case 4:
-          res.json({ message: "OTP sent successfully" + (process.env.NODE_ENV === "development" ? " (check backend console)" : ""), expiresInSec: DELIVERY_OTP_EXPIRY_MINUTES * 60 });
+          res.json({
+            success: true,
+            otpSent: true,
+            expiresIn: DELIVERY_OTP_EXPIRY_MINUTES * 60,
+            expiresInSec: DELIVERY_OTP_EXPIRY_MINUTES * 60,
+            message: "OTP sent successfully" + (devOrSkipSms ? " (check backend console)" : ""),
+            mobileNumber: targetPhone
+          });
           _contextOtpSend.n = 6;
           break;
         case 5:
@@ -656,7 +725,9 @@ orderRouter.post("/:orderId/otp/send", _authenticate.authenticate, /*#__PURE__*/
   return function (_xOtpSendReq, _xOtpSendRes) {
     return _refOtpSend.apply(this, arguments);
   };
-}());
+}();
+orderRouter.post("/:orderId/otp/send", _authenticate.authenticate, deliveryOtpSendHandler);
+orderRouter.post("/:orderId/otp/resend", _authenticate.authenticate, deliveryOtpSendHandler);
 
 /**
  * Verify delivery OTP for this order.
@@ -677,12 +748,12 @@ orderRouter.post("/:orderId/otp/verify", _authenticate.authenticate, /*#__PURE__
         case 1:
           orderId = req.params.orderId;
           riderId = req.user.id;
-          otp = req.body && req.body.otp != null ? String(req.body.otp).trim() : "";
+          otp = normalizeOtpDigits(req.body && req.body.otp);
           if (otp && otp.length === 4) {
             _contextOtpVerify.n = 2;
             break;
           }
-          res.status(400).json({ verified: false, error: "otp must be 4 digits" });
+          res.status(400).json({ success: false, verified: false, message: "Enter OTP" });
           return _contextOtpVerify.a(2);
         case 2:
           _contextOtpVerify.p = 2;
@@ -694,29 +765,30 @@ orderRouter.post("/:orderId/otp/verify", _authenticate.authenticate, /*#__PURE__
             res.status(404).json({ verified: false, error: "Order not found" });
             return _contextOtpVerify.a(2);
           }
-          if (!order.riderAssignment || order.riderAssignment.riderId !== riderId) {
-            res.status(403).json({ verified: false, error: "Access denied" });
+          if (!order.riderAssignment || !riderIdsMatch(order.riderAssignment.riderId, riderId)) {
+            res.status(403).json({ success: false, verified: false, message: "Access denied" });
             return _contextOtpVerify.a(2);
           }
           order.metadata = order.metadata || {};
-          storedOtp = order.metadata.deliveryOtp != null ? String(order.metadata.deliveryOtp).trim() : "";
+          storedOtp = normalizeOtpDigits(order.metadata.deliveryOtp);
           expiry = order.metadata.deliveryOtpExpiry ? new Date(order.metadata.deliveryOtpExpiry) : null;
           now = new Date();
           if (!storedOtp) {
-            res.status(400).json({ verified: false, message: "No OTP requested" });
+            res.status(400).json({ success: false, verified: false, message: "OTP not sent. Please send OTP first." });
             return _contextOtpVerify.a(2);
           }
           if (expiry && now > expiry) {
-            res.status(400).json({ verified: false, message: "OTP expired" });
+            res.status(400).json({ success: false, verified: false, message: "OTP expired. Please resend OTP." });
             return _contextOtpVerify.a(2);
           }
           if (storedOtp !== otp) {
-            res.status(400).json({ verified: false, message: "Incorrect OTP" });
+            res.status(400).json({ success: false, verified: false, message: "Invalid OTP" });
             return _contextOtpVerify.a(2);
           }
           order.metadata.deliveryOtp = null;
           order.metadata.deliveryOtpExpiry = null;
           order.metadata.deliveryOtpVerifiedAt = new Date();
+          persistOrderMetadata(order);
           order.timeline.push({
             status: "delivery_otp_verified",
             timestamp: new Date(),
@@ -725,7 +797,7 @@ orderRouter.post("/:orderId/otp/verify", _authenticate.authenticate, /*#__PURE__
           _contextOtpVerify.n = 4;
           return order.save();
         case 4:
-          res.json({ verified: true, message: "OTP verified" });
+          res.json({ success: true, verified: true, message: "OTP verified" });
           _contextOtpVerify.n = 6;
           break;
         case 5:

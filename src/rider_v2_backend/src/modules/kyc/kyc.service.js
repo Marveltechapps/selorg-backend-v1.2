@@ -42,24 +42,60 @@ async function getDocumentTypes() {
 
 exports.getDocumentTypes = getDocumentTypes;
 
+const STATUS_RANK = { not_started: 0, pending: 1, failed: 2, verified: 3 };
+
+/** Normalize legacy/partial rider.documents entries to a single API status. */
+function normalizeDocumentStatus(doc) {
+  if (!doc || typeof doc !== "object") return "not_started";
+  const raw = String(doc.status || "").toLowerCase();
+  if (raw === "verified" || raw === "approved" || doc.verified === true) return "verified";
+  if (raw === "failed" || raw === "rejected") return "failed";
+  if (raw === "pending" || raw === "under_review") return "pending";
+  if (doc.documentUrl || doc.uploadedAt) return "pending";
+  return "not_started";
+}
+
+function resolveDocumentStatus(riderDoc, kycRow) {
+  let status = normalizeDocumentStatus(riderDoc);
+  if (kycRow) {
+    const rowStatus = normalizeDocumentStatus({
+      status: kycRow.status,
+      documentUrl: kycRow.fileUrl,
+      uploadedAt: kycRow.uploadedAt,
+      verified: kycRow.status === "verified",
+    });
+    if ((STATUS_RANK[rowStatus] ?? 0) > (STATUS_RANK[status] ?? 0)) {
+      status = rowStatus;
+    }
+  }
+  return status;
+}
+
 async function getUserStatus(userId) {
   await ensureDefaultTypes();
   const types = await KycDocumentType.find({ active: true }).sort({ sortOrder: 1 });
   const rider = await Rider.findOne({ riderId: userId }).lean();
-  
+
   const documents = rider?.documents || {};
-  
+
+  const kycRows = await UserKycDocument.find({ userId }).lean();
+  const kycByCode = Object.fromEntries(kycRows.map((r) => [r.documentTypeCode, r]));
+
   return types.map((t) => {
     const doc = documents[t.code] || {};
+    const kycRow = kycByCode[t.code];
+    const status = resolveDocumentStatus(doc, kycRow);
     return {
       documentTypeCode: t.code,
       label: t.label,
       iconKey: t.iconKey,
       required: t.required,
-      status: doc.status || "not_started",
-      uploadedAt: doc.uploadedAt,
-      fileUrl: doc.documentUrl,
-      documentNumber: doc.number,
+      status,
+      rejectedReason: doc.rejectionReason || doc.rejectedReason || kycRow?.rejectedReason,
+      uploadedAt: doc.uploadedAt || kycRow?.uploadedAt,
+      verifiedAt: doc.verifiedAt || kycRow?.verifiedAt,
+      fileUrl: doc.documentUrl || kycRow?.fileUrl,
+      documentNumber: doc.number || kycRow?.documentNumber,
     };
   });
 }

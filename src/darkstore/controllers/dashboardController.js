@@ -282,12 +282,20 @@ async function fetchLiveOrdersData(storeId, status = 'all', limit = 50) {
       ? rawPhone.slice(0, 2) + '******' + rawPhone.slice(-2)
       : rawPhone ? '******' : '';
 
+    const assignee = order.assignee || { id: '', name: 'Unassigned', initials: 'UA' };
+    const deliveryRiderId =
+      order.riderId ||
+      (assignee.id && String(assignee.name || '').toLowerCase() !== 'unassigned' ? assignee.id : '') ||
+      '';
+
     return {
       order_id: order.order_id,
       status: order.status,
+      riderId: deliveryRiderId || undefined,
+      rider_id: deliveryRiderId || undefined,
       bagId: order.bagId || '',
       rackLocation: order.rackLocation || '',
-      assignee: order.assignee || { id: '', name: 'Unassigned', initials: 'UA' },
+      assignee,
       pickerAssignment: order.pickerAssignment || {},
       timeline: order.timeline || [],
       pickingData: order.pickingData || {},

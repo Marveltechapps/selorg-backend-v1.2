@@ -216,6 +216,89 @@ var getEarningsSummary = exports.getEarningsSummary = /*#__PURE__*/function () {
     return _refEwrap.apply(this, arguments);
   };
 }();
+var getEarningsSummaryForRangeUncached = /*#__PURE__*/function () {
+  var _refRange = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeRange(riderId, periodStart, periodEnd) {
+    var earnings, withdrawalsToday, assignments, onlineMinutes, orderCount, activeIncentives, dayNames, dailyAgg;
+    return _regenerator().w(function (_contextRange) {
+      while (1) switch (_contextRange.n) {
+        case 0:
+          _contextRange.n = 1;
+          return Promise.all([
+            calculateEarnings(riderId, periodStart, periodEnd),
+            _Payout.Payout.countDocuments({
+              riderId: riderId,
+              requestedAt: {
+                $gte: new Date(new Date().setHours(0, 0, 0, 0)),
+                $lte: new Date(new Date().setHours(23, 59, 59, 999))
+              }
+            }),
+            _RiderShiftAssignment.find({
+              riderId: riderId,
+              status: 'completed',
+              endedAt: { $gte: periodStart, $lte: periodEnd }
+            })
+          ]);
+        case 1:
+          var results = _contextRange.v;
+          earnings = results[0];
+          withdrawalsToday = results[1];
+          assignments = results[2];
+          onlineMinutes = assignments.reduce(function(sum, a) {
+            if (a.startedAt && a.endedAt) {
+              return sum + Math.round((a.endedAt - a.startedAt) / (1000 * 60));
+            }
+            return sum;
+          }, 0);
+          orderCount = (earnings.orderIds || []).length;
+          activeIncentives = [
+            { id: '1', title: 'Daily Starter', subtitle: '5 orders', reward: '+₹50', completed: Math.min(orderCount, 5), target: 5, status: orderCount >= 5 ? 'unlocked' : 'active' },
+            { id: '2', title: 'Order Pro', subtitle: '20 orders', reward: '+₹200', completed: Math.min(orderCount, 20), target: 20, status: orderCount >= 20 ? 'unlocked' : 'active' },
+            { id: '3', title: 'Master Delivery', subtitle: '50 orders', reward: '+₹500', completed: Math.min(orderCount, 50), target: 50, status: orderCount >= 50 ? 'unlocked' : 'active' }
+          ];
+          dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          _contextRange.n = 2;
+          return _Order.Order.aggregate([
+            { $match: { 'riderAssignment.riderId': riderId, status: 'delivered', 'riderAssignment.deliveredAt': { $gte: periodStart, $lte: periodEnd } } },
+            { $group: { _id: { $dayOfWeek: '$riderAssignment.deliveredAt' }, total: { $sum: { $ifNull: ['$pricing.deliveryFee', 30] } }, count: { $sum: 1 } } }
+          ]);
+        case 2:
+          dailyAgg = _contextRange.v;
+          return _contextRange.a(2, {
+            totalEarnings: earnings.totalAmount,
+            orderCount: orderCount,
+            periodStart: periodStart.toISOString(),
+            periodEnd: periodEnd.toISOString(),
+            onlineTime: onlineMinutes > 60 ? (Math.floor(onlineMinutes / 60) + "h " + (onlineMinutes % 60) + "m") : (onlineMinutes + "m"),
+            withdrawalsToday: withdrawalsToday,
+            activeIncentives: activeIncentives,
+            dailyBreakdown: dayNames.map(function (label, idx) {
+              var dow = [2, 3, 4, 5, 6, 7, 1][idx];
+              var doc = dailyAgg.find(function (d) { return d._id === dow; });
+              return { dayLabel: label, value: doc ? doc.total : 0, orderCount: doc ? doc.count : 0 };
+            })
+          });
+      }
+    }, _calleeRange);
+  }));
+  return function getEarningsSummaryForRangeUncached(_xR, _xR2, _xR3) {
+    return _refRange.apply(this, arguments);
+  };
+}();
+var getEarningsSummaryForRange = exports.getEarningsSummaryForRange = /*#__PURE__*/function () {
+  var _refRangeWrap = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeRangeWrap(riderId, periodStart, periodEnd) {
+    var key;
+    return _regenerator().w(function (_contextRangeWrap) {
+      while (1) switch (_contextRangeWrap.n) {
+        case 0:
+          key = "rider:earnings:".concat(riderId, ":").concat(periodStart.toISOString(), ":").concat(periodEnd.toISOString());
+          return _contextRangeWrap.a(2, _riderCacheHelper.getCachedOrCompute(key, 60, function () { return getEarningsSummaryForRangeUncached(riderId, periodStart, periodEnd); }));
+      }
+    }, _calleeRangeWrap);
+  }));
+  return function getEarningsSummaryForRange(_xRW, _xRW2, _xRW3) {
+    return _refRangeWrap.apply(this, arguments);
+  };
+}();
 var createPayoutRequest = exports.createPayoutRequest = /*#__PURE__*/function () {
   var _ref2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee2(input) {
     var earnings, pendingPayout, payoutNumber, payout, rider;

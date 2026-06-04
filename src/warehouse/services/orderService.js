@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Order = require('../models/Order');
 // CRITICAL: Use RiderOperational (riders collection, string id) for warehouse assignments.
@@ -104,10 +105,23 @@ const listOrders = async (warehouseKeyOrFilters, filtersOrPagination = {}, pagin
       }
     }
 
-    // Map riders to orders
+    // Map riders to orders; hydrate riderId from assignee when warehouse doc only has darkstore shape
     orders = orders.map(order => {
+      if (!order.riderId && order.assignee && order.assignee.id) {
+        const assigneeName = String(order.assignee.name || '').toLowerCase();
+        if (assigneeName !== 'unassigned') {
+          order.riderId = order.assignee.id;
+        }
+      }
       if (order.riderId && ridersMap.has(order.riderId)) {
         order.rider = ridersMap.get(order.riderId);
+      }
+      if (order.riderId && !order.rider && order.assignee && order.assignee.name) {
+        order.rider = {
+          id: order.riderId,
+          name: order.assignee.name,
+          avatarInitials: order.assignee.initials,
+        };
       }
       return order;
     });
@@ -134,6 +148,85 @@ const listOrders = async (warehouseKeyOrFilters, filtersOrPagination = {}, pagin
   }
 };
 
+/**
+ * Resolve pickup/drop map coordinates from real backend sources (store model + geocoding).
+ * Matches dashboard fleet map: delivery.address.coordinates and metadata.pickupCoordinates.
+ */
+async function resolveRiderV2MapCoordinates(darkstoreCode, addressLine1, dropStr) {
+  const geocodingService = require('../../customer-backend/services/geocodingService');
+  const Store = require('../../merch/models/Store');
+
+  let pickupCoordinates = null;
+  let dropCoordinates = null;
+
+  const storeCode = String(darkstoreCode || '').trim();
+  if (storeCode) {
+    try {
+      const escaped = storeCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const store = await Store.findOne({
+        $or: [{ code: storeCode }, { storeId: storeCode }, { name: new RegExp(escaped, 'i') }],
+      })
+        .select('latitude longitude')
+        .lean();
+      const lat = store?.latitude;
+      const lng = store?.longitude;
+      if (typeof lat === 'number' && typeof lng === 'number' && !(lat === 0 && lng === 0)) {
+        pickupCoordinates = { lat, lng };
+      }
+    } catch (err) {
+      logger.warn('[RiderV2Order] Store coordinate lookup failed:', err.message);
+    }
+  }
+
+  const dropText =
+    addressLine1 && addressLine1 !== 'Delivery address'
+      ? addressLine1
+      : String(dropStr || '').trim();
+  if (dropText) {
+    try {
+      const geo = await geocodingService.geocodeAddress(dropText);
+      if (geo?.latitude != null && geo?.longitude != null) {
+        dropCoordinates = { lat: geo.latitude, lng: geo.longitude };
+      }
+    } catch (err) {
+      logger.warn('[RiderV2Order] Delivery geocode failed:', err.message);
+    }
+  }
+
+  return { pickupCoordinates, dropCoordinates };
+}
+
+/**
+ * Fleet dashboard assignments must activate the rider shift in RiderV2 so the
+ * mobile app (which gates Live Orders on currentShift) fetches assigned work.
+ */
+async function ensureRiderShiftForAssignment(riderId, warehouseCode) {
+  if (!riderId) return;
+  const profile = await RiderV2.findOne({ riderId }).lean();
+  if (!profile || profile.currentShift?.startedAt) return;
+
+  const shiftId = `shift-${crypto.randomUUID().slice(0, 8)}`;
+  const hubCode =
+    warehouseCode ||
+    profile.preferredLocation?.hubName ||
+    profile.preferredLocation?.cityName ||
+    'Hub';
+
+  await RiderV2.updateOne(
+    { riderId },
+    {
+      $set: {
+        currentShift: {
+          shiftId,
+          startedAt: new Date(),
+          warehouseCode: hubCode,
+        },
+        availability: profile.availability === 'offline' ? 'available' : profile.availability,
+      },
+    }
+  );
+}
+
 const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOverrideSla, overrideSlaMaybe = false) => {
   const first = String(warehouseKeyOrOrderId);
   const isLegacySig = /^ORD-/.test(first);
@@ -147,11 +240,13 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
   // vs DarkstoreOrder). Darkstore uses order_id; Warehouse uses id. Avoid loading as Mongoose
   // document to prevent validation failures on save (items as objects, timeline.ASSIGNED, etc).
   const ordersColl = mongoose.connection.collection('orders');
-  const orderFilter = mergeWarehouseFilter(
-    { $or: [{ id: orderId }, { order_id: orderId }] },
-    warehouseKey
-  );
-  const orderDoc = await ordersColl.findOne(orderFilter);
+  const baseOrderFilter = { $or: [{ id: orderId }, { order_id: orderId }] };
+  const orderFilter = mergeWarehouseFilter(baseOrderFilter, warehouseKey);
+  // Darkstore orders use order_id + store_id (no warehouseKey) — resolve without hub filter first.
+  let orderDoc = await ordersColl.findOne(baseOrderFilter);
+  if (!orderDoc) {
+    orderDoc = await ordersColl.findOne(orderFilter);
+  }
   if (!orderDoc) {
     const error = new Error(`Order ${orderId} not found in database`);
     error.statusCode = 404;
@@ -244,16 +339,20 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
   }
 
   // Validation checks - allow assign/reassign for pre-assignment and in-progress statuses
-  // Warehouse: pending, assigned, delayed, picked_up, in_transit
-  // Darkstore: new, processing, ready (pre-assign) + ASSIGNED, PICKING, PICKED, PACKED, READY_FOR_DISPATCH
   const assignableStatuses = [
-    'pending', 'assigned', 'delayed', 'picked_up', 'in_transit',
-    'new', 'processing', 'ready', 'picking', 'picked', 'packed', 'ready_for_dispatch',
+    'pending', 'assigned', 'delayed', 'picked_up', 'in_transit', 'out_for_delivery',
+    'new', 'queued', 'processing', 'ready', 'confirmed', 'placed',
+    'picking', 'picked', 'packed', 'ready_for_dispatch',
   ];
   const orderStatus = orderDoc.status;
-  const normalizedStatus = (orderStatus || '').toLowerCase();
+  const normalizedStatus = String(orderStatus || '')
+    .toLowerCase()
+    .replace(/\s+/g, '_');
   if (!assignableStatuses.includes(normalizedStatus)) {
-    const error = new Error(`Order cannot be assigned in current status (${orderStatus}). Allowed: ${assignableStatuses.join(', ')}`);
+    const error = new Error(
+      `Order cannot be assigned in current status (${orderStatus}). ` +
+        `Allowed statuses include: assigned, ready_for_dispatch, packed, picking, pending, new, processing.`
+    );
     error.statusCode = 400;
     throw error;
   }
@@ -300,13 +399,33 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
     }
   }
 
+  // Sync operational status from RiderV2 (mobile app is source of truth for availability)
+  const v2Live = await RiderV2.findOne({ riderId: effectiveRiderId }).lean();
+  if (v2Live && v2Live.availability) {
+    const liveMap = { available: 'online', busy: 'busy', offline: 'offline' };
+    const mapped = liveMap[v2Live.availability];
+    if (mapped && mapped !== 'offline') {
+      rider.status = mapped;
+    } else if (v2Live.availability === 'offline') {
+      const error = new Error(
+        'Selected rider is offline. Ask the rider to go Online in the Rider App before assigning orders.'
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
   // Allow idle, online, or busy riders with available capacity
-  const isRiderAvailable = 
+  const isRiderAvailable =
     ['idle', 'online'].includes(rider.status) ||
     (rider.status === 'busy' && rider.capacity && rider.capacity.currentLoad < rider.capacity.maxLoad);
 
   if (!isRiderAvailable) {
-    const error = new Error('Rider is not available for assignment');
+    const error = new Error(
+      rider.status === 'offline'
+        ? 'Selected rider is offline. Ask the rider to go Online in the Rider App before assigning orders.'
+        : 'Rider is not available for assignment (check capacity and status)'
+    );
     error.statusCode = 400;
     throw error;
   }
@@ -325,14 +444,21 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
   }
 
   // SLA validation (Warehouse: slaDeadline, Darkstore: sla_deadline)
+  // Block manual assignment only when the SLA deadline has already passed.
+  // Previous logic compared (now + eta) against the fixed order deadline, which
+  // incorrectly failed every assignment made after order creation.
   const slaDeadline = orderDoc.slaDeadline || orderDoc.sla_deadline;
-  if (!overrideSla && etaMinutes && slaDeadline) {
-    const estimatedDeliveryTime = new Date();
-    estimatedDeliveryTime.setMinutes(estimatedDeliveryTime.getMinutes() + etaMinutes);
-    if (estimatedDeliveryTime > new Date(slaDeadline)) {
-      const error = new Error('Assignment would violate SLA deadline');
-      error.statusCode = 400;
-      throw error;
+  if (!overrideSla && slaDeadline) {
+    const deadline =
+      slaDeadline instanceof Date ? slaDeadline : new Date(slaDeadline);
+    if (!Number.isNaN(deadline.getTime())) {
+      const minutesUntilDeadline =
+        (deadline.getTime() - Date.now()) / (1000 * 60);
+      if (minutesUntilDeadline <= 0) {
+        const error = new Error('Assignment would violate SLA deadline');
+        error.statusCode = 400;
+        throw error;
+      }
     }
   }
 
@@ -441,7 +567,21 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
     const scheduledTimeRaw = orderDoc.delivery?.scheduledTime || orderDoc.scheduled_time || orderDoc.scheduledTime;
     const scheduledTime = scheduledTimeRaw ? new Date(scheduledTimeRaw) : null;
     const deliverySlot = orderDoc.delivery?.slot || orderDoc.delivery_slot || 'asap';
-    const metadata = { etaMinutes: etaMins, estimatedDistanceKm: Math.round((etaMins / 4) * 10) / 10 };
+    const { pickupCoordinates, dropCoordinates } = await resolveRiderV2MapCoordinates(
+      darkstoreCode,
+      addressLine1,
+      dropStr
+    );
+
+    const metadata = {
+      etaMinutes: etaMins,
+      estimatedDistanceKm: Math.round((etaMins / 4) * 10) / 10,
+      pickupAddress: darkstoreCode,
+    };
+    if (pickupCoordinates) metadata.pickupCoordinates = pickupCoordinates;
+    if (dropCoordinates) metadata.dropCoordinates = dropCoordinates;
+    if (orderDoc.bagId) metadata.bagId = String(orderDoc.bagId).trim();
+    if (orderDoc.rackLocation) metadata.rackLocation = String(orderDoc.rackLocation).trim();
 
     const existing = await RiderV2Order.findOne({ orderNumber: orderIdVal }).lean();
     if (existing) {
@@ -453,6 +593,12 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
       };
       if (scheduledTime) updatePayload['delivery.scheduledTime'] = scheduledTime;
       if (deliverySlot) updatePayload['delivery.slot'] = deliverySlot;
+      if (dropCoordinates) updatePayload['delivery.address.coordinates'] = dropCoordinates;
+      if (pickupCoordinates) updatePayload['metadata.pickupCoordinates'] = pickupCoordinates;
+      if (dropCoordinates) updatePayload['metadata.dropCoordinates'] = dropCoordinates;
+      updatePayload['metadata.pickupAddress'] = metadata.pickupAddress;
+      if (metadata.bagId) updatePayload['metadata.bagId'] = metadata.bagId;
+      if (metadata.rackLocation) updatePayload['metadata.rackLocation'] = metadata.rackLocation;
       const updateResult = await RiderV2Order.updateOne(
         { orderNumber: orderIdVal },
         { $set: updatePayload }
@@ -470,6 +616,7 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
           city: cityStr || 'NA',
           state: 'NA',
           pincode: 'NA',
+          ...(dropCoordinates ? { coordinates: dropCoordinates } : {}),
         },
         slot: deliverySlot || 'asap',
       };
@@ -490,9 +637,16 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
       logger.info('[RiderV2Order] Created new order', { orderNumber: orderIdVal, riderId: effectiveRiderId });
     }
 
+    await ensureRiderShiftForAssignment(effectiveRiderId, darkstoreCode);
+
     const riderCacheHelper = require('../../rider_v2_backend/src/utils/riderCacheHelper.js');
-    if (riderCacheHelper && typeof riderCacheHelper.invalidateOrdersForRider === 'function') {
-      await riderCacheHelper.invalidateOrdersForRider();
+    if (riderCacheHelper) {
+      if (typeof riderCacheHelper.invalidateRider === 'function') {
+        await riderCacheHelper.invalidateRider(effectiveRiderId);
+      }
+      if (typeof riderCacheHelper.invalidateOrdersForRider === 'function') {
+        await riderCacheHelper.invalidateOrdersForRider();
+      }
     }
 
     const webSocketService = require('../../rider_v2_backend/src/modules/websocket/websocket.service.js').webSocketService;

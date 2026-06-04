@@ -57,6 +57,14 @@ function generateOTP() {
  */
 function buildSmsRequest(mobileNumber, otp) {
   const config = loadConfig();
+  const template = config.smsMessageTemplate || DEFAULT_SMS_MESSAGE;
+  const message = template.replace(/{otp}/g, otp).replace(/\{#var#\}/g, otp);
+  return buildSmsRequestWithText(mobileNumber, message);
+}
+
+/** Build SMS GET request with a full message body (e.g. delivery OTP). */
+function buildSmsRequestWithText(mobileNumber, text) {
+  const config = loadConfig();
   const base = (config.smsvendor || process.env.SMS_VENDOR_URL || '').trim();
   if (!base) return null;
 
@@ -65,8 +73,8 @@ function buildSmsRequest(mobileNumber, otp) {
 
   const paramMobile = config.smsParamMobile || 'to_mobileno';
   const paramMessage = config.smsParamMessage || 'sms_text';
-  const template = config.smsMessageTemplate || DEFAULT_SMS_MESSAGE;
-  const message = template.replace(/{otp}/g, otp).replace(/\{#var#\}/g, otp);
+  const message = String(text || '').trim();
+  if (!message) return null;
 
   // Spearuc India: use 10-digit unless config explicitly sets smsUseCountryCode: true
   const useCountryCode = config.smsUseCountryCode === true;
@@ -114,21 +122,7 @@ function getTestOtpForAny() {
  * @param {string} otp - 4-digit OTP
  * @returns {Promise<{success: boolean}>}
  */
-function sendOtpSms(mobileNumber, otp) {
-  const digits = String(mobileNumber).replace(/\D/g, '').slice(-10);
-  if (TEST_MOBILES.has(digits)) {
-    return Promise.resolve({ success: true });
-  }
-  if (getTestOtpForAny()) {
-    try {
-      const { logger } = require('../hhd/utils/logger');
-      logger.info(`[SMS] Skipping send (testOtpForAny): ${digits}`);
-    } catch (_) {
-      console.log(`[SMS] Skipping send (testOtpForAny): ${digits}`);
-    }
-    return Promise.resolve({ success: true });
-  }
-  const req = buildSmsRequest(mobileNumber, otp);
+function dispatchSmsRequest(req) {
   if (!req) {
     try {
       const { logger } = require('../hhd/utils/logger');
@@ -181,6 +175,54 @@ function sendOtpSms(mobileNumber, otp) {
   });
 }
 
+function sendOtpSms(mobileNumber, otp) {
+  const digits = String(mobileNumber).replace(/\D/g, '').slice(-10);
+  if (TEST_MOBILES.has(digits)) {
+    return Promise.resolve({ success: true });
+  }
+  if (getTestOtpForAny()) {
+    try {
+      const { logger } = require('../hhd/utils/logger');
+      logger.info(`[SMS] Skipping send (testOtpForAny): ${digits}`);
+    } catch (_) {
+      console.log(`[SMS] Skipping send (testOtpForAny): ${digits}`);
+    }
+    return Promise.resolve({ success: true });
+  }
+  return dispatchSmsRequest(buildSmsRequest(mobileNumber, otp));
+}
+
+/**
+ * Send arbitrary SMS text (e.g. 6-digit delivery OTP).
+ * @param {string} mobileNumber - 10-digit mobile
+ * @param {string} text - Full SMS body
+ */
+function sendSmsText(mobileNumber, text) {
+  const digits = String(mobileNumber).replace(/\D/g, '').slice(-10);
+  if (TEST_MOBILES.has(digits)) {
+    return Promise.resolve({ success: true });
+  }
+  if (getTestOtpForAny()) {
+    try {
+      const { logger } = require('../hhd/utils/logger');
+      logger.info(`[SMS] Skipping send (testOtpForAny): ${digits}`);
+    } catch (_) {
+      console.log(`[SMS] Skipping send (testOtpForAny): ${digits}`);
+    }
+    return Promise.resolve({ success: true });
+  }
+  if (isOtpDevMode()) {
+    try {
+      const { logger } = require('../hhd/utils/logger');
+      logger.info(`[SMS] otpDevMode: skipping SMS to ${digits}; message=${String(text).slice(0, 120)}`);
+    } catch (_) {
+      console.log(`[SMS] otpDevMode: skipping SMS to ${digits}`);
+    }
+    return Promise.resolve({ success: true, body: 'otp-dev-mode-no-sms' });
+  }
+  return dispatchSmsRequest(buildSmsRequestWithText(mobileNumber, text));
+}
+
 /** Check if OTP dev mode is on (no real SMS) */
 function isOtpDevMode() {
   const config = loadConfig();
@@ -201,6 +243,8 @@ function getTestOtpIfApplicable(mobileNumber) {
 module.exports = {
   generateOTP,
   sendOtpSms,
+  sendSmsText,
+  buildSmsRequestWithText,
   isOtpDevMode,
   getTestOtpIfApplicable,
   SIGNIN_SMS_MESSAGE: DEFAULT_SMS_MESSAGE,

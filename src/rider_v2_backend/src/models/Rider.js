@@ -168,6 +168,11 @@ var RiderSchema = new _mongoose.Schema({
     upiId: String,
     accountHolderName: String
   },
+  /** Last saved payout method — used by rider app to show the correct card when both exist */
+  primaryPayoutMethod: {
+    type: String,
+    enum: ["bank", "upi"]
+  },
   mfa: {
     enabled: {
       type: Boolean,

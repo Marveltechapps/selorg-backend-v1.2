@@ -7,6 +7,10 @@ const cache = require('../../utils/cache');
 const logger = require('../../core/utils/logger');
 const riderDashboardNotificationService = require('../services/riderDashboardNotificationService');
 
+function assignErrorResponse(res, statusCode, message) {
+  return res.status(statusCode).json({ success: false, message });
+}
+
 const listOrders = async (req, res, next) => {
   try {
     const { status, riderId, search, page, limit, sortBy, sortOrder } = req.query;
@@ -38,11 +42,19 @@ const assignOrder = async (req, res, next) => {
     const { riderId, orderId: bodyOrderId, overrideSla = false } = req.body;
     const effectiveRiderId = riderId || req.body.rider_id;
 
-    if (!effectiveRiderId) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'riderId is required',
-      });
+    logger.info('[assignOrder] request', {
+      orderId,
+      riderId: effectiveRiderId,
+      overrideSla: !!overrideSla,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+    });
+
+    if (!orderId || !String(orderId).trim()) {
+      return assignErrorResponse(res, 400, 'orderId is required in the URL path');
+    }
+
+    if (!effectiveRiderId || !String(effectiveRiderId).trim()) {
+      return assignErrorResponse(res, 400, 'riderId is required in the request body');
     }
 
     const order = await orderService.assignOrder(orderId, effectiveRiderId, overrideSla);
@@ -58,6 +70,7 @@ const assignOrder = async (req, res, next) => {
       .catch((err) => logger.warn('Rider dashboard notification (assign) failed', { err: err.message }));
 
     res.status(200).json({
+      success: true,
       orderId: order.id,
       riderId: order.riderId,
       riderName: order.rider?.name,
@@ -65,17 +78,28 @@ const assignOrder = async (req, res, next) => {
       etaMinutes: order.etaMinutes,
     });
   } catch (error) {
-    logger.error('Error in rider assignOrder:', error);
-    if (error.message === 'Order not found' || error.message?.includes('not found')) {
-      return res.status(404).json({ error: 'Not Found', message: error.message });
+    logger.error('Error in rider assignOrder:', {
+      message: error.message,
+      statusCode: error.statusCode,
+      orderId: req.params?.orderId,
+      riderId: req.body?.riderId || req.body?.rider_id,
+    });
+    const statusCode = error.statusCode || 500;
+    const message = error.message || 'Assignment failed';
+
+    if (statusCode === 404 || message.includes('not found')) {
+      return assignErrorResponse(res, 404, message);
     }
     if (
-      error.message?.includes('cannot be assigned') ||
-      error.message?.includes('not available') ||
-      error.message?.includes('at capacity') ||
-      error.message?.includes('violate SLA')
+      statusCode === 400 ||
+      message.includes('cannot be assigned') ||
+      message.includes('not available') ||
+      message.includes('at capacity') ||
+      message.includes('violate SLA') ||
+      message.includes('offline') ||
+      message.includes('required')
     ) {
-      return res.status(400).json({ error: 'Bad Request', message: error.message });
+      return assignErrorResponse(res, 400, message);
     }
     next(error);
   }

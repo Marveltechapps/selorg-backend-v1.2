@@ -151,6 +151,9 @@ const reviewDocument = async (documentId, reviewData) => {
       
       const updateData = {};
       updateData[`documents.${docType}.status`] = v2Status;
+      if (v2Status === 'verified') {
+        updateData[`documents.${docType}.verifiedAt`] = new Date();
+      }
       if (rejectionReason) {
         updateData[`documents.${docType}.rejectionReason`] = rejectionReason;
       }
