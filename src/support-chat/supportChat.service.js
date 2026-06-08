@@ -4,6 +4,8 @@ const SupportMessage = require('./models/SupportMessage');
 const { emitSupportRealtime } = require('./supportChat.socket');
 
 let RiderModel = null;
+let OrderModel = null;
+
 function getRiderModel() {
   if (!RiderModel) {
     try {
@@ -13,6 +15,60 @@ function getRiderModel() {
     }
   }
   return RiderModel;
+}
+
+function getOrderModel() {
+  if (!OrderModel) {
+    try {
+      OrderModel = require('../warehouse/models/Order');
+    } catch {
+      OrderModel = null;
+    }
+  }
+  return OrderModel;
+}
+
+async function getRiderOrderContext(riderId) {
+  const Rider = getRiderModel();
+  const Order = getOrderModel();
+  if (!Rider) return null;
+
+  const rider = await Rider.findOne({ riderId }).lean();
+  if (!rider) return null;
+
+  const orderId = rider.currentOrderId || rider.activeOrderId;
+  if (!orderId || !Order) {
+    return {
+      riderId,
+      availability: rider.availability || rider.status,
+      currentOrderId: orderId || null,
+      order: null,
+    };
+  }
+
+  const order = await Order.findOne({
+    $or: [{ id: orderId }, { orderId }, { _id: orderId }],
+  })
+    .select('id status customerName delivery_address riderId slaDeadline paymentMethod codAmount')
+    .lean();
+
+  return {
+    riderId,
+    availability: rider.availability || rider.status,
+    currentOrderId: orderId,
+    order: order
+      ? {
+          id: order.id || orderId,
+          status: order.status,
+          customerName: order.customerName,
+          dropLocation: order.delivery_address || order.dropLocation,
+          riderId: order.riderId,
+          slaDeadline: order.slaDeadline,
+          isCod: (order.paymentMethod || '').toLowerCase() === 'cod' || Boolean(order.codAmount),
+          codAmount: order.codAmount,
+        }
+      : null,
+  };
 }
 
 function toConversationDto(doc) {
@@ -227,10 +283,22 @@ async function updateStatus(conversationId, status, adminUserId) {
   return toConversationDto(conversation);
 }
 
+async function getConversationContext(conversationId) {
+  const conversation = await SupportConversation.findOne({ conversationId }).lean();
+  if (!conversation) return null;
+  const orderContext = await getRiderOrderContext(conversation.riderId);
+  return {
+    conversation: toConversationDto(conversation),
+    orderContext,
+  };
+}
+
 module.exports = {
   getOrCreateConversationForRider,
   listConversationsForAdmin,
   getConversationById,
+  getConversationContext,
+  getRiderOrderContext,
   assertRiderOwnsConversation,
   listMessages,
   sendMessage,

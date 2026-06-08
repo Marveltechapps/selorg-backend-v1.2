@@ -95,9 +95,13 @@ const listRiders = async (filters = {}, pagination = {}) => {
     const contracts = await Contract.find({ riderId: { $in: riderIds } }).lean();
     const contractMap = new Map(contracts.map(c => [c.riderId, c]));
 
+    const trainings = await Training.find({ riderId: { $in: riderIds } }).lean();
+    const trainingMap = new Map(trainings.map(t => [t.riderId, t]));
+
     // Format dates and final merge
     const formattedRiders = paginatedRiders.map(r => {
       const contract = contractMap.get(r.id);
+      const training = trainingMap.get(r.id);
       let contractStatus = contract?.status;
       if (!contractStatus) {
         const now = new Date();
@@ -131,6 +135,15 @@ const listRiders = async (filters = {}, pagination = {}) => {
           reason: r.suspension.reason || null,
           since: r.suspension.since ? new Date(r.suspension.since).toISOString() : null,
         } : null,
+        trainingProgress: training ? {
+          modulesCompleted: training.modulesCompleted ?? 0,
+          totalModules: training.totalModules ?? (training.modules?.length || 5),
+          progressPercentage: training.progressPercentage ?? 0,
+        } : {
+          modulesCompleted: r.trainingStatus === 'completed' ? 5 : r.trainingStatus === 'in_progress' ? 1 : 0,
+          totalModules: 5,
+          progressPercentage: r.trainingStatus === 'completed' ? 100 : r.trainingStatus === 'in_progress' ? 20 : 0,
+        },
       };
     });
 

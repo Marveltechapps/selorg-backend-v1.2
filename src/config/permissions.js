@@ -54,6 +54,15 @@ const PERMISSIONS = Object.freeze({
   // Analytics
   ANALYTICS_REPORTS_READ: 'analytics.reports.read',
 
+  // Rider fleet ops (dashboard)
+  RIDER_OPS_DISPATCH_ASSIGN: 'rider_ops.dispatch.assign',
+  RIDER_OPS_DISPATCH_AUTO_ASSIGN: 'rider_ops.dispatch.auto_assign',
+  RIDER_OPS_SHIFT_MANAGE: 'rider_ops.shift.manage',
+  RIDER_OPS_HR_APPROVE: 'rider_ops.hr.approve',
+  RIDER_OPS_AUDIT_VIEW: 'rider_ops.audit.view',
+  RIDER_OPS_ANALYTICS_EXPORT: 'rider_ops.analytics.export',
+  RIDER_OPS_CASH_VIEW: 'rider_ops.cash.view',
+
   // Compliance
   COMPLIANCE_AUDIT_READ: 'compliance.audit.read',
 });
@@ -97,7 +106,7 @@ const ROLE_DEFAULT_PERMISSIONS = Object.freeze({
   /** Warehouse module JWT role */
   warehouse: ['warehouse.*', 'inventory.stock.read', 'inventory.stock.write'],
   picker: ['inventory.stock.read', 'orders.read', 'operations.picking.*'],
-  rider: ['delivery.*', 'orders.read'],
+  rider: ['delivery.*', 'rider_ops.*', 'orders.read', 'analytics.reports.read'],
   hhd: ['inventory.stock.read', 'orders.read'],
 });
 

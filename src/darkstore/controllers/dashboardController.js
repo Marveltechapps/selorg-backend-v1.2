@@ -1,4 +1,5 @@
 const Order = require('../models/Order');
+const { requireStoreId } = require('../utils/resolveStoreId');
 const Staff = require('../models/Staff');
 const StockAlert = require('../models/StockAlert');
 const RTOAlert = require('../models/RTOAlert');
@@ -18,7 +19,8 @@ const appConfig = require('../../config/app');
  */
 const getDashboardSummary = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || '';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const cacheKey = `dashboard:summary:${storeId}`;
 
     const { value: summary } = await getCachedOrCompute(
@@ -97,7 +99,8 @@ const getDashboardSummary = async (req, res) => {
  */
 const getStaffLoad = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || '';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const cacheKey = `dashboard:staff-load:${storeId}`;
     const { value: data } = await getCachedOrCompute(
       cacheKey,
@@ -155,7 +158,8 @@ const getStaffLoad = async (req, res) => {
  */
 const getStockAlerts = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || '';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const severity = req.query.severity || 'all';
     const cacheKey = `dashboard:stock-alerts:${storeId}:${severity}`;
     const { value: data } = await getCachedOrCompute(
@@ -192,7 +196,8 @@ const getStockAlerts = async (req, res) => {
  */
 const getRTOAlerts = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || '';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const cacheKey = `dashboard:rto-alerts:${storeId}`;
     const { value: data } = await getCachedOrCompute(
       cacheKey,
@@ -230,7 +235,8 @@ const getRTOAlerts = async (req, res) => {
  * @returns {Promise<{orders: object[]}>}
  */
 async function fetchLiveOrdersData(storeId, status = 'all', limit = 50) {
-  const effectiveStoreId = storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+  const effectiveStoreId = storeId || '';
+  if (!effectiveStoreId) return { orders: [] };
   const allActiveStatuses = ['new', 'queued', 'processing', 'ready', 'ASSIGNED', 'PICKING', 'PICKED', 'PACKED', 'READY_FOR_DISPATCH'];
   let query;
   let sort = { createdAt: -1 };
@@ -290,6 +296,7 @@ async function fetchLiveOrdersData(storeId, status = 'all', limit = 50) {
 
     return {
       order_id: order.order_id,
+      store_id: order.store_id,
       status: order.status,
       riderId: deliveryRiderId || undefined,
       rider_id: deliveryRiderId || undefined,
@@ -333,7 +340,8 @@ async function fetchLiveOrdersData(storeId, status = 'all', limit = 50) {
  */
 const getLiveOrders = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const status = req.query.status || 'all';
     let limit = parseInt(req.query.limit) || 50;
     if (limit > 100) limit = 100;
@@ -376,6 +384,77 @@ const refreshDashboard = async (req, res) => {
   }
 };
 
+const Store = require('../../merch/models/Store');
+
+function toStoreProfile(store, fallbackId) {
+  return {
+    id: store.code || fallbackId,
+    name: store.name,
+    address: store.address,
+    phone: store.phone || '',
+    lat: store.latitude ?? store.x ?? 12.97,
+    lng: store.longitude ?? store.y ?? 77.59,
+  };
+}
+
+const getStoreProfile = async (req, res) => {
+  try {
+    const storeId = req.query.storeId;
+    if (!storeId) {
+      return res.status(400).json({ success: false, error: 'storeId is required' });
+    }
+    const store = await Store.findOne({
+      $or: [{ code: storeId }, { code: storeId.toUpperCase() }, { name: storeId }],
+    }).lean();
+    if (!store) {
+      return res.status(404).json({ success: false, error: 'Store not found' });
+    }
+    res.status(200).json({
+      success: true,
+      data: toStoreProfile(store, storeId),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch store profile' });
+  }
+};
+
+/** Warehouse pickup location for replenishment (warehouse → darkstore) */
+const getWarehouseProfile = async (req, res) => {
+  try {
+    const storeId = req.query.storeId;
+    if (!storeId) {
+      return res.status(400).json({ success: false, error: 'storeId is required' });
+    }
+    const darkstore = await Store.findOne({
+      $or: [{ code: storeId }, { code: storeId.toUpperCase() }],
+      type: { $in: ['dark_store', 'store'] },
+    }).lean();
+
+    let warehouse = null;
+    if (darkstore?.cityId) {
+      warehouse = await Store.findOne({
+        type: 'warehouse',
+        cityId: darkstore.cityId,
+        status: { $ne: 'inactive' },
+      }).lean();
+    }
+    if (!warehouse) {
+      warehouse = await Store.findOne({ type: 'warehouse', status: { $ne: 'inactive' } })
+        .sort({ updatedAt: -1 })
+        .lean();
+    }
+    if (!warehouse) {
+      return res.status(404).json({ success: false, error: 'No warehouse found for replenishment' });
+    }
+    res.status(200).json({
+      success: true,
+      data: toStoreProfile(warehouse, warehouse.code || 'WAREHOUSE'),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch warehouse profile' });
+  }
+};
+
 module.exports = {
   getDashboardSummary,
   getStaffLoad,
@@ -384,5 +463,7 @@ module.exports = {
   getLiveOrders,
   refreshDashboard,
   fetchLiveOrdersData,
+  getStoreProfile,
+  getWarehouseProfile,
 };
 

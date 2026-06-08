@@ -5,8 +5,15 @@
 
 const { ORDER_STATUS } = require('../../constants/pickerEnums');
 
-// Statuses that can transition TO ASSIGNED (i.e. order is unassigned)
-const ASSIGNABLE_STATUSES = ['new', 'processing', 'ready'];
+// Statuses that can transition TO ASSIGNED (i.e. order is unassigned or re-assignable)
+const ASSIGNABLE_STATUSES = [
+  'new',
+  'queued',
+  'pending',
+  'processing',
+  'ready',
+  'assigned', // legacy lowercase
+];
 
 // Valid transitions: fromStatus -> [allowed toStatuses]
 const VALID_TRANSITIONS = {

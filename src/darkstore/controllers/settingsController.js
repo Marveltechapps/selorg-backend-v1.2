@@ -1,4 +1,5 @@
 const Settings = require('../models/Settings');
+const { requireStoreId } = require('../utils/resolveStoreId');
 const AuditLog = require('../models/AuditLog');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
@@ -23,7 +24,8 @@ function toPlainSettings(doc) {
  */
 const getSettings = async (req, res) => {
   try {
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     
     let settings = await Settings.findOne({ store_id: storeId });
     
@@ -64,7 +66,8 @@ const getSettings = async (req, res) => {
  */
 const updateSettings = async (req, res) => {
   try {
-    const storeId = req.body.storeId || req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const { settings: newSettings } = req.body;
     
     if (!newSettings) {

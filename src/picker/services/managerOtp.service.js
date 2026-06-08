@@ -83,12 +83,62 @@ async function getActiveDeviceRequestOtpsByPickerIds(pickerIds) {
   return map;
 }
 
-async function requestManagerOtp(pickerId) {
+async function requestManagerOtp(pickerId, options = {}) {
   const picker = await PickerUser.findById(pickerId);
   if (!picker) {
     const err = new Error('Picker not found');
     err.statusCode = 404;
     throw err;
+  }
+
+  const forceNew = options?.forceNew === true;
+
+  // If there is already an active OTP, do not overwrite it.
+  // This keeps the supervisor-generated OTP valid when the picker presses
+  // "Request Approval OTP" before verifying.
+  const existing = await ManagerOTP.findOne({
+    pickerId,
+    used: false,
+    expiresAt: { $gt: new Date() },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  if (existing && !forceNew) {
+    const existingOtpCode = String(existing.otpCode);
+    const remainingMs =
+      new Date(existing.expiresAt).getTime() - Date.now();
+    const expiresInMinutes = Math.max(0, Math.ceil(remainingMs / 60000));
+
+    const managerPhone =
+      existing.managerPhone || (await resolveManagerPhoneForPicker(picker));
+
+    const response = {
+      success: true,
+      message:
+        'Approval OTP is already active. Your supervisor can read the code from the Admin Operations Dashboard.',
+      expiresInMinutes,
+    };
+
+    if (isOtpDevMode()) {
+      response.devOtp = existingOtpCode;
+    }
+
+    if (shouldSendManagerSms() && managerPhone) {
+      const smsResult = await sendOtpSms(managerPhone, existingOtpCode);
+      if (!smsResult.sent) {
+        const err = new Error(
+          smsResult.userMessage || 'Failed to send OTP to manager'
+        );
+        err.statusCode = 502;
+        throw err;
+      }
+      response.maskedPhone = maskPhone10(managerPhone);
+      response.message =
+        'OTP sent to your manager and is visible on the Admin Operations Dashboard.';
+    }
+
+    return response;
   }
 
   const plainOtp = generateSixDigitOtp();
@@ -176,10 +226,30 @@ async function verifyManagerOtp(pickerId, otpInput) {
   return { success: true, message: 'OTP verified successfully' };
 }
 
+/**
+ * Generate device-request OTP for dashboard supervisors (HSD User List drawer).
+ * Returns the plain 6-digit code for display to the picker.
+ */
+async function generateDeviceRequestOtpForDashboard(pickerId) {
+  await requestManagerOtp(pickerId, { forceNew: true });
+  const map = await getActiveDeviceRequestOtpsByPickerIds([pickerId]);
+  const row = map[String(pickerId)] || null;
+  return {
+    success: true,
+    otp: row?.otp || null,
+    expiresAt: row?.expiresAt ? new Date(row.expiresAt).toISOString() : null,
+    expiresInMinutes: Math.round(OTP_TTL_MS / 60000),
+    message: row?.otp
+      ? '6-digit approval OTP generated. The picker can verify it in the Collect Device screen.'
+      : 'OTP generated but could not be retrieved. Try again.',
+  };
+}
+
 module.exports = {
   requestManagerOtp,
   verifyManagerOtp,
   getActiveDeviceRequestOtpsByPickerIds,
+  generateDeviceRequestOtpForDashboard,
   maskPhone10,
   normalizePhone10,
 };

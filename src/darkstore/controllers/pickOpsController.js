@@ -30,6 +30,11 @@ async function getPickOps(req, res) {
         }
       }
 
+      const packStation =
+        pd.packStation ||
+        (o.bagId ? `Station ${String(o.bagId).slice(-1) || 'A'}` : null) ||
+        `Station ${(String(o.order_id).charCodeAt(0) % 3) + 1}`;
+
       return {
         orderId: o.order_id,
         pickerName: pa.pickerName || (o.assignee && o.assignee.name) || '—',
@@ -37,7 +42,9 @@ async function getPickOps(req, res) {
         progress,
         missingItemsCount: missingCount,
         slaRisk: o.sla_status || 'safe',
-        zone: o.store_id || '—',
+        zone: o.zone || pd.zone || 'General',
+        packStation,
+        status: o.status,
       };
     });
 

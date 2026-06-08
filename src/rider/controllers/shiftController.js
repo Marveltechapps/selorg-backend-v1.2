@@ -1,4 +1,5 @@
 const shiftService = require('../services/shiftService');
+const riderAuditService = require('../services/riderAuditService');
 
 function handleError(res, err) {
   const statusMap = {
@@ -212,6 +213,37 @@ async function myShifts(req, res) {
   }
 }
 
+async function getAssignments(req, res) {
+  try {
+    const data = await shiftService.getShiftAssignments(req.params.id);
+    res.json({ success: true, data });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+async function assignRider(req, res) {
+  try {
+    const { riderId } = req.body || {};
+    const data = await shiftService.adminAssignRider(req.params.id, riderId);
+    await riderAuditService.logRiderOpsAction(req, 'shift.assign', 'shift', req.params.id, { riderId });
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
+async function unassignRider(req, res) {
+  try {
+    const riderId = req.params.riderId || req.body?.riderId;
+    const data = await shiftService.adminUnassignRider(req.params.id, riderId);
+    await riderAuditService.logRiderOpsAction(req, 'shift.unassign', 'shift', req.params.id, { riderId });
+    res.json({ success: true, data });
+  } catch (err) {
+    handleError(res, err);
+  }
+}
+
 module.exports = {
   list,
   filterOptions,
@@ -225,5 +257,8 @@ module.exports = {
   start,
   end,
   myShifts,
+  getAssignments,
+  assignRider,
+  unassignRider,
 };
 

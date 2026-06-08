@@ -87,6 +87,16 @@ adminRouter.get('/conversations', async (req, res) => {
   }
 });
 
+adminRouter.get('/conversations/:conversationId/context', async (req, res) => {
+  try {
+    const data = await service.getConversationContext(req.params.conversationId);
+    if (!data) return res.status(404).json({ success: false, error: 'Conversation not found' });
+    res.json({ success: true, data });
+  } catch (e) {
+    sendError(res, e);
+  }
+});
+
 adminRouter.get('/conversations/:conversationId', async (req, res) => {
   try {
     const conversation = await service.getConversationById(req.params.conversationId);

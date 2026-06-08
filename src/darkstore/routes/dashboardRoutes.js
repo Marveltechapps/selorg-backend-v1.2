@@ -7,11 +7,19 @@ const {
   getRTOAlerts,
   getLiveOrders,
   refreshDashboard,
+  getStoreProfile,
+  getWarehouseProfile,
 } = require('../controllers/dashboardController');
 const { getAlertHistory } = require('../controllers/orderController');
 
 // GET /api/darkstore/dashboard/summary
 router.get('/summary', getDashboardSummary);
+
+// GET /api/darkstore/dashboard/store-profile
+router.get('/store-profile', getStoreProfile);
+
+// GET /api/darkstore/dashboard/warehouse-profile
+router.get('/warehouse-profile', getWarehouseProfile);
 
 // GET /api/darkstore/dashboard/staff-load
 router.get('/staff-load', getStaffLoad);

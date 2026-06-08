@@ -1,4 +1,5 @@
 const documentService = require('../services/documentService');
+const riderAuditService = require('../services/riderAuditService');
 
 const listDocuments = async (req, res, next) => {
   try {
@@ -35,6 +36,10 @@ const reviewDocument = async (req, res, next) => {
       notes,
       rejectionReason,
       reviewer,
+    });
+    await riderAuditService.logRiderOpsAction(req, `document.${action}`, 'document', documentId, {
+      notes,
+      rejectionReason,
     });
     res.status(200).json(document);
   } catch (error) {

@@ -530,11 +530,21 @@ const downloadPerformanceReport = async (req, res) => {
       store_id: storeId,
     });
 
-    // Mock PDF content for now
-    const csvContent = "Rank,Employee,Role,Productivity,Error Rate,SLA Impact,Incentive\n" +
-      "1,John Doe,Picker,125 UPH,0.5%,Low,Eligible\n" +
-      "2,Jane Smith,Packer,140 UPH,0.8%,Low,Eligible\n" +
-      "3,Mike Brown,Loader,95 UPH,1.2%,Medium,At Risk";
+    const period = req.query.period || 'week';
+    const performance = await StaffPerformance.find({ store_id: storeId, period }).sort({ score: -1 }).lean();
+    const header = 'Rank,Employee,Role,Productivity,Error Rate,SLA Impact,Incentive\n';
+    const rows = performance.map((p, index) =>
+      [
+        index + 1,
+        p.name || p.staff_id,
+        p.role || '',
+        p.productivity || '',
+        p.error_rate || '',
+        p.sla_impact || '',
+        p.incentive_status || '',
+      ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')
+    );
+    const csvContent = header + (rows.length ? rows.join('\n') : 'No performance data for this period');
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=staff-performance-${new Date().toISOString().split('T')[0]}.csv`);

@@ -354,4 +354,430 @@ async function getExceptionQueue(req, res) {
   }
 }
 
-module.exports = { getSlaMonitor, getMissingItems, getLivePickingMonitor, getOperationalAlerts, getExceptionQueue };
+/**
+ * GET /darkstore/operations/pipeline
+ * Live fulfillment pipeline counts by stage
+ */
+async function getPipelineStats(req, res) {
+  try {
+    const storeId = req.query.storeId || '';
+    const query = storeId ? { store_id: storeId } : {};
+    const now = new Date();
+
+    const activeStatuses = {
+      queued: ['new'],
+      assigned: ['processing', ORDER_STATUS.ASSIGNED],
+      picking: [ORDER_STATUS.PICKING],
+      packing: ['ready', ORDER_STATUS.PICKED, ORDER_STATUS.PACKED],
+      ready_dispatch: [ORDER_STATUS.READY_FOR_DISPATCH],
+    };
+
+    const stages = {};
+    for (const [stage, statuses] of Object.entries(activeStatuses)) {
+      const q = { ...query, status: { $in: statuses } };
+      stages[stage] = await Order.countDocuments(q);
+    }
+
+    const waitingRiderQuery = {
+      ...query,
+      status: ORDER_STATUS.READY_FOR_DISPATCH,
+      $or: [{ bagId: { $exists: true, $ne: '' } }, { rackLocation: { $exists: true, $ne: '' } }],
+    };
+    stages.waiting_rider = await Order.countDocuments(waitingRiderQuery);
+
+    const slaCritical = await Order.countDocuments({
+      ...query,
+      status: { $in: ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING, ORDER_STATUS.PACKED, ORDER_STATUS.READY_FOR_DISPATCH] },
+      sla_status: 'critical',
+    });
+
+    const ordersUnder5Min = await Order.countDocuments({
+      ...query,
+      status: { $in: ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING] },
+      sla_deadline: { $gte: now, $lte: new Date(now.getTime() + 5 * 60 * 1000) },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        stages,
+        slaCritical,
+        ordersUnder5Min,
+        totalActive: Object.values(stages).reduce((a, b) => a + b, 0),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch pipeline stats' });
+  }
+}
+
+/**
+ * GET /darkstore/operations/activity-feed
+ * Recent operational events (last N minutes)
+ */
+async function getActivityFeed(req, res) {
+  try {
+    const storeId = req.query.storeId || '';
+    const minutes = Math.min(60, Math.max(1, parseInt(req.query.minutes, 10) || 5));
+    const since = new Date(Date.now() - minutes * 60 * 1000);
+    const query = storeId ? { store_id: storeId } : {};
+
+    const items = [];
+
+    const recentOrders = await Order.find({
+      ...query,
+      updatedAt: { $gte: since },
+    })
+      .sort({ updatedAt: -1 })
+      .limit(30)
+      .select('order_id status updatedAt createdAt sla_status')
+      .lean();
+
+    for (const o of recentOrders) {
+      const isNew = o.createdAt && new Date(o.createdAt) >= since;
+      items.push({
+        id: `order-${o.order_id}-${o.updatedAt}`,
+        type: isNew ? 'order_created' : 'order_updated',
+        title: isNew ? `New order ${o.order_id}` : `Order ${o.order_id} updated`,
+        description: `Status: ${o.status}${o.sla_status === 'critical' ? ' · SLA critical' : ''}`,
+        orderId: o.order_id,
+        createdAt: o.updatedAt || o.createdAt,
+      });
+    }
+
+    const slaBreaches = await Order.find({
+      ...query,
+      sla_deadline: { $lt: new Date() },
+      status: { $in: ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING] },
+      updatedAt: { $gte: since },
+    })
+      .sort({ sla_deadline: 1 })
+      .limit(10)
+      .select('order_id sla_deadline updatedAt')
+      .lean();
+
+    for (const o of slaBreaches) {
+      items.push({
+        id: `sla-${o.order_id}`,
+        type: 'sla_breach',
+        title: `SLA breach — ${o.order_id}`,
+        description: 'Order past deadline',
+        orderId: o.order_id,
+        createdAt: o.updatedAt || o.sla_deadline,
+      });
+    }
+
+    const alertQuery = storeId ? { storeId, createdAt: { $gte: since } } : { createdAt: { $gte: since } };
+    const alerts = await OperationalAlert.find(alertQuery)
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    for (const a of alerts) {
+      items.push({
+        id: `alert-${a._id}`,
+        type: 'ops_alert',
+        title: a.title || a.alertType,
+        description: a.description || '',
+        orderId: a.orderId,
+        createdAt: a.createdAt,
+      });
+    }
+
+    items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.status(200).json({ success: true, data: items.slice(0, 25) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch activity feed' });
+  }
+}
+
+/**
+ * GET /darkstore/operations/order-workflow/:orderId
+ * Extended workflow info including rider delivery stage
+ */
+async function getOrderWorkflow(req, res) {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    if (!orderId) {
+      return res.status(400).json({ success: false, error: 'Order ID required' });
+    }
+
+    const order = await Order.findOne({ order_id: orderId })
+      .select('order_id status timeline pickerAssignment assignee sla_status sla_timer sla_deadline bagId rackLocation')
+      .lean();
+
+    if (!order) {
+      return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+
+    let riderStatus = null;
+    let riderName = null;
+    try {
+      const RiderOrder = require('../../rider_v2_backend/src/models/Order').Order;
+      const riderOrder = await RiderOrder.findOne({ orderNumber: orderId })
+        .select('status riderAssignment metadata')
+        .lean();
+      if (riderOrder) {
+        riderStatus = riderOrder.status || null;
+        riderName = riderOrder.riderAssignment?.riderName || riderOrder.riderAssignment?.name || null;
+      }
+    } catch (_) {
+      /* rider module optional */
+    }
+
+    const timeline = order.timeline || [];
+    const pickerName =
+      (order.assignee && order.assignee.name) ||
+      (order.pickerAssignment && order.pickerAssignment.pickerName) ||
+      null;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orderId: order.order_id,
+        status: order.status,
+        timeline,
+        pickerName,
+        riderStatus,
+        riderName,
+        readyForDispatch: Boolean(order.bagId && order.rackLocation),
+        slaStatus: order.sla_status,
+        slaTimer: order.sla_timer,
+        slaDeadline: order.sla_deadline,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch order workflow' });
+  }
+}
+
+/**
+ * GET /darkstore/operations/workflow-sla-metrics
+ * P50/P95 pick times, breach rate by hour, exception resolution time
+ */
+async function getWorkflowSlaMetrics(req, res) {
+  try {
+    const storeId = req.query.storeId || '';
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const baseQuery = storeId ? { store_id: storeId } : {};
+
+    const pickedOrders = await Order.find({
+      ...baseQuery,
+      'pickingData.startTime': { $exists: true },
+      'pickingData.endTime': { $exists: true },
+      updatedAt: { $gte: todayStart },
+    })
+      .select('pickingData')
+      .lean();
+
+    const durations = pickedOrders
+      .map((o) => {
+        const start = new Date(o.pickingData.startTime).getTime();
+        const end = new Date(o.pickingData.endTime).getTime();
+        return (end - start) / 1000;
+      })
+      .filter((d) => d > 0 && d < 3600)
+      .sort((a, b) => a - b);
+
+    const percentile = (arr, p) => (arr.length ? arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] : 0);
+
+    const todayOrders = await Order.find({
+      ...baseQuery,
+      createdAt: { $gte: todayStart },
+      sla_deadline: { $exists: true },
+    })
+      .select('createdAt sla_status sla_deadline')
+      .lean();
+
+    const breachByHour = Array.from({ length: 24 }, (_, hour) => ({ hour, breaches: 0, total: 0, rate: 0 }));
+    const now = new Date();
+    for (const o of todayOrders) {
+      const h = new Date(o.createdAt).getHours();
+      breachByHour[h].total += 1;
+      const breached =
+        o.sla_status === 'critical' || (o.sla_deadline && new Date(o.sla_deadline) < now);
+      if (breached) breachByHour[h].breaches += 1;
+    }
+    for (const row of breachByHour) {
+      row.rate = row.total > 0 ? Math.round((row.breaches / row.total) * 100) : 0;
+    }
+
+    const alertQuery = {
+      status: 'resolved',
+      updatedAt: { $gte: todayStart },
+      ...(storeId ? { storeId } : {}),
+    };
+    const resolvedAlerts = await OperationalAlert.find(alertQuery).select('createdAt updatedAt').lean();
+    const resMs = resolvedAlerts
+      .map((a) => new Date(a.updatedAt).getTime() - new Date(a.createdAt).getTime())
+      .filter((ms) => ms > 0);
+    const avgExceptionResolutionMin = resMs.length
+      ? Math.round(resMs.reduce((s, m) => s + m, 0) / resMs.length / 60000)
+      : 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        pickTimeP50Sec: Math.round(percentile(durations, 0.5)),
+        pickTimeP95Sec: Math.round(percentile(durations, 0.95)),
+        breachRateByHour: breachByHour,
+        avgExceptionResolutionMin,
+        sampleSize: durations.length,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch workflow SLA metrics' });
+  }
+}
+
+/**
+ * GET /darkstore/operations/regional-pipeline
+ * Multi-store pipeline health comparison
+ */
+async function getRegionalPipeline(req, res) {
+  try {
+    const storeIdsParam = String(req.query.storeIds || '').trim();
+    const storeIds = storeIdsParam
+      ? storeIdsParam.split(',').map((s) => s.trim()).filter(Boolean)
+      : await Order.distinct('store_id');
+
+    const now = new Date();
+    const stores = [];
+
+    for (const sid of storeIds.slice(0, 30)) {
+      if (!sid) continue;
+      const query = { store_id: sid };
+      const activeStatuses = ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING, ORDER_STATUS.PACKED, ORDER_STATUS.READY_FOR_DISPATCH];
+      const totalActive = await Order.countDocuments({ ...query, status: { $in: activeStatuses } });
+      const slaCritical = await Order.countDocuments({ ...query, status: { $in: activeStatuses }, sla_status: 'critical' });
+      const ordersUnder5Min = await Order.countDocuments({
+        ...query,
+        status: { $in: ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING] },
+        sla_deadline: { $gte: now, $lte: new Date(now.getTime() + 5 * 60 * 1000) },
+      });
+      const pickerCount = await PickerUser.countDocuments({ storeId: sid, isActive: { $ne: false } }).catch(() => 0);
+      stores.push({
+        storeId: sid,
+        totalActive,
+        slaCritical,
+        ordersUnder5Min,
+        slaThreatPct: totalActive > 0 ? Math.round((slaCritical / totalActive) * 100) : 0,
+        pickerCount,
+      });
+    }
+
+    stores.sort((a, b) => b.slaThreatPct - a.slaThreatPct);
+    res.status(200).json({ success: true, data: stores });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch regional pipeline' });
+  }
+}
+
+/**
+ * GET /darkstore/operations/escalation-suggestions
+ * Auto-escalation rules surfaced in UI
+ */
+async function getEscalationSuggestions(req, res) {
+  try {
+    const storeId = req.query.storeId || '';
+    const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
+    const baseQuery = storeId ? { store_id: storeId } : {};
+
+    const unassignedLong = await Order.find({
+      ...baseQuery,
+      status: { $in: ['new'] },
+      createdAt: { $lte: threeMinAgo },
+      $or: [
+        { assignee: { $exists: false } },
+        { assignee: null },
+        { 'assignee.name': { $in: [null, '', '-'] } },
+        { 'pickerAssignment.pickerId': { $exists: false } },
+      ],
+    })
+      .sort({ createdAt: 1 })
+      .limit(15)
+      .select('order_id createdAt order_type sla_status sla_timer')
+      .lean();
+
+    const expressUnassigned = await Order.find({
+      ...baseQuery,
+      status: { $in: ['new', 'processing'] },
+      order_type: { $in: ['Express', 'Priority', 'Premium'] },
+      $or: [
+        { 'pickerAssignment.pickerId': { $exists: false } },
+        { 'assignee.name': { $in: [null, '', '-'] } },
+      ],
+    })
+      .limit(10)
+      .select('order_id order_type sla_status createdAt')
+      .lean();
+
+    const suggestions = [];
+
+    for (const o of unassignedLong) {
+      const mins = Math.floor((Date.now() - new Date(o.createdAt).getTime()) / 60000);
+      suggestions.push({
+        id: `reassign-${o.order_id}`,
+        tier: 'P1',
+        type: 'unassigned_long',
+        orderId: o.order_id,
+        message: `Order ${o.order_id} unassigned for ${mins}m — suggest reassign`,
+        action: 'assign_picker',
+        createdAt: o.createdAt,
+      });
+    }
+
+    for (const o of expressUnassigned) {
+      if (suggestions.some((s) => s.orderId === o.order_id)) continue;
+      suggestions.push({
+        id: `express-${o.order_id}`,
+        tier: 'P1',
+        type: 'express_unassigned',
+        orderId: o.order_id,
+        message: `Express order ${o.order_id} still unassigned`,
+        action: 'assign_picker',
+        createdAt: o.createdAt,
+      });
+    }
+
+    const slaCritical = await Order.find({
+      ...baseQuery,
+      sla_status: 'critical',
+      status: { $in: ['new', 'processing', ORDER_STATUS.ASSIGNED, ORDER_STATUS.PICKING] },
+    })
+      .limit(5)
+      .select('order_id sla_timer')
+      .lean();
+
+    for (const o of slaCritical) {
+      suggestions.unshift({
+        id: `p0-${o.order_id}`,
+        tier: 'P0',
+        type: 'sla_imminent',
+        orderId: o.order_id,
+        message: `SLA critical — ${o.order_id} (${o.sla_timer || 'breach imminent'})`,
+        action: 'view_sla',
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    res.status(200).json({ success: true, data: suggestions.slice(0, 20) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to fetch escalation suggestions' });
+  }
+}
+
+module.exports = {
+  getSlaMonitor,
+  getMissingItems,
+  getLivePickingMonitor,
+  getOperationalAlerts,
+  getExceptionQueue,
+  getPipelineStats,
+  getActivityFeed,
+  getOrderWorkflow,
+  getWorkflowSlaMetrics,
+  getRegionalPipeline,
+  getEscalationSuggestions,
+};

@@ -18,6 +18,16 @@ const DeviceHistory = require('../models/DeviceHistory');
 const AuditLog = require('../models/AuditLog');
 const OutboundTransferRequest = require('../models/OutboundTransferRequest');
 const hsdUserLoginService = require('../services/hsdUserLogin.service');
+const {
+  generateDeviceRequestOtpForDashboard,
+  getActiveDeviceRequestOtpsByPickerIds,
+} = require('../../picker/services/managerOtp.service');
+const {
+  getPickerUserForHhdUser,
+  findPickerByPhone,
+  normalizePhone10,
+} = require('../../picker/helpers/hhdLink.helper');
+const mongoose = require('mongoose');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
 
@@ -47,8 +57,17 @@ const getFleetOverview = async (req, res) => {
     const errorDevices = devices.filter(d => d.status === 'error').length;
     const lowBatteryCount = devices.filter(d => d.battery_level < 20).length;
 
-    // Calculate average sync latency (mock)
-    const avgSyncLatency = 120;
+    const now = Date.now();
+    const latencies = devices
+      .map((d) => {
+        const last = d.last_sync || d.last_seen;
+        if (!last) return null;
+        return Math.max(0, Math.round((now - new Date(last).getTime()) / 1000));
+      })
+      .filter((v) => v != null);
+    const avgSyncLatency = latencies.length
+      ? Math.round(latencies.reduce((s, v) => s + v, 0) / latencies.length)
+      : 0;
 
     // Transform devices to match YAML format
     const transformedDevices = devices.map(device => ({
@@ -1090,6 +1109,93 @@ const createRequisition = async (req, res) => {
 };
 
 /**
+ * Resolve picker_users _id from HSD list userId (HHD id or picker id) and/or phone.
+ */
+async function resolvePickerIdForHsdUser({ userId, phoneNumber }) {
+  const uid = String(userId || '').trim();
+  if (uid && mongoose.Types.ObjectId.isValid(uid)) {
+    const asPicker = await PickerUser.findById(uid).select('_id').lean();
+    if (asPicker) return String(asPicker._id);
+
+    const pickerFromHhd = await getPickerUserForHhdUser(uid);
+    if (pickerFromHhd) return String(pickerFromHhd._id);
+  }
+
+  const phone = normalizePhone10(phoneNumber);
+  if (phone) {
+    const { picker } = await findPickerByPhone(phone);
+    if (picker) return String(picker._id);
+  }
+
+  return null;
+}
+
+/**
+ * GET /api/darkstore/hsd/users/:userId/device-request-otp
+ */
+const getHsdUserDeviceOtp = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const phoneNumber = req.query.phoneNumber || req.query.phone;
+    const pickerId = await resolvePickerIdForHsdUser({ userId, phoneNumber });
+    if (!pickerId) {
+      return res.status(404).json({
+        success: false,
+        error: 'No picker account linked to this HSD user',
+      });
+    }
+
+    const map = await getActiveDeviceRequestOtpsByPickerIds([pickerId]);
+    const row = map[pickerId] || null;
+
+    return res.status(200).json({
+      success: true,
+      pickerId,
+      otp: row?.otp || null,
+      deviceRequestOtp: row?.otp || null,
+      expiresAt: row?.expiresAt ? new Date(row.expiresAt).toISOString() : null,
+    });
+  } catch (error) {
+    logger.error('Get HSD user device OTP error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch device request OTP',
+    });
+  }
+};
+
+/**
+ * POST /api/darkstore/hsd/users/:userId/generate-device-otp
+ */
+const generateHsdUserDeviceOtp = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const phoneNumber = req.body?.phoneNumber || req.query?.phoneNumber;
+    const pickerId = await resolvePickerIdForHsdUser({ userId, phoneNumber });
+    if (!pickerId) {
+      return res.status(404).json({
+        success: false,
+        error: 'No picker account linked to this HSD user',
+      });
+    }
+
+    const result = await generateDeviceRequestOtpForDashboard(pickerId);
+    return res.status(200).json({
+      ...result,
+      pickerId,
+      deviceRequestOtp: result.otp,
+    });
+  } catch (error) {
+    logger.error('Generate HSD user device OTP error:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to generate device request OTP',
+    });
+  }
+};
+
+/**
  * Get HSD User List (users who logged in on HSD devices)
  * GET /api/darkstore/hsd/users
  */
@@ -1140,5 +1246,7 @@ module.exports = {
   sessionAction,
   createRequisition,
   getHSDUserList,
+  getHsdUserDeviceOtp,
+  generateHsdUserDeviceOtp,
 };
 

@@ -11,7 +11,7 @@ const customerCallSchema = new mongoose.Schema(
     order_id: {
       type: String,
       required: true,
-      match: /^ORD-\d+$/,
+      match: /^ORD-[A-Za-z0-9-]+$/,
     },
     store_id: {
       type: String,

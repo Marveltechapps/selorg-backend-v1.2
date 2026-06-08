@@ -129,6 +129,7 @@ async function sendAdminPasswordResetEmail({ to, name, temporaryPassword }) {
 }
 
 module.exports = {
+  sendEmail,
   sendAdminUserOtpEmail,
   sendAdminUserCreatedEmail,
   sendAdminCreationConfirmationEmail,

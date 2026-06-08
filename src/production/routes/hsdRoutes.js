@@ -21,8 +21,8 @@ const {
 // GET /api/darkstore/hsd/fleet
 router.get('/fleet', getFleetOverview);
 
-// GET /api/darkstore/hsd/users — HSD User List (Device Management)
-router.get('/users', getHsdUsers);
+// GET /api/darkstore/hsd/picker-users — pickers with device assignment (legacy)
+router.get('/picker-users', getHsdUsers);
 
 // POST /api/darkstore/hsd/devices/register
 router.post('/devices/register', registerDevice);

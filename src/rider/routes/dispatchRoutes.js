@@ -3,12 +3,16 @@ const router = express.Router();
 const dispatchController = require('../controllers/dispatchController');
 const appConfig = require('../../config/app');
 const { validateAutoAssign } = require('../../middleware/validator');
+const { authenticateToken, requireRole } = require('../../core/middleware');
+const { requireRiderOpsPermission } = require('../middleware/riderOpsPermissions');
 
-// Conditional auto-assign validation middleware
-// Skip validation in development mode, enforce in production
 const conditionalValidateAutoAssign = appConfig.nodeEnv === 'development'
-  ? (req, res, next) => next() // Skip validation in development
-  : validateAutoAssign; // Apply validation in production
+  ? (req, res, next) => next()
+  : validateAutoAssign;
+
+const fleetAuth = [authenticateToken, requireRole('rider', 'admin', 'super_admin')];
+
+router.use(...fleetAuth);
 
 // Unassigned Orders Endpoints
 router.get('/unassigned-orders', dispatchController.listUnassignedOrders);
@@ -20,10 +24,10 @@ router.post('/clusters/compute-metrics', dispatchController.computeClusterMetric
 
 // Cluster Management
 router.get('/clusters', dispatchController.listClusters);
-router.post('/clusters', dispatchController.saveClusters);
-router.patch('/clusters/:clusterId/orders', dispatchController.updateClusterOrders);
-router.delete('/clusters/:clusterId', dispatchController.deleteCluster);
-router.post('/clusters/:clusterId/assign', dispatchController.assignCluster);
+router.post('/clusters', requireRiderOpsPermission('dispatch.assign'), dispatchController.saveClusters);
+router.patch('/clusters/:clusterId/orders', requireRiderOpsPermission('dispatch.assign'), dispatchController.updateClusterOrders);
+router.delete('/clusters/:clusterId', requireRiderOpsPermission('dispatch.assign'), dispatchController.deleteCluster);
+router.post('/clusters/:clusterId/assign', requireRiderOpsPermission('dispatch.assign'), dispatchController.assignCluster);
 
 // Map Data Endpoints
 router.get('/map-data', dispatchController.getMapData);
@@ -37,15 +41,16 @@ router.get('/recommended-riders/:orderId', dispatchController.getRecommendedRide
 router.get('/order/:orderId/assignment-details', dispatchController.getOrderAssignmentDetails);
 
 // Order Assignment Endpoints
-router.post('/assign', dispatchController.assignOrder);
-router.post('/batch-assign', dispatchController.batchAssignOrders);
-router.post('/auto-assign', conditionalValidateAutoAssign, dispatchController.autoAssignOrders);
+router.post('/assign', requireRiderOpsPermission('dispatch.assign'), dispatchController.assignOrder);
+router.post('/batch-assign', requireRiderOpsPermission('dispatch.assign'), dispatchController.batchAssignOrders);
+router.post('/auto-assign', requireRiderOpsPermission('dispatch.auto_assign'), conditionalValidateAutoAssign, dispatchController.autoAssignOrders);
+router.post('/auto-assign/simulate', requireRiderOpsPermission('dispatch.auto_assign'), dispatchController.simulateAutoAssign);
 
 // Manual Order Creation
-router.post('/manual-order', dispatchController.createManualOrder);
+router.post('/manual-order', requireRiderOpsPermission('dispatch.assign'), dispatchController.createManualOrder);
 
 // Auto-assign Rules (GET/PUT)
 router.get('/auto-assign-rules', dispatchController.getAutoAssignRules);
-router.put('/auto-assign-rules', dispatchController.updateAutoAssignRule);
+router.put('/auto-assign-rules', requireRiderOpsPermission('dispatch.auto_assign'), dispatchController.updateAutoAssignRule);
 
 module.exports = router;

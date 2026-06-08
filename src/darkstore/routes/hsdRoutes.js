@@ -17,13 +17,15 @@ const {
   sessionAction,
   createRequisition,
   getHSDUserList,
+  getHsdUserDeviceOtp,
+  generateHsdUserDeviceOtp,
 } = require('../controllers/hsdController');
 
 // GET /api/darkstore/hsd/fleet
 router.get('/fleet', getFleetOverview);
 
-// GET /api/darkstore/hsd/users — HSD User List (Device Management)
-router.get('/users', getHsdUsers);
+// GET /api/darkstore/hsd/picker-users — pickers with device assignment (legacy)
+router.get('/picker-users', getHsdUsers);
 
 // POST /api/darkstore/hsd/devices/register
 router.post('/devices/register', registerDevice);
@@ -60,6 +62,12 @@ router.get('/logs', getHSDLogs);
 
 // GET /api/darkstore/hsd/users — HSD User List (login sessions)
 router.get('/users', getHSDUserList);
+
+// GET /api/darkstore/hsd/users/:userId/device-request-otp — active 6-digit approval OTP
+router.get('/users/:userId/device-request-otp', getHsdUserDeviceOtp);
+
+// POST /api/darkstore/hsd/users/:userId/generate-device-otp — generate 6-digit approval OTP
+router.post('/users/:userId/generate-device-otp', generateHsdUserDeviceOtp);
 
 // POST /api/darkstore/hsd/sessions/:deviceId/action
 router.post('/sessions/:deviceId/action', sessionAction);

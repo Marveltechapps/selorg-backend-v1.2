@@ -443,9 +443,203 @@ const exportReport = async (payload) => {
   }
 };
 
+/**
+ * Drill-down detail for a chart bucket (orders / breaches for timestamp)
+ */
+const getDrillDown = async ({ metric = 'rider', timestamp, granularity = 'day' }) => {
+  if (!timestamp) {
+    const err = new Error('timestamp is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const bucketStart = new Date(timestamp);
+  const bucketEnd = new Date(bucketStart);
+  if (granularity === 'hour') {
+    bucketEnd.setHours(bucketEnd.getHours() + 1);
+  } else if (granularity === 'week') {
+    bucketEnd.setDate(bucketEnd.getDate() + 7);
+  } else {
+    bucketEnd.setDate(bucketEnd.getDate() + 1);
+  }
+
+  if (metric === 'sla') {
+    const orders = await Order.find({
+      slaDeadline: { $gte: bucketStart, $lt: bucketEnd },
+      status: { $nin: ['delivered', 'cancelled'] },
+    })
+      .select('id status riderId customerName slaDeadline createdAt')
+      .limit(100)
+      .lean();
+    return {
+      metric,
+      timestamp: bucketStart.toISOString(),
+      label: 'SLA breaches & at-risk orders',
+      rows: orders.map((o) => ({
+        id: o.id || String(o._id),
+        status: o.status,
+        riderId: o.riderId,
+        customerName: o.customerName,
+        slaDeadline: o.slaDeadline,
+      })),
+      total: orders.length,
+    };
+  }
+
+  const orders = await Order.find({
+    $or: [
+      { completedAt: { $gte: bucketStart, $lt: bucketEnd } },
+      { createdAt: { $gte: bucketStart, $lt: bucketEnd } },
+    ],
+  })
+    .select('id status riderId customerName createdAt completedAt')
+    .limit(100)
+    .lean();
+
+  return {
+    metric,
+    timestamp: bucketStart.toISOString(),
+    label: metric === 'fleet' ? 'Fleet-active deliveries' : 'Deliveries in period',
+    rows: orders.map((o) => ({
+      id: o.id || String(o._id),
+      status: o.status,
+      riderId: o.riderId,
+      customerName: o.customerName,
+      createdAt: o.createdAt,
+      completedAt: o.completedAt,
+    })),
+    total: orders.length,
+  };
+};
+
+const AnalyticsReportSchedule = require('../models/AnalyticsReportSchedule');
+
+/** Hub-level delivery comparison for ops analytics */
+const getHubComparison = async (params = {}) => {
+  const { start, end } = resolveDateRange(params);
+  const orders = await Order.find({
+    createdAt: { $gte: start, $lte: end },
+  })
+    .select('id status storeId hubId zone createdAt completedAt slaDeadline')
+    .lean();
+
+  const byHub = {};
+  for (const o of orders) {
+    const hub = o.hubId || o.storeId || o.zone || 'default';
+    if (!byHub[hub]) {
+      byHub[hub] = { hubId: hub, orders: 0, delivered: 0, breaches: 0, avgAssignMins: 0, assignSamples: 0 };
+    }
+    byHub[hub].orders += 1;
+    if (o.status === 'delivered') byHub[hub].delivered += 1;
+    if (o.slaDeadline && new Date(o.slaDeadline) < end && o.status !== 'delivered') {
+      byHub[hub].breaches += 1;
+    }
+  }
+
+  return Object.values(byHub).map((h) => ({
+    hubId: h.hubId,
+    orders: h.orders,
+    delivered: h.delivered,
+    onTimePercent: h.orders ? parseFloat(((h.delivered / h.orders) * 100).toFixed(1)) : 0,
+    slaBreaches: h.breaches,
+  }));
+};
+
+/** Top riders by completed deliveries in period */
+const getRiderLeaderboard = async (params = {}) => {
+  const { start, end } = resolveDateRange(params);
+  const limit = Math.min(parseInt(params.limit, 10) || 10, 50);
+  const orders = await Order.find({
+    status: 'delivered',
+    completedAt: { $gte: start, $lte: end },
+    riderId: { $exists: true, $ne: null },
+  })
+    .select('riderId riderName')
+    .lean();
+
+  const counts = {};
+  for (const o of orders) {
+    const id = o.riderId;
+    if (!counts[id]) counts[id] = { riderId: id, riderName: o.riderName || id, deliveries: 0 };
+    counts[id].deliveries += 1;
+  }
+
+  return Object.values(counts)
+    .sort((a, b) => b.deliveries - a.deliveries)
+    .slice(0, limit);
+};
+
+/** Dispatch efficiency KPIs */
+const getDispatchEfficiency = async (params = {}) => {
+  const { start, end } = resolveDateRange(params);
+  const orders = await Order.find({ createdAt: { $gte: start, $lte: end } })
+    .select('id status riderId createdAt timeline')
+    .lean();
+
+  let assigned = 0;
+  let unassigned = 0;
+  let assignMinutesTotal = 0;
+  let assignSamples = 0;
+
+  for (const o of orders) {
+    if (o.riderId) {
+      assigned += 1;
+      const created = o.createdAt ? new Date(o.createdAt) : null;
+      const assignEvent = (o.timeline || []).find((t) => t.status === 'assigned');
+      if (created && assignEvent?.time) {
+        assignMinutesTotal += (new Date(assignEvent.time) - created) / 60000;
+        assignSamples += 1;
+      }
+    } else if (['pending', 'new', 'ready_for_dispatch', 'unassigned'].includes(o.status)) {
+      unassigned += 1;
+    }
+  }
+
+  const total = orders.length || 1;
+  return {
+    totalOrders: orders.length,
+    assignedCount: assigned,
+    unassignedCount: unassigned,
+    autoAssignSuccessRate: parseFloat(((assigned / total) * 100).toFixed(1)),
+    avgTimeToAssignMinutes: assignSamples
+      ? parseFloat((assignMinutesTotal / assignSamples).toFixed(1))
+      : 0,
+  };
+};
+
+function computeNextRun(frequency) {
+  const next = new Date();
+  if (frequency === 'daily') next.setDate(next.getDate() + 1);
+  else if (frequency === 'monthly') next.setMonth(next.getMonth() + 1);
+  else next.setDate(next.getDate() + 7);
+  next.setHours(8, 0, 0, 0);
+  return next;
+}
+
+const createReportSchedule = async (payload, userId) => {
+  const doc = await AnalyticsReportSchedule.create({
+    ...payload,
+    createdBy: userId || 'system',
+    nextRunAt: computeNextRun(payload.frequency || 'weekly'),
+  });
+  return doc.toObject();
+};
+
+const listReportSchedules = async (userId) => {
+  const query = userId ? { createdBy: userId, active: true } : { active: true };
+  return AnalyticsReportSchedule.find(query).sort({ createdAt: -1 }).limit(50).lean();
+};
+
 module.exports = {
   getRiderPerformance,
   getSlaAdherence,
   getFleetUtilization,
   exportReport,
+  getDrillDown,
+  createReportSchedule,
+  listReportSchedules,
+  computeNextRun,
+  getHubComparison,
+  getRiderLeaderboard,
+  getDispatchEfficiency,
 };

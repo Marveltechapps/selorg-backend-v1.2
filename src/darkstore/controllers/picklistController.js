@@ -10,7 +10,7 @@ const Picker = require('../models/Picker');
 const PackingOrder = require('../models/PackingOrder');
 const PackingOrderItem = require('../models/PackingOrderItem');
 
-const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+const { requireStoreId } = require('../utils/resolveStoreId');
 const ZONES = ['Ambient A', 'Ambient B', 'Chiller', 'Frozen'];
 
 function toFrontendPicklist(doc, pickerDoc) {
@@ -40,7 +40,8 @@ function toFrontendPicklist(doc, pickerDoc) {
  */
 const getPicklists = async (req, res) => {
   try {
-    const storeId = req.query.storeId || DEFAULT_STORE;
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const { status, zone, priority, page = 1, limit = 100 } = req.query;
     const query = { store_id: storeId };
     if (status && status !== 'all') query.status = status;
@@ -89,7 +90,8 @@ const getPicklists = async (req, res) => {
  */
 const createPicklist = async (req, res) => {
   try {
-    const storeId = req.body.storeId || req.query.storeId || DEFAULT_STORE;
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const { zone, priority = 'normal', type = 'auto', orders } = req.body;
 
     const count = await Picklist.countDocuments({ store_id: storeId });
@@ -324,7 +326,8 @@ const assignPicker = async (req, res) => {
 const moveToPacking = async (req, res) => {
   try {
     const { picklistId } = req.params;
-    const storeId = req.body?.storeId || req.query.storeId || DEFAULT_STORE;
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
 
     const picklist = await Picklist.findOne({ picklist_id: picklistId }).lean();
     if (!picklist) return res.status(404).json({ success: false, error: 'Picklist not found' });
@@ -334,7 +337,8 @@ const moveToPacking = async (req, res) => {
     const pickerName = picklist.picker_id ? (await Picker.findOne({ id: picklist.picker_id }).lean())?.name : null;
 
     if (picklistOrders.length === 0) {
-      const orderId = `ORD-${9000 + Math.floor(Math.random() * 999)}`;
+      const packCount = await PackingOrder.countDocuments({ store_id: storeId });
+      const orderId = `ORD-PK-${picklistId.replace(/[^A-Z0-9]/gi, '')}-${packCount + 1}`;
       await PackingOrder.create({
         order_id: orderId,
         customer_name: 'Customer',

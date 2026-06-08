@@ -196,6 +196,19 @@ function toCsvCell(value) {
   return str;
 }
 
+async function getAttendanceByMonth(req, res, next) {
+  try {
+    const { month, agencyId } = req.query;
+    const rows = await pickerOpsService.getAttendanceByMonth({
+      month: String(month || ''),
+      agencyId: agencyId && String(agencyId) !== 'all' ? String(agencyId) : null,
+    });
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function exportAttendanceCsv(req, res, next) {
   try {
     const { month, agencyId } = req.query;
@@ -275,6 +288,7 @@ module.exports = {
   decideOtRequest,
   listShiftChangeRequests,
   decideShiftChangeRequest,
+  getAttendanceByMonth,
   exportAttendanceCsv,
   sendPickerPush,
 };

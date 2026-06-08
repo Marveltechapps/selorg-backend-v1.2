@@ -199,6 +199,12 @@ app.use(xss());
 const compression = require('compression');
 app.use(compression());
 
+// Local uploads (picker/HHD docs when not on S3)
+const uploadsDir = process.env.UPLOAD_PATH || path.join(rootDir, 'uploads');
+if (fs.existsSync(uploadsDir)) {
+  app.use('/uploads', express.static(path.resolve(uploadsDir)));
+}
+
 // Body parser with size limits
 app.use(
   express.json({
@@ -313,6 +319,29 @@ app.use(
   authenticateToken,
   requireRole('rider', 'admin', 'super_admin'),
   riderDashboardNotificationRoutes
+);
+
+// Fleet ops routes — always mounted for dashboard regardless of USE_LEGACY_RIDER / v2 stack.
+const overviewController = require('./rider/controllers/overviewController');
+const legacyDispatchRoutes = require('./rider/routes/dispatchRoutes');
+const legacyFleetRoutes = require('./rider/routes/fleetRoutes');
+const riderDashboardCountsRoutes = require('./rider/routes/dashboardCountsRoutes');
+const riderAuditRoutes = require('./rider/routes/auditRoutes');
+
+app.get('/api/v1/rider/summary', overviewController.getSummary);
+app.use('/api/v1/rider/dispatch', legacyDispatchRoutes);
+app.use('/api/v1/rider/fleet', legacyFleetRoutes);
+app.use(
+  '/api/v1/rider/dashboard',
+  authenticateToken,
+  requireRole('rider', 'admin', 'super_admin'),
+  riderDashboardCountsRoutes
+);
+app.use(
+  '/api/v1/rider/audit',
+  authenticateToken,
+  requireRole('rider', 'admin', 'super_admin'),
+  riderAuditRoutes
 );
 
 const supportChatRoutes = require('./support-chat/supportChat.routes');
@@ -476,6 +505,13 @@ if (process.env.NODE_ENV !== 'test') {
       logger.info('Worldline reconciliation job started (interval: 5m)');
     } catch (wlJobErr) {
       logger.warn('Worldline reconciliation job failed to start', { error: wlJobErr?.message });
+    }
+
+    try {
+      const { startAnalyticsReportJob } = require('./shared/jobs/analyticsReportJob');
+      startAnalyticsReportJob();
+    } catch (analyticsJobErr) {
+      logger.warn('Analytics report job failed to start', { error: analyticsJobErr?.message });
     }
   }).on('error', (err) => {
     if (err.code === 'EADDRINUSE') {

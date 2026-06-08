@@ -106,10 +106,79 @@ const exportReport = async (req, res, next) => {
   }
 };
 
+const getDrillDown = async (req, res, next) => {
+  try {
+    const result = await analyticsService.getDrillDown({
+      metric: req.query.metric || 'rider',
+      timestamp: req.query.timestamp,
+      granularity: req.query.granularity || 'day',
+    });
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    if (error.statusCode === 400) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    next(error);
+  }
+};
+
+const scheduleReport = async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.user?.email || 'rider_ops';
+    const doc = await analyticsService.createReportSchedule(req.body, userId);
+    res.status(201).json({ success: true, data: doc });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const listSchedules = async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.user?.email;
+    const rows = await analyticsService.listReportSchedules(userId);
+    res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getHubComparison = async (req, res, next) => {
+  try {
+    const data = await analyticsService.getHubComparison(req.query);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getRiderLeaderboard = async (req, res, next) => {
+  try {
+    const data = await analyticsService.getRiderLeaderboard(req.query);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getDispatchEfficiency = async (req, res, next) => {
+  try {
+    const data = await analyticsService.getDispatchEfficiency(req.query);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getRiderPerformance,
   getSlaAdherence,
   getFleetUtilization,
   exportReport,
+  getDrillDown,
+  scheduleReport,
+  listSchedules,
+  getHubComparison,
+  getRiderLeaderboard,
+  getDispatchEfficiency,
 };
 

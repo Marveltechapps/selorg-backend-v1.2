@@ -56,7 +56,8 @@ router.post('/ot-requests/:requestId/decision', ...adminOrWorkforce, pickerOpsCo
 router.get('/shift-change-requests', ...adminOrWorkforce, pickerOpsController.listShiftChangeRequests);
 router.post('/shift-change-requests/:requestId/decision', ...adminOrWorkforce, pickerOpsController.decideShiftChangeRequest);
 
-// Attendance export (CSV)
+// Attendance summary + CSV export
+router.get('/attendance', ...adminOrWorkforce, pickerOpsController.getAttendanceByMonth);
 router.get('/attendance/export', ...adminOrWorkforce, pickerOpsController.exportAttendanceCsv);
 
 module.exports = router;

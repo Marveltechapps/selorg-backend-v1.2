@@ -122,11 +122,27 @@ const getOrders = async (req, res) => {
  */
 const getOrderById = async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const storeId = req.query.storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
-    const order = await Order.findOne({ order_id: orderId, store_id: storeId }).lean();
+    const orderId = String(req.params.orderId || '').trim();
+    if (!orderId) {
+      return res.status(400).json({ success: false, error: 'Order ID is required' });
+    }
+
+    const requestedStore = String(req.query.storeId || '').trim();
+    const order = await Order.findOne({ order_id: orderId }).lean();
     if (!order) {
       return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+
+    if (requestedStore && requestedStore !== order.store_id) {
+      const role = req.user?.role || req.user?.roleId || '';
+      const assignedStores = Array.isArray(req.user?.assignedStores) ? req.user.assignedStores : [];
+      const canAccessStore =
+        role === 'super_admin' ||
+        role === 'admin' ||
+        assignedStores.includes(order.store_id);
+      if (!canAccessStore) {
+        return res.status(404).json({ success: false, error: 'Order not found' });
+      }
     }
 
     let items = order.items || [];
@@ -187,8 +203,7 @@ const callCustomer = async (req, res) => {
     
     const callId = generateId('CALL');
     
-    // Generate random phone number for history
-    const calledNumber = `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+    const calledNumber = order.customer_phone || order.delivery_phone || '';
     
     // Create customer call record
     const customerCall = new CustomerCall({
@@ -272,6 +287,8 @@ const markRTO = async (req, res) => {
     
     await order.save();
     
+    const performedBy = req.user?.name || req.user?.email || req.user?.userId || 'system';
+
     // Save action history
     const alertHistory = new AlertHistory({
       entity_type: 'ORDER',
@@ -284,11 +301,31 @@ const markRTO = async (req, res) => {
         rto_status: rto_status || 'marked_rto',
         reason: reason || 'Customer unreachable',
         notes: notes || '',
+        performed_by: performedBy,
       },
-      performed_by: 'system',
+      performed_by: performedBy,
       store_id: order.store_id,
     });
     await alertHistory.save();
+
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        id: generateId('AUD'),
+        timestamp: new Date().toISOString(),
+        store_id: order.store_id,
+        module: 'compliance',
+        action: 'EXCEPTION_RESOLVED_MARK_RTO',
+        action_type: 'update',
+        user: performedBy,
+        details: {
+          order_id: orderId,
+          reason: reason || 'Customer unreachable',
+          notes: notes || '',
+          previous_status: previousStatus,
+        },
+      });
+    } catch (auditErr) { /* non-blocking */ }
     
     // Mark RTO alert as resolved
     await RTOAlert.updateMany(

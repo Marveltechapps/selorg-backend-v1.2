@@ -699,6 +699,76 @@ async function listRiderShifts(riderId, { date, status } = {}) {
     });
 }
 
+async function resolveShiftRecord(shiftIdOrMongoId) {
+  if (!shiftIdOrMongoId) return null;
+  const byStringId = await RiderShift.findOne({ id: shiftIdOrMongoId });
+  if (byStringId) return byStringId;
+  if (String(shiftIdOrMongoId).match(/^[a-f0-9]{24}$/i)) {
+    return RiderShift.findById(shiftIdOrMongoId);
+  }
+  return null;
+}
+
+async function getShiftAssignments(shiftId) {
+  const shift = await resolveShiftRecord(shiftId);
+  if (!shift) {
+    const error = new Error('Shift not found');
+    error.code = 'SHIFT_NOT_FOUND';
+    throw error;
+  }
+
+  const assignments = await RiderShiftAssignment.find({ shiftId: shift._id })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const riderIds = [...new Set(assignments.map((a) => a.riderId))];
+  const RiderHR = require('../models/RiderHR');
+  const riders = await RiderHR.find({ id: { $in: riderIds } })
+    .select('id name phone email status')
+    .lean();
+  const riderMap = new Map(riders.map((r) => [r.id, r]));
+
+  return {
+    shift: toShiftDto(shift),
+    assignments: assignments.map((a) => ({
+      id: String(a._id),
+      riderId: a.riderId,
+      riderName: riderMap.get(a.riderId)?.name || a.riderId,
+      riderPhone: riderMap.get(a.riderId)?.phone || null,
+      riderStatus: riderMap.get(a.riderId)?.status || null,
+      status: a.status,
+      date: formatDateOnly(a.date),
+      startedAt: a.startedAt ? a.startedAt.toISOString() : null,
+      endedAt: a.endedAt ? a.endedAt.toISOString() : null,
+      createdAt: a.createdAt ? a.createdAt.toISOString() : null,
+    })),
+    summary: {
+      total: assignments.length,
+      selected: assignments.filter((a) => a.status === 'selected').length,
+      started: assignments.filter((a) => a.status === 'started').length,
+      completed: assignments.filter((a) => a.status === 'completed').length,
+      cancelled: assignments.filter((a) => a.status === 'cancelled').length,
+      capacity: shift.capacity,
+      available: Math.max(0, shift.capacity - (shift.bookedCount ?? assignments.filter((a) => ['selected', 'started'].includes(a.status)).length)),
+    },
+  };
+}
+
+async function adminAssignRider(shiftId, riderId) {
+  if (!riderId) {
+    const error = new Error('Missing riderId');
+    error.code = 'MISSING_RIDER_ID';
+    throw error;
+  }
+  await selectShifts(riderId, [shiftId]);
+  return getShiftAssignments(shiftId);
+}
+
+async function adminUnassignRider(shiftId, riderId) {
+  await cancelShiftSelection(riderId, shiftId);
+  return getShiftAssignments(shiftId);
+}
+
 module.exports = {
   createShift,
   getShiftById,
@@ -712,5 +782,8 @@ module.exports = {
   startShift,
   endShift,
   listRiderShifts,
+  getShiftAssignments,
+  adminAssignRider,
+  adminUnassignRider,
 };
 

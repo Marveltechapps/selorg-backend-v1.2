@@ -9,6 +9,7 @@ const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const pickerMetricsService = require('../services/pickerMetricsService');
 const { deriveWorkerStatus } = require('../../picker/controllers/heartbeat.controller');
 const { getPickerIdsInActiveShift } = require('../services/activeShiftHelper');
+const { buildPickerUserStoreFilter } = require('../services/pickerStoreFilter.service');
 const pickerDarkStoreService = require('../../picker/services/pickerDarkStore.service');
 
 const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
@@ -38,10 +39,8 @@ const getPickersLive = async (req, res) => {
 
     const baseQuery = { status: PICKER_STATUS.ACTIVE };
     if (storeId) {
-      baseQuery.$or = [
-        { currentLocationId: String(storeId) },
-        ...(mongoose.Types.ObjectId.isValid(storeId) ? [{ storeId }] : []),
-      ];
+      const storeFilter = await buildPickerUserStoreFilter(storeId);
+      if (storeFilter) Object.assign(baseQuery, storeFilter);
     }
 
     const [pickers, inShiftIds] = await Promise.all([
@@ -189,11 +188,14 @@ const getAvailablePickers = async (req, res) => {
   try {
     const storeId = req.query.storeId || null;
     const query = { status: PICKER_STATUS.ACTIVE };
-    if (storeId) query.currentLocationId = storeId;
+    if (storeId) {
+      const storeFilter = await buildPickerUserStoreFilter(storeId);
+      if (storeFilter) Object.assign(query, storeFilter);
+    }
 
     const [pickers, inShiftIds] = await Promise.all([
       PickerUser.find(query)
-        .select('name phone lastSeenAt activeOrderId')
+        .select('name phone lastSeenAt activeOrderId onBreak')
         .lean(),
       getPickerIdsInActiveShift(),
     ]);
@@ -208,7 +210,9 @@ const getAvailablePickers = async (req, res) => {
           id: String(p._id),
           name: p.name || p.phone || 'Unknown',
           avatar: (p.name || p.phone || '?').slice(0, 2).toUpperCase(),
-          status: online ? (p.activeOrderId ? 'busy' : 'available') : 'offline',
+          status: !online ? 'offline' : p.activeOrderId ? 'busy' : 'available',
+          derivedStatus,
+          inShift: true,
         };
       });
 

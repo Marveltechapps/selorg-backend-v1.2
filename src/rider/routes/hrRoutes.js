@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { authenticateToken, requireRole } = require('../../core/middleware');
+const { requireRiderOpsPermission } = require('../middleware/riderOpsPermissions');
 
 // Controllers
 const hrController = require('../controllers/hrController');
@@ -10,13 +12,15 @@ const complianceController = require('../controllers/complianceController');
 const contractController = require('../controllers/contractController');
 const riderHrController = require('../controllers/riderHrController');
 
+const fleetAuth = [authenticateToken, requireRole('rider', 'admin', 'super_admin')];
+
 // HR Dashboard
-router.get('/dashboard/summary', hrController.getHrDashboardSummary);
+router.get('/dashboard/summary', ...fleetAuth, hrController.getHrDashboardSummary);
 
 // Documents
-router.get('/documents', documentController.listDocuments);
-router.get('/documents/:documentId', documentController.getDocumentDetails);
-router.put('/documents/:documentId', documentController.reviewDocument);
+router.get('/documents', ...fleetAuth, documentController.listDocuments);
+router.get('/documents/:documentId', ...fleetAuth, documentController.getDocumentDetails);
+router.put('/documents/:documentId', ...fleetAuth, requireRiderOpsPermission('hr.approve'), documentController.reviewDocument);
 router.get('/documents/:documentId/download', documentController.downloadDocument);
 router.get('/documents/:documentId/rejection-reason', documentController.getDocumentRejectionReason);
 router.get('/documents/:documentId/history', documentController.getDocumentHistory);

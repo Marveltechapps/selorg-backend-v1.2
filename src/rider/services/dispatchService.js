@@ -933,7 +933,8 @@ const assignOrder = async (orderId, riderId, overrideSla = false) => {
 /**
  * Batch assign multiple orders
  */
-const batchAssignOrders = async (orderIds = null) => {
+const batchAssignOrders = async (orderIds = null, options = {}) => {
+  const { dryRun = false } = options;
   try {
     // Find unassigned orders
     let unassignedOrders;
@@ -1025,6 +1026,21 @@ const batchAssignOrders = async (orderIds = null) => {
       }
 
       if (bestRider) {
+        if (dryRun) {
+          assignments.push({
+            orderId: order.id,
+            riderId: bestRider.id,
+            riderName: bestRider.name,
+            status: 'would_assign',
+            reason: null,
+          });
+          assignedCount++;
+          const riderIndex = availableRiders.findIndex((r) => r.id === bestRider.id);
+          if (riderIndex !== -1) {
+            availableRiders[riderIndex].capacity.currentLoad += 1;
+          }
+          continue;
+        }
         try {
           // Assign order
           const orderDoc = await Order.findOne({ id: order.id });
@@ -1089,6 +1105,19 @@ const batchAssignOrders = async (orderIds = null) => {
     logger.error('Error in batch assign:', error);
     throw error;
   }
+};
+
+const simulateAutoAssignOrders = async (orderIds = null) => {
+  const enabled = await isAutoAssignEnabled();
+  const result = await batchAssignOrders(orderIds, { dryRun: true });
+  return {
+    ...result,
+    disabled: !enabled,
+    simulation: true,
+    message: enabled
+      ? `Simulation: ${result.assigned} order(s) would be assigned`
+      : 'Auto-assign is disabled in rules configuration',
+  };
 };
 
 /**
@@ -1872,6 +1901,7 @@ module.exports = {
   assignOrder,
   batchAssignOrders,
   autoAssignOrders,
+  simulateAutoAssignOrders,
   createManualOrder,
   getAutoAssignRules,
   updateAutoAssignRule,

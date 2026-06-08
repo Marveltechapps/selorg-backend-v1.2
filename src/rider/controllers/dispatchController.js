@@ -1,6 +1,7 @@
 const dispatchService = require('../services/dispatchService');
 const orderService = require('../../warehouse/services/orderService');
 const riderDashboardNotificationService = require('../services/riderDashboardNotificationService');
+const riderAuditService = require('../services/riderAuditService');
 const cache = require('../../utils/cache');
 const logger = require('../../core/utils/logger');
 
@@ -169,6 +170,13 @@ const assignOrder = async (req, res, next) => {
       })
       .catch((err) => logger.warn('Rider dashboard notification (dispatch assign) failed', { err: err.message }));
 
+    riderAuditService
+      .logRiderOpsAction(req, 'order.assign', 'order', order.id, {
+        riderId,
+        overrideSla: overrideSla || false,
+      })
+      .catch(() => {});
+
     res.status(200).json({
       orderId: order.id,
       riderId: order.riderId,
@@ -253,6 +261,20 @@ const autoAssignOrders = async (req, res, next) => {
     res.status(200).json(result);
   } catch (error) {
     logger.error('Error in autoAssignOrders controller:', error);
+    next(error);
+  }
+};
+
+/**
+ * Simulate auto-assign (dry run — no DB writes)
+ */
+const simulateAutoAssign = async (req, res, next) => {
+  try {
+    const { orderIds } = req.body || {};
+    const result = await dispatchService.simulateAutoAssignOrders(orderIds || []);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    logger.error('Error in simulateAutoAssign controller:', error);
     next(error);
   }
 };
@@ -476,6 +498,7 @@ module.exports = {
   assignOrder,
   batchAssignOrders,
   autoAssignOrders,
+  simulateAutoAssign,
   createManualOrder,
   getAutoAssignRules,
   updateAutoAssignRule,

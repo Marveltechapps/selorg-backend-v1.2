@@ -1,7 +1,14 @@
 const HSDUserLogin = require('../models/HSDUserLogin');
 const Device = require('../models/Device');
+const PickerUser = require('../../picker/models/user.model');
+const HHDUser = require('../../hhd/models/User.model');
+const { PICKER_STATUS } = require('../../constants/pickerEnums');
+const { getHhdUserIdForPickerUser } = require('../../picker/helpers/hhdLink.helper');
 const { generateId } = require('../../utils/helpers');
 const logger = require('../../core/utils/logger');
+
+/** Match picker heartbeat offline threshold (see heartbeat.controller.js). */
+const HEARTBEAT_OFFLINE_THRESHOLD_MS = 60 * 1000;
 
 const SESSION_INACTIVITY_MS =
   parseInt(process.env.HSD_SESSION_INACTIVITY_HOURS || '12', 10) * 60 * 60 * 1000;
@@ -306,6 +313,99 @@ function transformLoginRow(row) {
 }
 
 /**
+ * When no login rows exist for a store, seed sessions from active pickers / HHD users.
+ */
+async function backfillSessionsForStore(storeId) {
+  const resolvedStoreId =
+    storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+
+  const existing = await HSDUserLogin.countDocuments({ store_id: resolvedStoreId });
+  if (existing > 0) return;
+
+  const now = Date.now();
+  const devices = await Device.find({
+    store_id: resolvedStoreId,
+    'assigned_to.userId': { $exists: true, $ne: null },
+  })
+    .select('device_id assigned_to')
+    .lean();
+
+  const pickers = await PickerUser.find({ status: PICKER_STATUS.ACTIVE })
+    .select('name phone hhdUserId lastSeenAt')
+    .lean();
+
+  for (const picker of pickers) {
+    const pickerId = String(picker._id);
+    const hhdUserId = await getHhdUserIdForPickerUser(pickerId);
+    if (!hhdUserId) continue;
+
+    const lastSeenMs = picker.lastSeenAt ? new Date(picker.lastSeenAt).getTime() : 0;
+    const hhdUser = picker.hhdUserId
+      ? await HHDUser.findById(picker.hhdUserId).select('mobile name lastLogin deviceId').lean()
+      : await HHDUser.findById(hhdUserId).select('mobile name lastLogin deviceId').lean();
+    const lastLoginMs = hhdUser?.lastLogin ? new Date(hhdUser.lastLogin).getTime() : 0;
+    const isActive =
+      (lastSeenMs && now - lastSeenMs < HEARTBEAT_OFFLINE_THRESHOLD_MS) ||
+      (lastLoginMs && now - lastLoginMs < HEARTBEAT_OFFLINE_THRESHOLD_MS);
+    if (!isActive) continue;
+
+    const phone = String(picker.phone || hhdUser?.mobile || '')
+      .replace(/\D/g, '')
+      .slice(-10);
+    if (!phone) continue;
+
+    const assignedDevice = devices.find(
+      (d) => d.assigned_to?.userId && String(d.assigned_to.userId) === pickerId
+    );
+
+    try {
+      await touchOrEnsureActiveSession({
+        userId: String(hhdUserId),
+        phoneNumber: phone,
+        userName: picker.name || hhdUser?.name || null,
+        deviceId: assignedDevice?.device_id || hhdUser?.deviceId || null,
+        storeId: resolvedStoreId,
+        source: 'dashboard',
+      });
+    } catch (err) {
+      logger.warn(`[HSDUserLogin] Backfill skipped for picker ${pickerId}: ${err.message}`);
+    }
+  }
+
+  const recentHhdUsers = await HHDUser.find({
+    isActive: true,
+    lastLogin: { $gte: new Date(now - HEARTBEAT_OFFLINE_THRESHOLD_MS) },
+  })
+    .select('mobile name lastLogin deviceId')
+    .lean();
+
+  for (const hhd of recentHhdUsers) {
+    const phone = String(hhd.mobile || '')
+      .replace(/\D/g, '')
+      .slice(-10);
+    if (!phone) continue;
+    const hasSession = await HSDUserLogin.exists({
+      store_id: resolvedStoreId,
+      user_id: String(hhd._id),
+      status: 'active',
+    });
+    if (hasSession) continue;
+    try {
+      await touchOrEnsureActiveSession({
+        userId: String(hhd._id),
+        phoneNumber: phone,
+        userName: hhd.name || null,
+        deviceId: hhd.deviceId || null,
+        storeId: resolvedStoreId,
+        source: 'hhd',
+      });
+    } catch (err) {
+      logger.warn(`[HSDUserLogin] Backfill skipped for HHD user ${hhd._id}: ${err.message}`);
+    }
+  }
+}
+
+/**
  * Paginated list for dashboard.
  */
 async function getHSDUserList({
@@ -319,6 +419,7 @@ async function getHSDUserList({
     storeId || process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
 
   await expireStaleSessions(resolvedStoreId);
+  await backfillSessionsForStore(resolvedStoreId);
 
   const legacyFilter = {
     store_id: resolvedStoreId,
@@ -381,6 +482,7 @@ module.exports = {
   touchSessionActivity,
   touchOrEnsureActiveSession,
   expireStaleSessions,
+  backfillSessionsForStore,
   getHSDUserList,
   transformLoginRow,
 };

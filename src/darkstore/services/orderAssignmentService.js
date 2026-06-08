@@ -7,6 +7,7 @@ const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const { deriveWorkerStatus } = require('../../picker/controllers/heartbeat.controller');
 const { WORKER_STATUS } = require('../../constants/pickerEnums');
 const { getPickerIdsInActiveShift } = require('./activeShiftHelper');
+const { buildPickerUserStoreFilter } = require('./pickerStoreFilter.service');
 
 const HEARTBEAT_OFFLINE_MS = 60 * 1000;
 
@@ -23,7 +24,10 @@ function getStrategy() {
  */
 async function getAvailablePickers(storeId = null) {
   const query = { status: PICKER_STATUS.ACTIVE };
-  if (storeId) query.currentLocationId = storeId;
+  if (storeId) {
+    const storeFilter = await buildPickerUserStoreFilter(storeId);
+    if (storeFilter) Object.assign(query, storeFilter);
+  }
 
   const [pickers, inShiftIds] = await Promise.all([
     PickerUser.find(query)
@@ -33,19 +37,30 @@ async function getAvailablePickers(storeId = null) {
   ]);
 
   const now = Date.now();
-  return pickers
-    .filter((p) => inShiftIds.has(String(p._id)))
-    .filter((p) => {
-      const status = deriveWorkerStatus(p, now);
-      return status === WORKER_STATUS.AVAILABLE || status === WORKER_STATUS.PICKING;
-    })
-    .map((p) => ({
-      id: String(p._id),
-      name: p.name || p.phone || 'Unknown',
-      activeOrderId: p.activeOrderId || null,
-      lastSeenAt: p.lastSeenAt,
-      storeId: p.currentLocationId,
-    }));
+  const inShift = pickers.filter((p) => inShiftIds.has(String(p._id)));
+  const toRow = (p) => ({
+    id: String(p._id),
+    name: p.name || p.phone || 'Unknown',
+    activeOrderId: p.activeOrderId || null,
+    lastSeenAt: p.lastSeenAt,
+    storeId: p.currentLocationId,
+  });
+
+  const onlineEligible = inShift.filter((p) => {
+    const status = deriveWorkerStatus(p, now);
+    return status === WORKER_STATUS.AVAILABLE || status === WORKER_STATUS.PICKING;
+  });
+  if (onlineEligible.length > 0) {
+    return onlineEligible.map(toRow);
+  }
+
+  // Punched in but no recent heartbeat — still allow auto-assign (manual list already does).
+  const fallbackDisabled = String(process.env.ORDER_AUTO_ASSIGN_FALLBACK_PUNCHED_IN || 'true').toLowerCase() === 'false';
+  if (fallbackDisabled) return [];
+
+  return inShift
+    .filter((p) => deriveWorkerStatus(p, now) !== WORKER_STATUS.ON_BREAK)
+    .map(toRow);
 }
 
 /**

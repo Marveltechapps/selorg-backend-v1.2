@@ -13,6 +13,7 @@ const { PICKER_STATUS } = require('../../constants/pickerEnums');
 const {
   getActiveDeviceRequestOtpsByPickerIds,
 } = require('../../picker/services/managerOtp.service');
+const { resolveMediaUrl } = require('../../utils/resolveMediaUrl');
 
 /**
  * Derive docs status from picker_documents (aadhar front/back, pan front/back)
@@ -224,7 +225,7 @@ async function getPickerById(id) {
   docs.forEach((d) => {
     if (documents[d.docType]) {
       documents[d.docType][d.side] = {
-        url: d.url,
+        url: resolveMediaUrl(d.url),
         status: d.status || 'pending',
         rejectionReason: d.rejectionReason || null,
         reviewedAt: d.reviewedAt || null,
@@ -269,7 +270,7 @@ async function getPickerById(id) {
     email: picker.email,
     age: picker.age,
     gender: picker.gender,
-    photoUri: picker.photoUri,
+    photoUri: resolveMediaUrl(picker.photoUri),
     locationType: picker.locationType,
     currentLocationId: resolvedLocId || picker.currentLocationId || null,
     locationName: workLoc?.name || (resolvedLocId ? resolvedLocId : null) || picker.currentLocationId || null,

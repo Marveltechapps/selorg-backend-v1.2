@@ -6,7 +6,7 @@
 const PackingOrder = require('../models/PackingOrder');
 const PackingOrderItem = require('../models/PackingOrderItem');
 
-const DEFAULT_STORE = process.env.DEFAULT_STORE_ID || 'DS-Adyar-01';
+const { requireStoreId } = require('../utils/resolveStoreId');
 
 function toQueueItem(doc) {
   if (!doc) return null;
@@ -51,7 +51,8 @@ function toOrderDetails(orderDoc, items) {
  */
 const getPackQueue = async (req, res) => {
   try {
-    const storeId = req.query.storeId || DEFAULT_STORE;
+    const storeId = requireStoreId(req, res);
+    if (!storeId) return;
     const query = { store_id: storeId, status: { $in: ['pending', 'packing'] } };
 
     const orders = await PackingOrder.find(query).sort({ createdAt: 1 }).lean();
