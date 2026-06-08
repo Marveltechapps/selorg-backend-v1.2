@@ -21,6 +21,8 @@ const userSchema = new mongoose.Schema(
     /** Admin user who approved the picker (ObjectId of admin/dashboard user). */
     approvedBy: { type: mongoose.Schema.Types.ObjectId },
     email: { type: String },
+    /** How the picker signed in: mobile SMS, WhatsApp OTP, or email OTP. */
+    loginMethod: { type: String, enum: ['mobile', 'whatsapp', 'email'] },
     name: { type: String },
     age: { type: Number },
     gender: { type: String, enum: ['male', 'female'] },

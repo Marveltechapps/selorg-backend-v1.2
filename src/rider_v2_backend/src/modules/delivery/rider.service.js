@@ -10,6 +10,28 @@ var _Rider = require("../../models/Rider.js");
 var _Order = require("../../models/Order.js");
 var _City = _interopRequireDefault(require("../../../../merch/models/City.js"));
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
+var _profileValidation = require("../../utils/profileDetails.validation.js");
+
+function phoneLookupVariants(phone) {
+  var digits = _profileValidation.normalizePhoneDigits(phone);
+  if (!digits) return [];
+  var e164 = _profileValidation.formatPhoneE164(digits);
+  return [String(phone), digits, e164, "+91" + digits].filter(function (v, i, arr) {
+    return v && arr.indexOf(v) === i;
+  });
+}
+
+function normalizeStoredPhone(phone) {
+  var digits = _profileValidation.normalizePhoneDigits(phone);
+  if (!digits) return String(phone || "");
+  return _profileValidation.formatPhoneE164(digits);
+}
+
+function phonesMatch(a, b) {
+  var da = _profileValidation.normalizePhoneDigits(a);
+  var db = _profileValidation.normalizePhoneDigits(b);
+  return !!da && da === db;
+}
 var _riderCacheHelper = require("../../utils/riderCacheHelper.js");
 var _websocket = require("../../../../utils/websocket.js");
 var ACTIVE_ORDER_STATUSES = ["assigned", "picked", "picked_up", "out_for_delivery", "in_transit"];
@@ -45,9 +67,11 @@ var createRider = exports.createRider = /*#__PURE__*/function () {
     return _regenerator().w(function (_context) {
       while (1) switch (_context.p = _context.n) {
         case 0:
+          input.phoneNumber = normalizeStoredPhone(input.phoneNumber);
           _context.n = 1;
           return _Rider.Rider.findOne({
-            phoneNumber: input.phoneNumber
+            phoneNumber: { $in: phoneLookupVariants(input.phoneNumber) },
+            deletedAt: { $exists: false },
           });
         case 1:
           existing = _context.v;
@@ -336,14 +360,47 @@ var getRiderStats = exports.getRiderStats = /*#__PURE__*/function () {
 }();
 var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
   var _ref9 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee9(riderId, updates) {
-    var update, rider;
+    var update, existing, conflict, rider;
     return _regenerator().w(function (_context9) {
       while (1) switch (_context9.n) {
         case 0:
+          _context9.n = 1;
+          return _Rider.Rider.findOne({ riderId: riderId });
+        case 1:
+          existing = _context9.v;
+          if (existing) {
+            _context9.n = 2;
+            break;
+          }
+          return _context9.a(2, null);
+        case 2:
           update = {};
           if (updates.name) update.name = updates.name;
           if (updates.email !== undefined) update.email = updates.email;
-          if (updates.phoneNumber !== undefined) update.phoneNumber = updates.phoneNumber;
+          if (updates.phoneNumber !== undefined) {
+            if (!phonesMatch(updates.phoneNumber, existing.phoneNumber)) {
+              update.phoneNumber = normalizeStoredPhone(updates.phoneNumber);
+              _context9.n = 3;
+              return _Rider.Rider.findOne({
+                riderId: { $ne: riderId },
+                phoneNumber: { $in: phoneLookupVariants(update.phoneNumber) },
+                deletedAt: { $exists: false },
+              });
+            }
+          }
+          _context9.n = 5;
+          break;
+        case 3:
+          conflict = _context9.v;
+          if (!conflict) {
+            _context9.n = 4;
+            break;
+          }
+          throw new Error("Phone number already registered to another account");
+        case 4:
+          _context9.n = 5;
+          break;
+        case 5:
           if (updates.vehicle) {
             if (updates.vehicle.type) update["vehicle.type"] = updates.vehicle.type;
             if (updates.vehicle.registrationNumber) update["vehicle.registrationNumber"] = updates.vehicle.registrationNumber;
@@ -373,14 +430,17 @@ var updateRiderProfile = exports.updateRiderProfile = /*#__PURE__*/function () {
               update["upiDetails.accountHolderName"] = updates.upiDetails.accountHolderName;
             }
           }
-          _context9.n = 1;
+          if (Object.keys(update).length === 0) {
+            return _context9.a(2, existing);
+          }
+          _context9.n = 6;
           return _Rider.Rider.findOneAndUpdate({ riderId: riderId }, { $set: update }, { "new": true }).catch(function (err) {
             if (err && err.code === 11000) {
               throw new Error("Phone number already registered to another account");
             }
             throw err;
           });
-        case 1:
+        case 6:
           rider = _context9.v;
           _riderCacheHelper.invalidateRider(riderId).catch(function () {});
           return _context9.a(2, rider);

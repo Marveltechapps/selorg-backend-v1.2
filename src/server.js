@@ -443,6 +443,14 @@ if (process.env.NODE_ENV !== 'test') {
     });
     logger.info('WebSocket server initialized');
 
+    try {
+      const { warmSmtpConnection, logProviderStatus } = require('./picker/services/emailOtp.service');
+      logProviderStatus();
+      warmSmtpConnection();
+    } catch (warmErr) {
+      logger.warn('Picker email warm-up failed', { error: warmErr?.message });
+    }
+
     // Start operational alerts job (ORDER_SLA_BREACHED, PICKER_INACTIVE)
     try {
       const operationalAlertsJob = require('./darkstore/jobs/operationalAlertsJob');

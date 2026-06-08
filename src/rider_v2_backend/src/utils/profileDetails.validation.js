@@ -74,4 +74,6 @@ function validateProfileFields(updates) {
 
 module.exports = {
   validateProfileFields,
+  normalizePhoneDigits,
+  formatPhoneE164,
 };

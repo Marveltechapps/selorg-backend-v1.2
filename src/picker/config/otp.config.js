@@ -117,12 +117,23 @@ function getTwilioConfig() {
     authToken: (process.env.TWILIO_AUTH_TOKEN || c.twilioAuthToken || '').trim(),
     phoneNumber: (
       process.env.TWILIO_PHONE_NUMBER ||
+      process.env.TWILIO_SMS_FROM ||
       process.env.TWILIO_FROM ||
       c.twilioPhoneNumber ||
       (typeof c.twilioFrom === 'string' ? c.twilioFrom : '') ||
       ''
     ).trim(),
+    whatsappFrom: (process.env.TWILIO_WHATSAPP_FROM || c.twilioWhatsappFrom || '').trim(),
   };
+}
+
+/** Selorg Picker OTP copy for SMS / WhatsApp. Env: PICKER_OTP_SMS_MESSAGE with {otp} placeholder. */
+function getPickerOtpMessageTemplate() {
+  const envTemplate = (process.env.PICKER_OTP_SMS_MESSAGE || process.env.PICKER_OTP_WHATSAPP_MESSAGE || '').trim();
+  if (envTemplate) return envTemplate;
+  const configTemplate = getSmsMessageTemplate();
+  if (configTemplate) return configTemplate;
+  return 'Your Selorg Picker verification code is {otp}. Valid for 5 minutes. Do not share.';
 }
 
 /**
@@ -190,6 +201,7 @@ module.exports = {
   getSmsMessageTemplate,
   getSmsProvider,
   getTwilioConfig,
+  getPickerOtpMessageTemplate,
   isOtpDevMode,
   getMsg91Config,
   getFast2SmsConfig,

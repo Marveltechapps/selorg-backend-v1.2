@@ -20,7 +20,14 @@ const upload = async (req, res, next) => {
       try {
         url = await s3Service.uploadDocument(req.file.buffer, mimetype, key);
       } catch (s3Err) {
-        url = `data:${mimetype};base64,${req.file.buffer.toString('base64')}`;
+        console.warn(
+          `[Documents] S3 upload failed for ${userId}/${docType}/${side}:`,
+          s3Err?.message || s3Err
+        );
+        return res.status(503).json({
+          success: false,
+          error: 'Document storage is unavailable. Please try again later.',
+        });
       }
     }
     if (!url) url = req.body.image ? `data:image/jpeg;base64,${req.body.image}` : '';

@@ -66,17 +66,22 @@ const setSelectedShifts = async (userId, selectedShifts) => {
 };
 
 const setUpi = async (userId, upiId, upiName) => {
+  if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) return null;
+  const trimmedId = String(upiId || '').trim();
+  const trimmedName = String(upiName || '').trim();
+  if (!trimmedId || !trimmedName) return null;
+
   const user = await User.findByIdAndUpdate(
     userId,
     {
       $set: {
-        upiId,
-        upiName,
+        upiId: trimmedId,
+        upiName: trimmedName,
         upiPayoutVerificationStatus: 'pending',
         upiPayoutRejectionReason: '',
       },
     },
-    { new: true }
+    { new: true, runValidators: true }
   ).lean();
   return user || null;
 };
@@ -105,6 +110,7 @@ const getProfile = async (userId) => {
     name: user.name,
     phone: user.phone,
     email: user.email,
+    loginMethod: user.loginMethod || null,
     age: user.age,
     gender: user.gender,
     photoUri: user.photoUri,
@@ -218,6 +224,7 @@ const getProfileOverview = async (userId) => {
       name: profile.name || null,
       phone: profile.phone || null,
       email: profile.email || null,
+      loginMethod: profile.loginMethod || null,
       photoUri: profile.photoUri || null,
       joinedAt: profile.createdAt || null,
       status: profile.status || null,
@@ -239,10 +246,7 @@ const getProfileOverview = async (userId) => {
     device: await (async () => {
       const { buildPickerDeviceStatus } = require('./deviceStatus.service');
       const status = await buildPickerDeviceStatus(userId);
-      const hhdActive = status?.hhdActive === true || status?.inUseOnHhd === true;
-      const effectivelyAssigned = status?.assigned === true || hhdActive;
-
-      if (!effectivelyAssigned) {
+      if (!status) {
         return {
           assigned: false,
           deviceId: null,
@@ -251,6 +255,30 @@ const getProfileOverview = async (userId) => {
           assignedAt: null,
           hhdActive: false,
           inUseOnHhd: false,
+          hsdDeviceOnline: false,
+          hsdBatteryLevel: null,
+        };
+      }
+
+      const hhdActive = status.hhdActive === true || status.inUseOnHhd === true;
+      const normalizedStatus = String(status.status || '').trim().toUpperCase();
+      const hasDevice =
+        status.assigned === true ||
+        normalizedStatus === 'ASSIGNED' ||
+        !!status.deviceId ||
+        hhdActive;
+
+      if (!hasDevice) {
+        return {
+          assigned: false,
+          deviceId: null,
+          serial: null,
+          status: null,
+          assignedAt: null,
+          hhdActive: false,
+          inUseOnHhd: false,
+          hsdDeviceOnline: false,
+          hsdBatteryLevel: null,
         };
       }
 

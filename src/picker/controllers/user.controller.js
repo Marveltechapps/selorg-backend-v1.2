@@ -3,6 +3,7 @@
  */
 const userService = require('../services/user.service');
 const { success, error } = require('../utils/response.util');
+const { invalidatePickerCache } = require('../cacheInvalidation');
 
 const getProfile = async (req, res, next) => {
   try {
@@ -62,7 +63,11 @@ const setUpi = async (req, res, next) => {
     if (!upiRegex.test(String(upiId))) return error(res, 'Invalid UPI ID', 400);
     const data = await userService.setUpi(req.userId, upiId, upiName);
     if (!data) return error(res, 'User not found', 404);
-    success(res, {});
+    await invalidatePickerCache();
+    success(res, {
+      upiId: data.upiId,
+      upiName: data.upiName,
+    });
   } catch (err) {
     next(err);
   }

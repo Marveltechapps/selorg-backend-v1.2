@@ -78,7 +78,7 @@ const appConfig = require('../config/app');
 // Scope GET cache by Authorization so different users never share an entry. Skip /documents so approval status is always fresh.
 app.use(
   cacheMiddleware(appConfig.cache.picker.default, {
-    skipPaths: ['/documents'],
+    skipPaths: ['/documents', '/bank', '/users/profile', '/users/upi', '/me', '/devices'],
     cacheKeyExtra: (req) => {
       const raw = typeof req.get === 'function' ? req.get('authorization') : req.headers?.authorization;
       if (!raw) return ':anon';

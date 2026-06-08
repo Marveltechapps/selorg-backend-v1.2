@@ -4,6 +4,18 @@
  */
 const Otp = require('../models/otp.model');
 
+function emailOtpKey(email) {
+  return `email|${String(email ?? '').trim().toLowerCase()}`;
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(email) {
+  const normalized = String(email ?? '').trim().toLowerCase();
+  if (!normalized || !EMAIL_REGEX.test(normalized)) return null;
+  return normalized;
+}
+
 function generateOTP(retryCount = 0) {
   const otp = Math.floor(1000 + Math.random() * 9000).toString();
   if (otp.length !== 4) {
@@ -106,8 +118,24 @@ async function verifyOTP(phone, otp) {
   return true;
 }
 
+async function createEmailOTP(email, otpOverride) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) throw new Error('Invalid email');
+  return createOTP(emailOtpKey(normalizedEmail), otpOverride);
+}
+
+async function verifyEmailOTP(email, otp) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return false;
+  return verifyOTP(emailOtpKey(normalizedEmail), otp);
+}
+
 module.exports = {
   createOTP,
   verifyOTP,
   generateOTP,
+  emailOtpKey,
+  normalizeEmail,
+  createEmailOTP,
+  verifyEmailOTP,
 };

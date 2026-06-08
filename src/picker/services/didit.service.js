@@ -6,13 +6,22 @@
  * Mirrors the rider didit.service.js but updates the picker Document model
  * and uses userType='picker' in vendor_data.
  *
- * Required env vars (same as rider – shared deployment):
- *   DIDIT_CLIENT_ID, DIDIT_CLIENT_SECRET, DIDIT_WEBHOOK_SECRET, DIDIT_WEBHOOK_BASE_URL
+ * Required env vars:
+ *   DIDIT_API_KEY (or DIDIT_CLIENT_SECRET) – Didit application API key (x-api-key header)
+ *   DIDIT_WEBHOOK_SECRET – HMAC secret for webhook signature verification
+ *   DIDIT_WEBHOOK_BASE_URL – Public server origin only (e.g. https://api.selorg.com)
+ * Optional:
+ *   DIDIT_WORKFLOW_ID – v3 workflow UUID (defaults to Custom KYC workflow)
+ * Legacy OAuth (optional, deprecated by Didit):
+ *   DIDIT_CLIENT_ID + DIDIT_CLIENT_SECRET
  */
 
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Document = require('../models/document.model');
+
+/** Default "Custom KYC" workflow (OCR + LIVENESS + FACE_MATCH) on the Selorg Didit app. */
+const DEFAULT_WORKFLOW_ID = 'c2c00127-641c-4f9a-bf3b-b152ed110c04';
 
 // ---------------------------------------------------------------------------
 // Didit session model (picker-scoped to avoid collection conflict with rider)
@@ -50,14 +59,18 @@ const DIDIT_BASE_URL = 'https://verification.didit.me';
 let _cachedToken = null;
 let _tokenExpiresAt = 0;
 
+function getApiKey() {
+  return (process.env.DIDIT_API_KEY || process.env.DIDIT_CLIENT_SECRET || '').trim();
+}
+
 async function getAccessToken() {
   const now = Date.now();
   if (_cachedToken && _tokenExpiresAt > now + 30_000) return _cachedToken;
 
-  const clientId = process.env.DIDIT_CLIENT_ID;
-  const clientSecret = process.env.DIDIT_CLIENT_SECRET;
+  const clientId = (process.env.DIDIT_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.DIDIT_CLIENT_SECRET || '').trim();
   if (!clientId || !clientSecret) {
-    throw new Error('DIDIT_CLIENT_ID and DIDIT_CLIENT_SECRET environment variables must be set');
+    throw new Error('DIDIT_CLIENT_ID and DIDIT_CLIENT_SECRET must be set for OAuth (use DIDIT_API_KEY instead)');
   }
 
   const res = await fetch(DIDIT_AUTH_URL, {
@@ -80,6 +93,56 @@ async function getAccessToken() {
   return _cachedToken;
 }
 
+/**
+ * Create a Didit verification session via v3 (x-api-key) or legacy v1/OAuth.
+ */
+async function requestDiditSession({ vendorData, callbackUrl }) {
+  const apiKey = getApiKey();
+  const workflowId = (process.env.DIDIT_WORKFLOW_ID || DEFAULT_WORKFLOW_ID).trim();
+
+  if (apiKey) {
+    const res = await fetch(`${DIDIT_BASE_URL}/v3/session/`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        workflow_id: workflowId,
+        vendor_data: vendorData,
+        callback: callbackUrl,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail =
+        data.error ??
+        data.message ??
+        (typeof data === 'object' ? JSON.stringify(data) : 'unknown');
+      throw new Error(`Didit createSession failed (${res.status}): ${detail}`);
+    }
+    return data;
+  }
+
+  const token = await getAccessToken();
+  const res = await fetch(`${DIDIT_BASE_URL}/v1/session/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      callback: callbackUrl,
+      vendor_data: vendorData,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`Didit createSession failed (${res.status}): ${data.error ?? data.message ?? 'unknown'}`);
+  }
+  return data;
+}
+
 // ---------------------------------------------------------------------------
 // Session creation
 // ---------------------------------------------------------------------------
@@ -96,26 +159,19 @@ async function createSession(pickerId) {
   }
 
   const webhookBaseUrl = (process.env.DIDIT_WEBHOOK_BASE_URL || '').replace(/\/$/, '');
+  if (!webhookBaseUrl) {
+    throw new Error('DIDIT_WEBHOOK_BASE_URL must be set (e.g. https://api.selorg.com)');
+  }
   const callbackUrl = `${webhookBaseUrl}/api/v1/picker/didit/webhook`;
 
-  const token = await getAccessToken();
-  const res = await fetch(`${DIDIT_BASE_URL}/v1/session/`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      callback: callbackUrl,
-      features: 'OCR + FACE_ID',
-      vendor_data: `picker:${pickerId}`,
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(`Didit createSession failed (${res.status}): ${data.error ?? data.message ?? 'unknown'}`);
+  if (!getApiKey() && !(process.env.DIDIT_CLIENT_ID || '').trim()) {
+    throw new Error('Didit is not configured. Set DIDIT_API_KEY (or DIDIT_CLIENT_SECRET) in the backend .env');
   }
+
+  const data = await requestDiditSession({
+    vendorData: `picker:${pickerId}`,
+    callbackUrl,
+  });
 
   const sessionId = data.session_id;
   const verificationUrl = data.url;

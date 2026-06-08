@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 const otpSessionSchema = new mongoose.Schema(
   {
     sessionId: { type: String, required: true, unique: true, index: true },
-    phoneNumber: { type: String, required: true, index: true },
+    phoneNumber: { type: String, index: true, default: null },
+    email: { type: String, index: true, default: null },
     otpHash: { type: String, required: true },
     channel: { type: String, default: 'sms' },
     provider: { type: String },

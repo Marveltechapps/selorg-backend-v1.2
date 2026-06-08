@@ -17,7 +17,11 @@ const createSession = async (req, res, next) => {
     });
   } catch (err) {
     console.error('[Didit] createSession controller:', err);
-    return res.status(500).json({ success: false, error: err.message || 'Failed to create Didit session' });
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to create Didit session',
+      error: err.message || 'Failed to create Didit session',
+    });
   }
 };
 

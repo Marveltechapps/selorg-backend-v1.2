@@ -12,6 +12,7 @@ const {
   getSmsMessageTemplate,
   getSmsProvider,
   getTwilioConfig,
+  getPickerOtpMessageTemplate,
   getMsg91Config,
   getFast2SmsConfig,
 } = require('../config/otp.config');
@@ -51,6 +52,24 @@ function getLastSmsResult() {
 const logOtp = (phone, otp) => {
   console.log(`[SMS] OTP for ${phone}: ${otp} (no provider configured – add config.json smsvendor or .env FAST2SMS/TWILIO)`);
 };
+
+function buildPickerOtpMessage(otp) {
+  const template = activeOtpMessageTemplate || getPickerOtpMessageTemplate();
+  return String(template).replace(/\{otp\}/gi, otp).replace(/\{#var#\}/gi, otp);
+}
+
+/** When set, overrides PICKER_OTP_SMS_MESSAGE for the current send (Rider app uses this). */
+let activeOtpMessageTemplate = null;
+
+function withOtpMessageTemplate(template, fn) {
+  const prev = activeOtpMessageTemplate;
+  activeOtpMessageTemplate = template || null;
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      activeOtpMessageTemplate = prev;
+    });
+}
 
 /** Use phone as-is: digits only. For India 10-digit, optionally prepend country code via config. */
 function normalizeMobileForVendor(phone) {
@@ -512,10 +531,7 @@ const sendViaTwilio = (phone, otp) => {
     setLastSmsError('Twilio', null, null, 'Invalid phone format');
     return Promise.resolve({ sent: false, ...getLastSmsResult() });
   }
-  const template = getSmsMessageTemplate();
-  const msg = template
-    ? String(template).replace(/\{otp\}/gi, otp).replace(/\{#var#\}/gi, otp)
-    : `Your verification code is ${otp}. Valid for 5 minutes.`;
+  const msg = buildPickerOtpMessage(otp);
   const body = new URLSearchParams({ To: to, From: from, Body: msg }).toString();
   const auth = Buffer.from(`${sid}:${token}`).toString('base64');
   return new Promise((resolve) => {
@@ -612,6 +628,96 @@ const sendVia2Factor = (phone, otp) => {
   });
 };
 
+/** Twilio WhatsApp – sandbox or approved WhatsApp sender. */
+const sendViaTwilioWhatsApp = (phone, otp) => {
+  const { accountSid: sid, authToken: token, whatsappFrom } = getTwilioConfig();
+  if (!sid || !token || !whatsappFrom) {
+    return Promise.resolve({
+      sent: false,
+      userMessage: 'WhatsApp OTP is not configured on the server.',
+      internalLog: '[WhatsApp] TWILIO_WHATSAPP_FROM missing',
+    });
+  }
+  const e164 = toE164India(phone) || (String(phone).startsWith('+') ? phone : `+91${normalizeMobileForVendor(phone)}`);
+  if (!e164 || !e164.startsWith('+')) {
+    setLastSmsError('Twilio WhatsApp', null, null, 'Invalid phone format');
+    return Promise.resolve({ sent: false, ...getLastSmsResult() });
+  }
+  const to = e164.startsWith('whatsapp:') ? e164 : `whatsapp:${e164}`;
+  const from = whatsappFrom.startsWith('whatsapp:') ? whatsappFrom : `whatsapp:${whatsappFrom.replace(/^whatsapp:/i, '')}`;
+  const msg = buildPickerOtpMessage(otp);
+  const body = new URLSearchParams({ To: to, From: from, Body: msg }).toString();
+  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'api.twilio.com',
+        path: `/2010-04-01/Accounts/${sid}/Messages.json`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${auth}`,
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          const ok = res.statusCode >= 200 && res.statusCode < 300;
+          if (ok) {
+            lastSmsResult = { sent: true, channel: 'whatsapp' };
+            lastSmsError = null;
+            console.log(`[WhatsApp] Selorg Picker OTP sent to ${to}`);
+            resolve({ sent: true, channel: 'whatsapp' });
+          } else {
+            let errMessage = null;
+            try {
+              const j = JSON.parse(data);
+              errMessage = j?.message ?? j?.error_message ?? j?.more_info ?? null;
+            } catch (_) {}
+            setLastSmsError('Twilio WhatsApp', res.statusCode, data, errMessage || undefined);
+            console.warn('[WhatsApp] Twilio FAIL – HTTP', res.statusCode, 'body:', (data || '').slice(0, MAX_DEBUG_BODY_LENGTH));
+            resolve({ sent: false, ...getLastSmsResult() });
+          }
+        });
+      }
+    );
+    req.on('error', (err) => {
+      setLastSmsError('Twilio WhatsApp', null, null, err?.message);
+      resolve({ sent: false, ...getLastSmsResult() });
+    });
+    req.setTimeout(SMS_TIMEOUT_MS, () => {
+      req.destroy();
+      setLastSmsError('Twilio WhatsApp', null, null, 'Request timeout');
+      resolve({ sent: false, ...getLastSmsResult() });
+    });
+    req.write(body);
+    req.end();
+  });
+};
+
+/**
+ * Send OTP via WhatsApp (Twilio). Falls back to SMS if WhatsApp is not configured.
+ */
+const sendOtpWhatsApp = async (phone, otp) => {
+  const trimmed = String(phone).replace(/\D/g, '');
+  if (!trimmed) {
+    return { sent: false, errorCode: 'SMS_INVALID_NUMBER', userMessage: 'Invalid phone number.' };
+  }
+  lastSmsError = null;
+  lastSmsResult = null;
+  const twilioCfg = getTwilioConfig();
+  if (twilioCfg.accountSid && twilioCfg.authToken && twilioCfg.whatsappFrom) {
+    const r = await sendViaTwilioWhatsApp(trimmed, otp);
+    if (r.sent) return r;
+    return r;
+  }
+  console.warn('[WhatsApp] Not configured – falling back to SMS for', trimmed);
+  const sms = await sendOtpSms(trimmed, otp);
+  return { ...sms, channel: 'sms' };
+};
+
 /**
  * Send OTP to phone. Provider order:
  * - If smsProvider === 'twilio': Twilio only.
@@ -679,4 +785,11 @@ const sendOtpSms = async (phone, otp, otpExpiryMinutes = 5) => {
   }
 };
 
-module.exports = { sendOtpSms, sendPickerTransactionalSms, getLastSmsError, getLastSmsResult };
+module.exports = {
+  sendOtpSms,
+  sendOtpWhatsApp,
+  sendPickerTransactionalSms,
+  withOtpMessageTemplate,
+  getLastSmsError,
+  getLastSmsResult,
+};

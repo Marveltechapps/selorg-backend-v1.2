@@ -8,8 +8,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/user.model');
 const HHDUser = require('../../hhd/models/User.model');
-const { createOTP, verifyOTP } = require('./otp.service');
-const { sendOtpSms } = require('./sms.service');
+const { createOTP, verifyOTP, createEmailOTP, verifyEmailOTP, normalizeEmail } = require('./otp.service');
+const { sendOtpSms, sendOtpWhatsApp } = require('./sms.service');
+const { sendPickerEmailOtp, isEmailOtpConfigured } = require('./emailOtp.service');
 const { isOtpDevMode, getTestOtpIfApplicable, generateOTP } = require('../../utils/smsGateway');
 const { OTP_ERROR_CODES } = require('../config/otp.constants');
 const pickerDarkStoreService = require('./pickerDarkStore.service');
@@ -65,7 +66,7 @@ async function ensureLinkedHhdUser(pickerUser, normalizedPhone) {
 /**
  * Send OTP – HHD flow: validate mobile, get test OTP or generate; dev mode: createOTP and return OTP; else send SMS then createOTP.
  */
-const sendOtp = async (phone) => {
+const sendOtp = async (phone, options = {}) => {
   if (phone === undefined || phone === null) {
     return { success: false, message: 'Phone number is required', errorCode: OTP_ERROR_CODES.INVALID_PHONE };
   }
@@ -75,31 +76,49 @@ const sendOtp = async (phone) => {
     return { success: false, message: 'Please provide a valid 10-digit mobile number.', errorCode: OTP_ERROR_CODES.INVALID_PHONE };
   }
 
+  const preferredChannel = String(options.preferredChannel || 'sms').toLowerCase();
+  const isWhatsApp = preferredChannel === 'whatsapp';
+  const channelLabel = isWhatsApp ? 'WhatsApp' : 'SMS';
+
   const testOtp = getTestOtpIfApplicable(trimmed);
   const otp = testOtp || generateOTP();
 
   if (isOtpDevMode()) {
-    logPickerOtp('info', `[Picker OTP] sendOtp: dev mode ON – skipping SMS for ${trimmed}, OTP returned in response`);
+    logPickerOtp('info', `[Picker OTP] sendOtp: dev mode ON – skipping ${channelLabel} for ${trimmed}, OTP returned in response`);
     try {
       await createOTP(trimmed, otp);
     } catch (e) {
       return { success: false, message: 'Failed to store OTP. Please try again.', errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR };
     }
-    return { success: true, message: 'OTP sent successfully', otp };
+    return {
+      success: true,
+      message: 'OTP sent successfully',
+      channel: isWhatsApp ? 'whatsapp' : 'sms',
+      otp,
+    };
   }
 
-  logPickerOtp('info', `[Picker OTP] sendOtp: sending SMS to ${trimmed} via gateway, OTP: ${otp}`);
-  const smsResult = await sendOtpSms(trimmed, otp);
-  logPickerOtp('info', `[Picker OTP] sendOtp: SMS result - sent: ${smsResult.sent}, internalLog: ${smsResult.internalLog || 'N/A'}`);
-  if (!smsResult.sent) {
-    logPickerOtp('warn', `[Picker OTP] sendOtp: SMS failed for ${trimmed} – ${smsResult.userMessage || ''} ${smsResult.internalLog || ''}`);
+  logPickerOtp('info', `[Picker OTP] sendOtp: sending ${channelLabel} to ${trimmed}`);
+  const deliveryResult = isWhatsApp ? await sendOtpWhatsApp(trimmed, otp) : await sendOtpSms(trimmed, otp);
+  const resultChannel = deliveryResult.channel || (isWhatsApp ? 'whatsapp' : 'sms');
+  logPickerOtp(
+    'info',
+    `[Picker OTP] sendOtp: ${channelLabel} result - sent: ${deliveryResult.sent}, internalLog: ${deliveryResult.internalLog || 'N/A'}`
+  );
+  if (!deliveryResult.sent) {
+    logPickerOtp(
+      'warn',
+      `[Picker OTP] sendOtp: ${channelLabel} failed for ${trimmed} – ${deliveryResult.userMessage || ''} ${deliveryResult.internalLog || ''}`
+    );
     return {
       success: false,
-      message: smsResult.userMessage || 'Failed to send OTP via SMS. Please try again.',
+      message:
+        deliveryResult.userMessage ||
+        (isWhatsApp ? 'Failed to send OTP via WhatsApp. Please try again.' : 'Failed to send OTP via SMS. Please try again.'),
       errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR,
     };
   }
-  logPickerOtp('info', `[Picker OTP] sendOtp: SMS accepted by gateway for ${trimmed}, OTP: ${otp}`);
+  logPickerOtp('info', `[Picker OTP] sendOtp: ${channelLabel} accepted for ${trimmed}`);
 
   try {
     await createOTP(trimmed, otp);
@@ -110,17 +129,87 @@ const sendOtp = async (phone) => {
   return {
     success: true,
     message: 'OTP sent successfully',
-    ...(isOtpDevMode() && { otp }),           // Dev mode: return OTP (no SMS)
-    ...(testOtp && { otp: testOtp }),         // Test numbers (e.g. 9698790921): return fixed OTP (no SMS)
+    channel: resultChannel,
+    ...(isOtpDevMode() && { otp }),
+    ...(testOtp && { otp: testOtp }),
   };
 };
 
 /**
  * Resend OTP – same as send (HHD treats resend as send).
  */
-const resendOtp = async (phone) => {
-  return sendOtp(phone);
+const resendOtp = async (phone, options = {}) => {
+  return sendOtp(phone, options);
 };
+
+function syntheticPhoneForEmail(email) {
+  const hex = crypto.createHash('md5').update(String(email).toLowerCase()).digest('hex');
+  const digits = hex.replace(/[a-f]/gi, '').slice(0, 9);
+  return `1${digits.padEnd(9, '0')}`;
+}
+
+function loginMethodFromChannel(channel) {
+  const c = String(channel || '').toLowerCase();
+  if (c === 'whatsapp') return 'whatsapp';
+  if (c === 'email') return 'email';
+  return 'mobile';
+}
+
+/**
+ * Send OTP to email – stores under email|{address}, delivers via SMTP/Resend-style config.
+ */
+const sendOtpEmail = async (email) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return { success: false, message: 'Please enter a valid email address.', errorCode: OTP_ERROR_CODES.INVALID_PHONE };
+  }
+
+  const otp = generateOTP();
+  const expireMinutes = Math.max(1, Math.min(30, parseInt(process.env.OTP_EXPIRE_MINUTES || '5', 10)));
+
+  if (!isEmailOtpConfigured()) {
+    logPickerOtp('warn', '[Picker OTP] sendOtpEmail: email provider not configured');
+    return {
+      success: false,
+      message: 'Email OTP is not configured on the server. Please use Mobile or WhatsApp login.',
+      errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR,
+    };
+  }
+
+  // Start SMTP/API send immediately while OTP is being stored (saves 1–3s).
+  const mailPromise = sendPickerEmailOtp({ to: normalizedEmail, otp, expiresInMinutes: expireMinutes });
+
+  try {
+    await createEmailOTP(normalizedEmail, otp);
+  } catch (e) {
+    return { success: false, message: 'Failed to store OTP. Please try again.', errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR };
+  }
+
+  const mailResult = await mailPromise;
+  if (!mailResult.sent) {
+    logPickerOtp(
+      'warn',
+      `[Picker OTP] sendOtpEmail: email failed for ${normalizedEmail} – ${mailResult.internalError || mailResult.userMessage}`
+    );
+    return {
+      success: false,
+      message: mailResult.userMessage || 'Failed to send OTP email. Please try again.',
+      errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR,
+    };
+  }
+
+  logPickerOtp(
+    'info',
+    `[Picker OTP] sendOtpEmail: email accepted by ${mailResult.provider || 'provider'} for ${normalizedEmail}`
+  );
+  return {
+    success: true,
+    message: 'OTP sent successfully',
+    channel: mailResult.channel || 'email',
+  };
+};
+
+const resendOtpEmail = async (email) => sendOtpEmail(email);
 
 /**
  * Verify OTP – HHD flow: verifyOTP then find/create user, return JWT and user.
@@ -158,7 +247,12 @@ const verifyOtp = async (phone, otp, options = {}) => {
 
   let user = await User.findOne({ phone: trimmed });
   const isNewUser = !user;
-  if (!user) user = await User.create({ phone: trimmed });
+  const loginMethod = loginMethodFromChannel(options.preferredChannel);
+  if (!user) {
+    user = await User.create({ phone: trimmed, loginMethod });
+  } else {
+    user.loginMethod = loginMethod;
+  }
   const hhdUser = await ensureLinkedHhdUser(user, trimmed);
 
   const sessionToken = crypto.randomUUID();
@@ -227,9 +321,91 @@ const verifyOtp = async (phone, otp, options = {}) => {
     message: 'OTP verified',
     token,
     isNewUser,
-    user: { phone: user.phone, id: user._id.toString() },
+    user: {
+      phone: user.phone,
+      id: user._id.toString(),
+      email: user.email || null,
+      loginMethod: user.loginMethod || loginMethod,
+    },
     ...(darkStoreSession && { darkStoreSession }),
   };
 };
 
-module.exports = { sendOtp, resendOtp, verifyOtp };
+/**
+ * Verify email OTP – find/create user by email.
+ */
+const verifyOtpEmail = async (email, otp, options = {}) => {
+  const normalizedEmail = normalizeEmail(email);
+  const otpStr = String(otp ?? '').trim();
+  if (!normalizedEmail) {
+    return { success: false, message: 'Please enter a valid email address.', errorCode: OTP_ERROR_CODES.INVALID_PHONE };
+  }
+  if (!otpStr || !/^\d{4}$/.test(otpStr)) {
+    return { success: false, message: 'OTP must be exactly 4 numeric digits', errorCode: OTP_ERROR_CODES.INCORRECT_OTP };
+  }
+
+  let isValid;
+  try {
+    isValid = await verifyEmailOTP(normalizedEmail, otpStr);
+  } catch (err) {
+    logPickerOtp('warn', `[Picker OTP] verifyOtpEmail: error – ${err?.message}`);
+    return { success: false, message: 'Verification failed. Please try again.' };
+  }
+
+  if (!isValid) {
+    return { success: false, message: 'Invalid or expired OTP. Please try again.', errorCode: OTP_ERROR_CODES.OTP_EXPIRED };
+  }
+
+  let user = await User.findOne({ email: normalizedEmail });
+  const isNewUser = !user;
+  try {
+    if (!user) {
+      user = await User.create({
+        phone: syntheticPhoneForEmail(normalizedEmail),
+        email: normalizedEmail,
+        loginMethod: 'email',
+      });
+    } else {
+      user.loginMethod = 'email';
+      if (!user.email) user.email = normalizedEmail;
+      await user.save();
+    }
+  } catch (err) {
+    logPickerOtp('warn', `[Picker OTP] verifyOtpEmail: user persist failed – ${err?.message}`);
+    return {
+      success: false,
+      message: 'Could not complete login for this email. Please try again or contact support.',
+      errorCode: OTP_ERROR_CODES.SMS_GATEWAY_ERROR,
+    };
+  }
+
+  const sessionToken = crypto.randomUUID();
+  user.sessionToken = sessionToken;
+  await user.save();
+
+  const token = jwt.sign(
+    {
+      sub: user._id.toString(),
+      userId: user._id.toString(),
+      id: user._id.toString(),
+      sid: sessionToken,
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  return {
+    success: true,
+    message: 'OTP verified',
+    token,
+    isNewUser,
+    user: {
+      phone: user.phone,
+      email: user.email,
+      id: user._id.toString(),
+      loginMethod: 'email',
+    },
+  };
+};
+
+module.exports = { sendOtp, resendOtp, verifyOtp, sendOtpEmail, resendOtpEmail, verifyOtpEmail };
