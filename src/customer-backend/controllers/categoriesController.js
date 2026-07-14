@@ -10,6 +10,7 @@ const {
 } = require('../services/categoriesService');
 const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
 const { enrichProduct } = require('../utils/customerMediaEnrichment');
+const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
 
 function isValidObjectId(id) {
   if (!id || typeof id !== 'string') return false;
@@ -24,13 +25,15 @@ async function listCategories(req, res) {
     })
       .sort({ order: 1 })
       .lean();
-    const data = (categories || []).map((c) => ({
-      id: String(c._id),
-      name: c.name,
-      slug: c.slug,
-      imageUrl: c.imageUrl || '',
-      order: c.order ?? 0,
-    }));
+    const data = filterCatalogLabels(
+      (categories || []).map((c) => ({
+        id: String(c._id),
+        name: c.name,
+        slug: c.slug,
+        imageUrl: c.imageUrl || '',
+        order: c.order ?? 0,
+      }))
+    );
     res.status(200).json({ success: true, data });
   } catch (err) {
     console.error('listCategories error:', err);

@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const legalDocumentSchema = new mongoose.Schema(
   {
-    type: { type: String, required: true, enum: ['terms', 'privacy'] },
+    type: { type: String, required: true, enum: ['terms', 'privacy', 'license'] },
     version: { type: String, required: true },
     title: { type: String, required: true },
     effectiveDate: { type: String, required: true },

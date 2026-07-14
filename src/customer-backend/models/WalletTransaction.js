@@ -25,13 +25,14 @@ const walletTransactionSchema = new mongoose.Schema(
       enum: [
         'refund', 'cashback', 'promotional', 'goodwill',
         'order_payment', 'manual_credit', 'manual_debit', 'expiry',
+        'payment_topup',
       ],
       required: true,
     },
     referenceId: { type: String },
     referenceType: {
       type: String,
-      enum: ['order', 'refund', 'promotion', 'support_ticket', 'manual'],
+      enum: ['order', 'refund', 'promotion', 'support_ticket', 'manual', 'payment'],
     },
     description: { type: String, default: '' },
     expiresAt: { type: Date },
@@ -43,6 +44,17 @@ const walletTransactionSchema = new mongoose.Schema(
 walletTransactionSchema.index({ walletId: 1, createdAt: -1 });
 walletTransactionSchema.index({ customerId: 1, createdAt: -1 });
 walletTransactionSchema.index({ source: 1 });
+// Idempotent payment top-ups: one ledger row per gateway txn id.
+walletTransactionSchema.index(
+  { customerId: 1, source: 1, referenceId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      source: 'payment_topup',
+      referenceId: { $type: 'string', $gt: '' },
+    },
+  }
+);
 
 const WalletTransaction =
   mongoose.models.WalletTransaction ||

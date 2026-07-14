@@ -3,6 +3,7 @@
  * Stores full ticket data for admin-scoped operations.
  */
 const mongoose = require('mongoose');
+const { supportAttachmentSchema } = require('../../customer-backend/models/supportAttachmentSchema');
 
 const ticketNoteSchema = new mongoose.Schema(
   {
@@ -16,6 +17,7 @@ const ticketNoteSchema = new mongoose.Schema(
     },
     content: { type: String, required: true },
     isInternal: { type: Boolean, default: false },
+    attachments: { type: [supportAttachmentSchema], default: [] },
   },
   { timestamps: true }
 );
@@ -56,6 +58,7 @@ const adminSupportTicketSchema = new mongoose.Schema(
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerOrder' },
     orderNumber: { type: String },
     tags: [{ type: String }],
+    attachments: { type: [supportAttachmentSchema], default: [] },
     responseTime: { type: Number },
     resolutionTime: { type: Number },
     slaBreached: { type: Boolean, default: false },
@@ -81,12 +84,7 @@ adminSupportTicketSchema.index({ category: 1 });
 adminSupportTicketSchema.index({ assignedTo: 1 });
 adminSupportTicketSchema.index({ createdAt: -1 });
 
-// Separate notes collection for easier querying
-const AdminSupportTicketNote = mongoose.model(
-  'AdminSupportTicketNote',
-  ticketNoteSchema
-);
-
+const AdminSupportTicketNote = mongoose.model('AdminSupportTicketNote', ticketNoteSchema);
 const AdminSupportTicket = mongoose.model('AdminSupportTicket', adminSupportTicketSchema);
 
 module.exports = { AdminSupportTicket, AdminSupportTicketNote };

@@ -9,8 +9,9 @@ const logger = require('../core/utils/logger');
 const migration001 = require('./001_add_order_type');
 const migration002 = require('./002_add_user_type');
 const migration003 = require('./003_create_type_indexes');
+const migration004 = require('./004_help_support_indexes');
 
-const MIGRATIONS = [migration001, migration002, migration003];
+const MIGRATIONS = [migration001, migration002, migration003, migration004];
 
 /**
  * Run all pending migrations

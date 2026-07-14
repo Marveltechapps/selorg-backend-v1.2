@@ -104,6 +104,14 @@ async function sendPushNotification(customerId, type, data = {}) {
       return;
     }
 
+    const { CustomerUser } = require('../models/CustomerUser');
+    const { isPushEnabled } = require('./notificationPreferencesService');
+    const user = await CustomerUser.findById(customerId).select('notificationPreferences').lean();
+    if (!isPushEnabled(user?.notificationPreferences)) {
+      logger.info('Push skipped by user preferences', { customerId, type });
+      return { success: true, skipped: true, reason: 'preferences' };
+    }
+
     const title = config.title;
     const body = fillTemplate(config.template, data);
 

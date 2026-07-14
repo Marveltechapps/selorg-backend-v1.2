@@ -55,7 +55,7 @@ module.exports = {
   list: asyncHandler(async (req, res) => {
     let apps = await Application.find().sort({ type: 1 });
     if (apps.length === 0) {
-      const base = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 5001}`;
+      const base = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3333}`;
       const riderUrl = process.env.RIDER_BACKEND_URL || base;
       // Rider standalone uses /healthz; unified server uses /health
       const riderHealthPath = process.env.RIDER_BACKEND_URL ? '/healthz' : '/health';

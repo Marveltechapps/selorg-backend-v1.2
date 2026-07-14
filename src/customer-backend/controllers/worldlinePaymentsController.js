@@ -3,6 +3,7 @@ const {
   completePayment,
   getStatus,
   processGatewayReturn,
+  resolvePaymentContextFromGatewayResponse,
   findPaymentByTxnAndOrder,
   mapStatusLabel,
   formatTimeElapsed,
@@ -21,6 +22,105 @@ function formatAmount(value) {
   return num.toFixed(2);
 }
 
+function resolveWorldlineResponseStatus(status) {
+  const key = String(status || '').trim().toLowerCase();
+  if (key === 'success') return 'success';
+  if (key === 'cancelled' || key === 'cancel' || key === '0392' || key === '0002') return 'cancelled';
+  return 'failed';
+}
+
+function inferWorldlineReturnPresentation(response, resultStatus, errorMessage) {
+  const merged = response && typeof response === 'object' ? response : {};
+  const txnStatus = String(
+    merged.txn_status || merged.statusCode || merged.TXN_STATUS || merged.status || ''
+  )
+    .trim()
+    .toLowerCase();
+
+  if (txnStatus === '0300' || txnStatus === 'success') {
+    return { status: 'success', message: '' };
+  }
+  if (txnStatus === '0392' || txnStatus === '0002' || txnStatus === 'cancelled' || txnStatus === 'cancel') {
+    return {
+      status: 'cancelled',
+      message: 'You cancelled the payment. No amount has been charged.',
+    };
+  }
+
+  const err = String(errorMessage || '').trim();
+  const errLower = err.toLowerCase();
+  if (
+    errLower.includes('cancel') ||
+    errLower.includes('0392') ||
+    errLower.includes('missing clnt_txn_ref') ||
+    errLower.includes('missing txnid') ||
+    Object.keys(merged).length === 0
+  ) {
+    return {
+      status: 'cancelled',
+      message: 'You cancelled the payment. No amount has been charged.',
+    };
+  }
+
+  if (resultStatus) {
+    return { status: resolveWorldlineResponseStatus(resultStatus), message: err };
+  }
+
+  return { status: 'failed', message: err };
+}
+
+function resolveWebAppBaseUrl() {
+  const candidates = [
+    process.env.WORLDLINE_WEB_APP_URL,
+    process.env.CUSTOMER_WEB_URL,
+    process.env.FRONTEND_URL,
+  ];
+  for (const candidate of candidates) {
+    const trimmed = String(candidate ?? '').trim();
+    if (trimmed) return trimmed.replace(/\/$/, '');
+  }
+  return 'http://localhost:5173';
+}
+
+function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount, purpose }) {
+  const base = resolveWebAppBaseUrl();
+  // Wallet top-ups return to the wallet tab; grocery checkout stays on /payment.
+  const path = purpose === 'wallet_topup' ? '/account/wallet' : '/payment';
+  const url = new URL(path, base);
+  url.searchParams.set('paynimo_bridge', '1');
+  const resolvedStatus = resolveWorldlineResponseStatus(status);
+  url.searchParams.set('status', resolvedStatus);
+  if (orderId) url.searchParams.set('orderId', String(orderId));
+  if (txnId) url.searchParams.set('txnId', String(txnId));
+  if (amount != null && String(amount).trim() !== '') {
+    url.searchParams.set('amount', String(amount));
+  }
+  if (purpose) url.searchParams.set('purpose', String(purpose));
+  if (message) url.searchParams.set('message', String(message).slice(0, 500));
+  return url.toString();
+}
+
+function redirectToPaymentResultPage(res, payload) {
+  const redirectUrl = buildPaymentResultRedirectUrl(payload);
+  const webAppBase = resolveWebAppBaseUrl();
+
+  logger.info('WORLDLINE_RETURN_REDIRECT', {
+    event: 'worldline_return_redirect',
+    status: payload.status,
+    orderId: payload.orderId || '',
+    txnId: payload.txnId || '',
+    redirectUrl,
+    webAppBase,
+    webAppEnv: process.env.WORLDLINE_WEB_APP_URL || process.env.CUSTOMER_WEB_URL || process.env.FRONTEND_URL || null,
+  });
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('X-Selorg-Payment-Return', 'redirect-v2');
+  res.setHeader('X-Selorg-Redirect-Target', redirectUrl);
+  return res.redirect(302, redirectUrl);
+}
+
 async function createWorldlineSession(req, res) {
   try {
     const userId = req.user?._id;
@@ -28,7 +128,7 @@ async function createWorldlineSession(req, res) {
 
     const { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode } = req.body || {};
     if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
-    if (!platform) return res.status(400).json({ success: false, message: 'platform is required (android|ios)' });
+    if (!platform) return res.status(400).json({ success: false, message: 'platform is required (android|ios|web)' });
 
     // Log request for LM Group support
     console.log('\n========================================');
@@ -86,11 +186,24 @@ async function completeWorldlinePayment(req, res) {
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
     const { orderId, txnId, response, debug: clientDebug } = req.body || {};
-    if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
-    if (!txnId) return res.status(400).json({ success: false, message: 'txnId is required' });
     if (!response || typeof response !== 'object') {
       return res.status(400).json({ success: false, message: 'response object is required' });
     }
+
+    let resolvedOrderId = orderId != null ? String(orderId).trim() : '';
+    let resolvedTxnId = txnId != null ? String(txnId).trim() : '';
+
+    if (!resolvedOrderId || !resolvedTxnId) {
+      const ctx = await resolvePaymentContextFromGatewayResponse(userId, response);
+      if (ctx.error) {
+        return res.status(400).json({ success: false, message: ctx.error });
+      }
+      resolvedOrderId = resolvedOrderId || ctx.orderId;
+      resolvedTxnId = resolvedTxnId || ctx.txnId;
+    }
+
+    if (!resolvedOrderId) return res.status(400).json({ success: false, message: 'orderId is required' });
+    if (!resolvedTxnId) return res.status(400).json({ success: false, message: 'txnId is required' });
 
     // Log SDK response for LM Group support
     console.log('\n========================================');
@@ -98,13 +211,18 @@ async function completeWorldlinePayment(req, res) {
     console.log('========================================');
     console.log('Timestamp:', new Date().toISOString());
     console.log('User ID:', userId);
-    console.log('Order ID:', orderId);
-    console.log('Transaction ID:', txnId);
+    console.log('Order ID:', resolvedOrderId);
+    console.log('Transaction ID:', resolvedTxnId);
     console.log('SDK Response:', JSON.stringify(response, null, 2));
     if (clientDebug) console.log('SDK Debug:', JSON.stringify(clientDebug, null, 2));
     console.log('========================================\n');
 
-    const result = await completePayment(userId, { orderId, txnId, response, clientDebug });
+    const result = await completePayment(userId, {
+      orderId: resolvedOrderId,
+      txnId: resolvedTxnId,
+      response,
+      clientDebug,
+    });
     
     if (result.error) {
       console.log('\n========================================');
@@ -162,22 +280,57 @@ async function worldlineReturn(req, res) {
   try {
     // Gateway can send either query params or form/json body.
     const response = { ...(req.query || {}), ...(req.body || {}) };
-    const result = await processGatewayReturn({ response });
 
-    // Always return 200 to avoid gateway retries; embed success flag in payload.
+    logger.info('WORLDLINE_RETURN_RECEIVED', {
+      event: 'worldline_return_received',
+      method: req.method,
+      contentType: req.headers['content-type'] || '',
+      queryKeys: Object.keys(req.query || {}),
+      bodyKeys: Object.keys(req.body || {}),
+    });
+
+    const result = await processGatewayReturn({ response });
+    const gatewayAmount =
+      response?.txn_amt ??
+      response?.txnAmount ??
+      response?.amount ??
+      result.data?.amountInr ??
+      '';
+
+    // Always redirect to the customer web app (never expose raw API HTML to users).
     if (result.error) {
-      return res.status(200).send(
-        `<html><body><h3>Payment processing</h3><p>${String(result.error)}</p></body></html>`
-      );
+      const presentation = inferWorldlineReturnPresentation(response, null, result.error);
+      return redirectToPaymentResultPage(res, {
+        status: presentation.status,
+        message: presentation.message || String(result.error),
+        orderId: result.data?.orderId,
+        txnId: result.data?.txnId,
+        amount: gatewayAmount,
+        purpose: result.data?.purpose,
+      });
     }
 
-    return res.status(200).send(
-      `<html><body><h3>Payment processed</h3><p>Status: ${String(result.data.status)}</p></body></html>`
+    const presentation = inferWorldlineReturnPresentation(
+      response,
+      result.data.status,
+      result.data.statusMessage
     );
+
+    return redirectToPaymentResultPage(res, {
+      status: presentation.status,
+      message: presentation.message || result.data.statusMessage,
+      orderId: result.data.orderId,
+      txnId: result.data.txnId,
+      amount: gatewayAmount || result.data.amountInr,
+      purpose: result.data.purpose,
+    });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('worldline return error:', err);
-    return res.status(200).send('<html><body><h3>Payment processing</h3><p>Internal error</p></body></html>');
+    return redirectToPaymentResultPage(res, {
+      status: 'failed',
+      message: 'We could not confirm your payment status right now. Please try again.',
+    });
   }
 }
 

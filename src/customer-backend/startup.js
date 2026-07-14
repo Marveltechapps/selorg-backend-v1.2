@@ -6,6 +6,14 @@ const mongoose = require('mongoose');
 const logger = require('../core/utils/logger');
 const { LegalConfig } = require('./models/LegalConfig');
 const { LegalDocument } = require('./models/LegalDocument');
+const {
+  PLACEHOLDER_TERMS,
+  PLACEHOLDER_PRIVACY,
+  CUSTOMER_TERMS,
+  CUSTOMER_PRIVACY,
+  CUSTOMER_LICENSE,
+  EFFECTIVE_DATE,
+} = require('./data/legalSeedContent');
 
 function run() {
   const conn = mongoose.connection;
@@ -54,15 +62,31 @@ function run() {
         await LegalDocument.create({
           type: 'terms',
           version: '1',
-          title: 'Terms of Service',
-          effectiveDate: '2024-01-15',
-          lastUpdated: '2024-01-15',
+          title: 'Terms of Use',
+          effectiveDate: EFFECTIVE_DATE,
+          lastUpdated: EFFECTIVE_DATE,
           contentFormat: 'plain',
-          content: 'Terms of Service content is managed by the backend. Please configure via admin or database.',
+          content: CUSTOMER_TERMS,
           isCurrent: true,
           appTarget: 'customer',
         });
         logger.info('Customer legal: seeded default terms document');
+      } else {
+        await LegalDocument.updateMany(
+          {
+            type: 'terms',
+            isCurrent: true,
+            content: PLACEHOLDER_TERMS,
+            ...customerLegalOr,
+          },
+          {
+            $set: {
+              title: 'Terms of Use',
+              content: CUSTOMER_TERMS,
+              lastUpdated: EFFECTIVE_DATE,
+            },
+          }
+        );
       }
       const privacyCount = await LegalDocument.countDocuments({ type: 'privacy', ...customerLegalOr });
       if (privacyCount === 0) {
@@ -70,14 +94,44 @@ function run() {
           type: 'privacy',
           version: '1',
           title: 'Privacy Policy',
-          effectiveDate: '2024-01-15',
-          lastUpdated: '2024-01-15',
+          effectiveDate: EFFECTIVE_DATE,
+          lastUpdated: EFFECTIVE_DATE,
           contentFormat: 'plain',
-          content: 'Privacy Policy content is managed by the backend. Please configure via admin or database.',
+          content: CUSTOMER_PRIVACY,
           isCurrent: true,
           appTarget: 'customer',
         });
         logger.info('Customer legal: seeded default privacy document');
+      } else {
+        await LegalDocument.updateMany(
+          {
+            type: 'privacy',
+            isCurrent: true,
+            content: PLACEHOLDER_PRIVACY,
+            ...customerLegalOr,
+          },
+          {
+            $set: {
+              content: CUSTOMER_PRIVACY,
+              lastUpdated: EFFECTIVE_DATE,
+            },
+          }
+        );
+      }
+      const licenseCount = await LegalDocument.countDocuments({ type: 'license', ...customerLegalOr });
+      if (licenseCount === 0) {
+        await LegalDocument.create({
+          type: 'license',
+          version: '1',
+          title: 'License',
+          effectiveDate: EFFECTIVE_DATE,
+          lastUpdated: EFFECTIVE_DATE,
+          contentFormat: 'plain',
+          content: CUSTOMER_LICENSE,
+          isCurrent: true,
+          appTarget: 'customer',
+        });
+        logger.info('Customer legal: seeded default license document');
       }
 
       const riderConfigCount = await LegalConfig.countDocuments({ key: 'rider_login_legal' });
@@ -132,6 +186,135 @@ function run() {
       }
     } catch (err) {
       logger.warn('Customer legal seed failed', { error: err.message });
+    }
+
+    try {
+      const { FaqItem } = require('./models/FaqItem');
+      const { FAQ_SEED_ITEMS } = require('./data/faqSeedContent');
+      let inserted = 0;
+      for (const item of FAQ_SEED_ITEMS) {
+        const existing = await FaqItem.findOne({
+          question: item.question,
+          category: item.category,
+        })
+          .select('_id')
+          .lean();
+        if (existing) continue;
+        await FaqItem.create({
+          ...item,
+          isActive: true,
+          helpfulCount: 0,
+          notHelpfulCount: 0,
+        });
+        inserted += 1;
+      }
+      if (inserted > 0) {
+        logger.info(`Customer FAQ: seeded ${inserted} FAQ items`);
+      }
+    } catch (err) {
+      logger.warn('Customer FAQ seed failed', { error: err.message });
+    }
+
+    try {
+      const { AppConfig, DEFAULT_APP_CONFIG } = require('./models/AppConfig');
+      const { FAQ_CATEGORIES } = require('./data/faqSeedContent');
+
+      const isPlaceholderPhone = (value) => {
+        const digits = String(value || '').replace(/\D/g, '');
+        return !digits || /^91?9{8,}$/.test(digits) || /^0*9{10}$/.test(digits);
+      };
+
+      const existing = await AppConfig.findOne({ key: 'default' });
+      if (existing) {
+        let changed = false;
+        const support = existing.support || {};
+        const defaults = DEFAULT_APP_CONFIG.support || {};
+
+        // Clear known CMS placeholder phones so apps don't show fake contact numbers
+        const cleanedSupport = { ...support };
+        ['contactPhone', 'supportPhone', 'whatsappNumber'].forEach((field) => {
+          if (isPlaceholderPhone(cleanedSupport[field])) {
+            cleanedSupport[field] = '';
+            changed = true;
+          }
+        });
+
+        const needsSupportPatch =
+          cleanedSupport.workingHours == null ||
+          cleanedSupport.responseTime == null ||
+          cleanedSupport.supportEmail == null ||
+          cleanedSupport.liveChatEnabled == null;
+        if (needsSupportPatch || changed) {
+          existing.support = {
+            ...defaults,
+            ...cleanedSupport,
+            contactPhone: cleanedSupport.contactPhone || '',
+            supportPhone: cleanedSupport.supportPhone || cleanedSupport.contactPhone || '',
+            supportEmail:
+              cleanedSupport.supportEmail ||
+              cleanedSupport.contactEmail ||
+              defaults.supportEmail,
+            contactEmail:
+              cleanedSupport.contactEmail ||
+              cleanedSupport.supportEmail ||
+              defaults.contactEmail,
+            whatsappNumber: cleanedSupport.whatsappNumber || '',
+            workingHours: cleanedSupport.workingHours || defaults.workingHours,
+            responseTime: cleanedSupport.responseTime || defaults.responseTime,
+            liveChatEnabled:
+              typeof cleanedSupport.liveChatEnabled === 'boolean'
+                ? cleanedSupport.liveChatEnabled
+                : defaults.liveChatEnabled !== false,
+          };
+          existing.markModified('support');
+          changed = true;
+          logger.info('Customer AppConfig: sanitized/patched support contact fields');
+        }
+
+        const checkout = existing.checkout || {};
+        const checkoutDefaults = DEFAULT_APP_CONFIG.checkout || {};
+        if (!Array.isArray(checkout.cancelReasons) || checkout.cancelReasons.length === 0) {
+          checkout.cancelReasons = checkoutDefaults.cancelReasons || [];
+          existing.checkout = { ...checkoutDefaults, ...checkout };
+          existing.markModified('checkout');
+          changed = true;
+        }
+        if (!Array.isArray(checkout.ratingTags) || checkout.ratingTags.length === 0) {
+          const nextCheckout = existing.checkout || { ...checkoutDefaults, ...checkout };
+          nextCheckout.ratingTags = checkoutDefaults.ratingTags || [];
+          existing.checkout = nextCheckout;
+          existing.markModified('checkout');
+          changed = true;
+        }
+
+        if (!existing.wallet || !Array.isArray(existing.wallet.topUpAmounts) || !existing.wallet.topUpAmounts.length) {
+          existing.wallet = DEFAULT_APP_CONFIG.wallet;
+          existing.markModified('wallet');
+          changed = true;
+        }
+        if (!existing.catalog) {
+          existing.catalog = DEFAULT_APP_CONFIG.catalog;
+          existing.markModified('catalog');
+          changed = true;
+        }
+
+        const labels = new Set(
+          (existing.supportCategories || []).map((c) => String(c.label || '').trim())
+        );
+        const missingFaqCategories = FAQ_CATEGORIES.filter((name) => !labels.has(name));
+        if (missingFaqCategories.length > 0 || !(existing.supportCategories || []).length) {
+          existing.supportCategories = DEFAULT_APP_CONFIG.supportCategories;
+          existing.markModified('supportCategories');
+          changed = true;
+          logger.info('Customer AppConfig: refreshed supportCategories for FAQ catalog');
+        }
+
+        if (changed) {
+          await existing.save();
+        }
+      }
+    } catch (err) {
+      logger.warn('Customer AppConfig support patch failed', { error: err.message });
     }
   })();
 }

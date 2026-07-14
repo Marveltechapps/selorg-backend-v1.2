@@ -199,11 +199,10 @@ app.use(xss());
 const compression = require('compression');
 app.use(compression());
 
-// Local uploads (picker/HHD docs when not on S3)
+// Local uploads (picker/HHD docs / support attachments when not on S3)
 const uploadsDir = process.env.UPLOAD_PATH || path.join(rootDir, 'uploads');
-if (fs.existsSync(uploadsDir)) {
-  app.use('/uploads', express.static(path.resolve(uploadsDir)));
-}
+fs.mkdirSync(path.join(uploadsDir, 'support'), { recursive: true });
+app.use('/uploads', express.static(path.resolve(uploadsDir)));
 
 // Body parser with size limits
 app.use(
@@ -520,7 +519,7 @@ if (process.env.NODE_ENV !== 'test') {
         error: err.message,
         suggestion: `Port ${PORT} is already in use. Please either:
           1. Stop the process using port ${PORT}
-          2. Set a different PORT in your .env file (e.g., PORT=5001)
+          2. Set a different PORT in your .env file (e.g., PORT=3334)
           3. Kill the process: lsof -ti:${PORT} | xargs kill -9`,
       });
       process.exit(1);
@@ -574,7 +573,7 @@ process.on('uncaughtException', (err) => {
       port: PORT,
       suggestion: `Port ${PORT} is already in use. Please either:
         1. Stop the process using port ${PORT}: lsof -ti:${PORT} | xargs kill -9
-        2. Set a different PORT in your .env file (e.g., PORT=5001)
+        2. Set a different PORT in your .env file (e.g., PORT=3334)
         3. Wait for the port to become available`,
     });
   } else {

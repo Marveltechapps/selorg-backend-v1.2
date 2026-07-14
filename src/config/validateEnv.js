@@ -95,6 +95,15 @@ const validateEnvironment = () => {
     for (const key of requiredWorldline) {
       if (!process.env[key]) errors.push(`${key} is required when WORLDLINE_ENABLED=true`);
     }
+    if (
+      !process.env.WORLDLINE_WEB_APP_URL &&
+      !process.env.CUSTOMER_WEB_URL &&
+      !process.env.FRONTEND_URL
+    ) {
+      warnings.push(
+        'WORLDLINE_WEB_APP_URL (or FRONTEND_URL) not set — gateway return will redirect to http://localhost:5173/payment/result'
+      );
+    }
   } else if (process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE || process.env.WORLDLINE_SALT) {
     warnings.push('WORLDLINE_* variables are set but WORLDLINE_ENABLED is false');
   }

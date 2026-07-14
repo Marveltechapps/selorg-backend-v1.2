@@ -223,7 +223,15 @@ async function getHomePayload(req = {}) {
   const promoBlocksList = await PromoBlock.find({ isActive: true }).lean();
   const promoBlocks = {};
   for (const p of promoBlocksList) {
-    promoBlocks[p.blockKey] = { imageUrl: p.imageUrl, link: p.link };
+    promoBlocks[p.blockKey] = {
+      imageUrl: p.imageUrl,
+      link: p.link,
+      title: p.title,
+      subtitle: p.subtitle,
+      redirectType: p.redirectType,
+      redirectValue: p.redirectValue,
+      blockKey: p.blockKey,
+    };
   }
 
   let defaultAddress = null;

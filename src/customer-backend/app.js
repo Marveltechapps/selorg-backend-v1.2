@@ -39,6 +39,7 @@ const walletRoutes = require('./routes/walletRoutes');
 const supportRoutes = require('./routes/supportRoutes');
 const storeRoutes = require('./routes/storeRoutes');
 const deliveryRoutes = require('./routes/deliveryRoutes');
+const locationsRoutes = require('./routes/locationsRoutes');
 const adminMerchRoutes = require('./routes/adminRoutes');
 
 const app = express();
@@ -51,7 +52,7 @@ const appConfig = require('../config/app');
 // Cart and addresses are per-user and change often — never cache those GETs.
 app.use(
   cacheMiddleware(appConfig.cache.customer.default, {
-    skipPaths: ['/bootstrap', '/cart', '/addresses', '/user'],
+    skipPaths: ['/bootstrap', '/cart', '/addresses', '/user', '/wallet', '/notifications', '/orders'],
   }),
 );
 
@@ -91,6 +92,7 @@ app.use('/wallet', walletRoutes);
 app.use('/support', supportRoutes);
 app.use('/store', storeRoutes);
 app.use('/delivery', deliveryRoutes);
+app.use('/locations', locationsRoutes);
 
 const { getPublicConfig } = require('./controllers/admin/appConfigAdminController');
 app.get('/app-config', getPublicConfig);

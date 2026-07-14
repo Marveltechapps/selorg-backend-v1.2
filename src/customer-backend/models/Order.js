@@ -58,6 +58,8 @@ const orderSchema = new mongoose.Schema(
       state: String,
       pincode: String,
       landmark: String,
+      latitude: Number,
+      longitude: Number,
     },
     deliveryNotes: { type: String, default: '' },
     paymentMethodId: { type: String, default: '' },

@@ -13,6 +13,7 @@
     "seed:hhd": "node scripts/seed-hhd-orders.js",
     "seed:customer-home": "node scripts/seedCustomerHome.js",
     "seed:customer-cms": "node src/customer-backend/scripts/seed-cms-defaults.js",
+    "seed:customer-faq": "node src/customer-backend/scripts/seed-faq.js",
     "seed:customer-onboarding": "node scripts/seedCustomerOnboarding.js",
     "seed:customer-location": "node scripts/seed-customer-location.js",
     "seed:master-data": "node scripts/seed-master-data.js",

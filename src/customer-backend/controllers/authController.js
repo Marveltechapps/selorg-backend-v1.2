@@ -26,6 +26,22 @@ const CUSTOMER_SMS_TEMPLATE_FALLBACK =
 const TEST_MOBILE = '9698790921';
 const TEST_OTP = '8790';
 
+function isProductionEnv() {
+  return String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+}
+
+/** Fixed test OTP is blocked in production unless ALLOW_CUSTOMER_TEST_OTP=true. */
+function allowFixedTestOtp() {
+  if (String(process.env.ALLOW_CUSTOMER_TEST_OTP || '').toLowerCase() === 'true') {
+    return true;
+  }
+  return !isProductionEnv();
+}
+
+function shouldLogOtp() {
+  return isOtpDevMode() || !isProductionEnv();
+}
+
 function generateSecurePassword(length = 8) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
   let password = '';
@@ -288,8 +304,11 @@ async function sendOtp(req, res) {
       return;
     }
 
-    const otp = digits === TEST_MOBILE ? TEST_OTP : generateOtp(4);
-    console.log(`[sendOtp] Generated OTP for ${digits}: ${otp}`);
+    const otp =
+      allowFixedTestOtp() && digits === TEST_MOBILE ? TEST_OTP : generateOtp(4);
+    if (shouldLogOtp()) {
+      console.log(`[sendOtp] Generated OTP for ${digits}: ${otp}`);
+    }
 
     const providerResult = await deliverOtpToPhone(digits, otp, channel);
     if (!providerResult || !providerResult.success) {
@@ -523,10 +542,15 @@ async function resendOtp(req, res) {
 
     const channel = String(session.channel || 'sms').toLowerCase();
     const otp =
-      session.phoneNumber && normalizePhone(session.phoneNumber) === TEST_MOBILE ? TEST_OTP : generateOtp(4);
+      allowFixedTestOtp() &&
+      session.phoneNumber &&
+      normalizePhone(session.phoneNumber) === TEST_MOBILE
+        ? TEST_OTP
+        : generateOtp(4);
 
-    console.log(`[resendOtp] Generated OTP for ${session.email || session.phoneNumber}: ${otp}`);
-
+    if (shouldLogOtp()) {
+      console.log(`[resendOtp] Generated OTP for ${session.email || session.phoneNumber}: ${otp}`);
+    }
     let providerResult;
     if (channel === 'email' && session.email) {
       providerResult = await deliverOtpToEmail(session.email, otp);

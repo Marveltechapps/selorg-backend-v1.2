@@ -1,11 +1,20 @@
 /**
  * Customer Support controller – create tickets and messages from customer app.
- * Uses auth middleware; injects customer info from req.user.
+ * Supports multipart attachments for ticket create and replies.
  */
 const mongoose = require('mongoose');
 const adminSupportService = require('../../admin/services/adminSupportService');
 const { AdminSupportTicket, AdminSupportTicketNote } = require('../../admin/models/AdminSupportTicket');
 const { resolveCustomerIdentity } = require('../utils/customerDisplay');
+const { processSupportUploads } = require('../services/supportAttachmentService');
+
+function sanitizeText(value, maxLen = 5000) {
+  return String(value ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .trim()
+    .slice(0, maxLen);
+}
 
 function customerIdentityFromRequest(req, ticket) {
   return resolveCustomerIdentity({ user: req.user?.profile, ticket });
@@ -21,8 +30,53 @@ function isLiveChatRequest(body = {}) {
     body.channel === 'chat' ||
     type === 'general_inquiry' ||
     type === 'order_issue' ||
-    body.liveChat === true
+    body.liveChat === true ||
+    body.liveChat === 'true'
   );
+}
+
+function mapAttachment(a) {
+  return {
+    url: a.url,
+    fileName: a.fileName,
+    mimeType: a.mimeType,
+    sizeBytes: a.sizeBytes,
+  };
+}
+
+const VALID_TICKET_CATEGORIES = new Set([
+  'order',
+  'payment',
+  'delivery',
+  'account',
+  'technical',
+  'feedback',
+]);
+
+/** Map UI / free-text category labels to stored ticket category enum. */
+function normalizeTicketCategory(raw, fallback = 'order') {
+  const value = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s&-]+/g, '_');
+  if (VALID_TICKET_CATEGORIES.has(value)) return value;
+
+  const map = {
+    orders: 'order',
+    order_issues: 'order',
+    payments: 'payment',
+    payment_billing: 'payment',
+    refunds: 'payment',
+    refund_returns: 'payment',
+    wallet: 'payment',
+    offers: 'account',
+    account_settings: 'account',
+    general_inquiry: 'account',
+    contact_support: 'account',
+    technical_issues: 'technical',
+    app_issues: 'technical',
+  };
+  return map[value] || (VALID_TICKET_CATEGORIES.has(fallback) ? fallback : 'order');
 }
 
 async function getActiveChatTicket(req, res, next) {
@@ -58,6 +112,7 @@ async function getActiveChatTicket(req, res, next) {
         subject: ticket.subject,
         orderNumber: ticket.orderNumber,
         status: ticket.status,
+        attachments: (ticket.attachments || []).map(mapAttachment),
       },
     });
   } catch (err) {
@@ -75,11 +130,10 @@ async function createTicket(req, res, next) {
     const profile = req.user?.profile;
     const identity = customerIdentityFromRequest(req);
     const customerName =
-      (req.body.customerName && String(req.body.customerName).trim()) || identity.customerName;
+      sanitizeText(req.body.customerName, 120) || identity.customerName;
     const customerPhone =
-      (req.body.customerPhone && String(req.body.customerPhone).trim()) ||
-      identity.customerPhone;
-    const bodyEmail = req.body.customerEmail && String(req.body.customerEmail).trim();
+      sanitizeText(req.body.customerPhone, 40) || identity.customerPhone;
+    const bodyEmail = req.body.customerEmail && sanitizeText(req.body.customerEmail, 160);
     const profileEmail = profile?.email && String(profile.email).trim();
     const customerEmail =
       bodyEmail ||
@@ -88,33 +142,44 @@ async function createTicket(req, res, next) {
         ? `customer-${customerPhone.replace(/\D/g, '')}@selorg.com`
         : `customer-${userId}@selorg.com`);
 
-    const {
-      subject,
-      description,
-      category,
-      priority,
-      orderNumber,
-      orderId,
-      type,
-    } = req.body;
-
-    const resolvedOrderNumber = orderNumber || orderId;
+    const subject = sanitizeText(req.body.subject, 200);
+    const description = sanitizeText(
+      req.body.description || req.body.message || '',
+      5000
+    );
+    const categoryRaw = sanitizeText(req.body.category, 40) || undefined;
+    const priority = sanitizeText(req.body.priority, 20) || undefined;
+    const type = sanitizeText(req.body.type, 40);
+    const resolvedOrderNumber = sanitizeText(
+      req.body.orderNumber || req.body.orderId || '',
+      80
+    );
 
     const liveChat = isLiveChatRequest(req.body);
+    if (!liveChat && !subject && !description) {
+      return res.status(400).json({
+        success: false,
+        error: 'Subject or description is required',
+      });
+    }
+
+    const attachments = await processSupportUploads(req, { userId: String(userId) });
+    const fallbackCategory = type === 'general_inquiry' ? 'account' : 'order';
 
     const data = {
-      subject: (subject || 'General Chat Support').trim(),
+      subject: subject || (liveChat ? 'General Chat Support' : 'Support request'),
       description: liveChat
-        ? String(description || req.body.message || '').trim()
-        : (description || req.body.message || subject || 'General inquiry').trim(),
-      category: category || (type === 'general_inquiry' ? 'account' : 'order'),
+        ? description
+        : description || subject || 'General inquiry',
+      category: normalizeTicketCategory(categoryRaw, fallbackCategory),
       priority: priority || 'medium',
       customerName: String(customerName).trim(),
       customerEmail: String(customerEmail).trim(),
       customerPhone: String(customerPhone).trim(),
       customerId: String(userId),
-      orderNumber: resolvedOrderNumber ? String(resolvedOrderNumber).trim() : undefined,
-      channel: liveChat ? 'chat' : 'in_app',
+      orderNumber: resolvedOrderNumber || undefined,
+      channel: liveChat ? 'chat' : sanitizeText(req.body.channel, 40) || 'in_app',
+      attachments,
     };
 
     const ticket = await adminSupportService.createTicket(data, 'system', 'Support');
@@ -141,6 +206,8 @@ function mapCustomerTicketSummary(ticket, noteCount = 0) {
     priority: ticket.priority,
     status: ticket.status,
     channel: ticket.channel,
+    orderNumber: ticket.orderNumber,
+    attachments: (ticket.attachments || []).map(mapAttachment),
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     resolvedAt: ticket.resolvedAt,
@@ -257,8 +324,10 @@ async function getTicketMessages(req, res, next) {
       _id: n._id.toString(),
       text: n.content,
       message: n.content,
-      sender: n.type === 'customer_reply' ? 'customer' : 'agent',
+      sender: n.type === 'customer_reply' ? 'user' : 'agent',
+      senderType: n.type === 'customer_reply' ? 'customer' : 'agent',
       authorName: n.authorName,
+      attachments: (n.attachments || []).map(mapAttachment),
       timestamp: n.createdAt,
       createdAt: n.createdAt,
     }));
@@ -289,8 +358,16 @@ async function sendMessage(req, res, next) {
       return res.status(403).json({ success: false, error: 'Forbidden' });
     }
 
-    const content = req.body.message || req.body.text || req.body.content || '';
-    if (!content || !String(content).trim()) {
+    const content = sanitizeText(
+      req.body.message || req.body.text || req.body.content || '',
+      5000
+    );
+    const attachments = await processSupportUploads(req, {
+      userId: String(userId),
+      ticketId: String(ticketId),
+    });
+
+    if (!content && attachments.length === 0) {
       return res.status(400).json({ success: false, error: 'Message content is required' });
     }
 
@@ -300,8 +377,9 @@ async function sendMessage(req, res, next) {
       authorId: String(userId),
       authorName: identity.displayName,
       type: 'customer_reply',
-      content: String(content).trim(),
+      content: content || '[Attachment]',
       isInternal: false,
+      attachments,
     });
 
     await AdminSupportTicket.findByIdAndUpdate(ticketId, {
@@ -318,8 +396,13 @@ async function sendMessage(req, res, next) {
       data: {
         id: note.id,
         text: note.content,
-        sender: 'customer',
-        timestamp: new Date(),
+        message: note.content,
+        sender: 'user',
+        senderType: 'customer',
+        authorName: note.authorName,
+        attachments: (note.attachments || []).map(mapAttachment),
+        timestamp: note.createdAt,
+        createdAt: note.createdAt,
       },
     });
   } catch (err) {

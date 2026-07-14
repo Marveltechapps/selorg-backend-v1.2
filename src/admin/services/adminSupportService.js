@@ -185,6 +185,16 @@ async function getNextTicketNumber() {
   return `TKT-${String(ticketCounter).padStart(5, '0')}`;
 }
 
+function mapAttachment(a) {
+  if (!a) return null;
+  return {
+    url: a.url,
+    fileName: a.fileName,
+    mimeType: a.mimeType || 'application/octet-stream',
+    sizeBytes: a.sizeBytes || 0,
+  };
+}
+
 function mapTicketToResponse(doc, notes = []) {
   if (!doc) return null;
   const d = doc.toObject ? doc.toObject() : doc;
@@ -208,6 +218,7 @@ function mapTicketToResponse(doc, notes = []) {
     assignedAgentName: d.assignedToName || d.assignedTo?.name,
     orderNumber: d.orderNumber,
     tags: d.tags || [],
+    attachments: Array.isArray(d.attachments) ? d.attachments.map(mapAttachment).filter(Boolean) : [],
     responseTime: d.responseTime,
     resolutionTime: d.resolutionTime,
     slaBreached: d.slaBreached || false,
@@ -222,6 +233,9 @@ function mapTicketToResponse(doc, notes = []) {
       authorName: n.authorName,
       type: n.type,
       content: n.content,
+      attachments: Array.isArray(n.attachments)
+        ? n.attachments.map(mapAttachment).filter(Boolean)
+        : [],
       createdAt: n.createdAt,
       isInternal: n.isInternal || false,
     })),
@@ -340,6 +354,7 @@ async function createTicket(data, agentId, agentName) {
     customerPhone: data.customerPhone || '',
     orderNumber: data.orderNumber,
     tags: data.tags || [],
+    attachments: Array.isArray(data.attachments) ? data.attachments : [],
   });
 
   let notes;
@@ -353,6 +368,7 @@ async function createTicket(data, agentId, agentName) {
         data.welcomeMessage ||
         'Hi! How can we help you today? Send a message and our team will respond shortly.',
       isInternal: false,
+      attachments: [],
     });
     notes = [welcomeNote];
   } else {
@@ -363,6 +379,7 @@ async function createTicket(data, agentId, agentName) {
       type: 'customer_reply',
       content: data.description || data.subject,
       isInternal: false,
+      attachments: Array.isArray(data.attachments) ? data.attachments : [],
     });
     notes = [note];
   }
@@ -474,11 +491,14 @@ async function assignTicket(ticketId, agentId, agentName) {
 
 async function addTicketNote(ticketId, noteData) {
   const content = String(noteData.content || '').trim();
-  if (!content) {
+  const attachments = Array.isArray(noteData.attachments) ? noteData.attachments : [];
+  if (!content && attachments.length === 0) {
     const err = new Error('Note content is required');
     err.status = 400;
     throw err;
   }
+
+  const noteContent = content || (attachments.length ? '[Attachment]' : '');
 
   if (isPickerTicketId(ticketId)) {
     const rawId = getPickerTicketRawId(ticketId);
@@ -495,8 +515,9 @@ async function addTicketNote(ticketId, noteData) {
             authorId: noteData.authorId,
             authorName: noteData.authorName,
             type: noteData.type || 'agent_reply',
-            content,
+            content: noteContent,
             isInternal: noteData.isInternal || false,
+            attachments,
           },
         },
         $set: { status: 'in_progress' },
@@ -516,6 +537,7 @@ async function addTicketNote(ticketId, noteData) {
       authorName: lastReply.authorName,
       type: lastReply.type,
       content: lastReply.content,
+      attachments: lastReply.attachments || [],
       createdAt: lastReply.createdAt,
       isInternal: lastReply.isInternal || false,
     };
@@ -539,8 +561,9 @@ async function addTicketNote(ticketId, noteData) {
     authorId: noteData.authorId,
     authorName: noteData.authorName,
     type: noteData.type || 'agent_reply',
-    content,
+    content: noteContent,
     isInternal: noteData.isInternal || false,
+    attachments,
   });
   return {
     id: doc._id.toString(),
@@ -549,6 +572,7 @@ async function addTicketNote(ticketId, noteData) {
     authorName: doc.authorName,
     type: doc.type,
     content: doc.content,
+    attachments: Array.isArray(doc.attachments) ? doc.attachments : [],
     createdAt: doc.createdAt,
     isInternal: doc.isInternal,
   };

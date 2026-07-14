@@ -56,10 +56,21 @@ const appConfigSchema = new mongoose.Schema(
       minOrderAmount: { type: Number, default: 0 },
       tipAmounts: [{ type: Number }],
       deliveryInstructions: [{ type: String }],
+      cancelReasons: [{ type: String }],
+      ratingTags: [{ type: String }],
       emptyCartTitle: { type: String, default: "Don't Risk Your Health" },
       emptyCartDescription: { type: String, default: 'Avoid poison on your plate. Choose clean, organic food for your family.' },
       emptyCartCta: { type: String, default: 'Browse healthy products' },
       paymentInfoText: { type: String, default: 'All payments are secure and encrypted' },
+    },
+
+    wallet: {
+      topUpAmounts: [{ type: Number }],
+      maxTopUpAmount: { type: Number, default: 10000 },
+    },
+
+    catalog: {
+      defaultCollectionKey: { type: String, default: '' },
     },
 
     paymentMethods: [paymentMethodSchema],
@@ -92,8 +103,15 @@ const appConfigSchema = new mongoose.Schema(
     supportCategories: [supportCategorySchema],
 
     support: {
-      contactPhone: { type: String, default: '+919999999999' },
+      contactPhone: { type: String, default: '' },
       contactEmail: { type: String, default: 'support@selorg.com' },
+      /** Aliases exposed to mobile/web apps — leave blank until CMS sets real values */
+      supportPhone: { type: String, default: '' },
+      supportEmail: { type: String, default: 'support@selorg.com' },
+      whatsappNumber: { type: String, default: '' },
+      workingHours: { type: String, default: 'Mon–Sat, 9:00 AM – 8:00 PM IST' },
+      responseTime: { type: String, default: 'Typically within 2–4 hours on business days' },
+      liveChatEnabled: { type: Boolean, default: true },
     },
 
     payment: {
@@ -176,10 +194,32 @@ const DEFAULT_APP_CONFIG = {
     minOrderAmount: 0,
     tipAmounts: [10, 20, 30],
     deliveryInstructions: ['No Contact Delivery', "Don't ring the bell", 'Pet at home'],
+    cancelReasons: [
+      'Ordered by mistake',
+      'Delivery is taking too long',
+      'Found a better price elsewhere',
+      'Want to change items or address',
+      'Other reason',
+    ],
+    ratingTags: [
+      'Fast delivery',
+      'Fair prices',
+      'Friendly partner',
+      'On-time delivery',
+      'Poor support',
+      'High prices',
+    ],
     emptyCartTitle: "Don't Risk Your Health",
     emptyCartDescription: 'Avoid poison on your plate. Choose clean, organic food for your family.',
     emptyCartCta: 'Browse healthy products',
     paymentInfoText: 'All payments are secure and encrypted',
+  },
+  wallet: {
+    topUpAmounts: [100, 250, 500],
+    maxTopUpAmount: 10000,
+  },
+  catalog: {
+    defaultCollectionKey: '',
   },
   paymentMethods: [
     { key: 'cash', label: 'Cash on Delivery', description: 'Pay when your order arrives', icon: 'cash', isActive: true, order: 0 },
@@ -215,8 +255,14 @@ const DEFAULT_APP_CONFIG = {
     estimatedEndTime: null,
   },
   support: {
-    contactPhone: '+919999999999',
+    contactPhone: '',
     contactEmail: 'support@selorg.com',
+    supportPhone: '',
+    supportEmail: 'support@selorg.com',
+    whatsappNumber: '',
+    workingHours: 'Mon–Sat, 9:00 AM – 8:00 PM IST',
+    responseTime: 'Typically within 2–4 hours on business days',
+    liveChatEnabled: true,
   },
   payment: {
     upiMerchantId: 'merchant@upi',
@@ -235,14 +281,17 @@ const DEFAULT_APP_CONFIG = {
   },
   supportCategories: [
     { key: 'contact_support', label: 'Contact Support', description: 'Get in touch with our team', icon: 'phone', isActive: true, order: 0 },
-    { key: 'general_inquiry', label: 'General Inquiry', description: 'Ask us anything', icon: 'help-circle', isActive: true, order: 1 },
-    { key: 'order_issues', label: 'Order Issues', description: 'Issues with your order', icon: 'package', isActive: true, order: 2 },
-    { key: 'payment_billing', label: 'Payment & Billing', description: 'Payment and billing questions', icon: 'credit-card', isActive: true, order: 3 },
-    { key: 'refund_returns', label: 'Refund & Returns', description: 'Request refunds or returns', icon: 'refresh-cw', isActive: true, order: 4 },
-    { key: 'delivery', label: 'Delivery', description: 'Delivery related queries', icon: 'truck', isActive: true, order: 5 },
-    { key: 'account_settings', label: 'Account Settings', description: 'Manage your account', icon: 'settings', isActive: true, order: 6 },
-    { key: 'feedback', label: 'Feedback', description: 'Share your feedback', icon: 'message-square', isActive: true, order: 7 },
-    { key: 'app_issues', label: 'App Issues', description: 'Report technical problems', icon: 'alert-triangle', isActive: true, order: 8 },
+    { key: 'orders', label: 'Orders', description: 'Track, cancel, or change orders', icon: 'package', isActive: true, order: 1 },
+    { key: 'payments', label: 'Payments', description: 'Payment methods and failed charges', icon: 'credit-card', isActive: true, order: 2 },
+    { key: 'delivery', label: 'Delivery', description: 'Delivery slots and issues', icon: 'truck', isActive: true, order: 3 },
+    { key: 'wallet', label: 'Wallet', description: 'Wallet balance and top-ups', icon: 'wallet', isActive: true, order: 4 },
+    { key: 'refunds', label: 'Refunds', description: 'Refund status and eligibility', icon: 'refresh-cw', isActive: true, order: 5 },
+    { key: 'account', label: 'Account', description: 'Profile, addresses, and settings', icon: 'settings', isActive: true, order: 6 },
+    { key: 'offers', label: 'Offers', description: 'Coupons and promotional offers', icon: 'star', isActive: true, order: 7 },
+    { key: 'technical_issues', label: 'Technical Issues', description: 'App or website problems', icon: 'alert-triangle', isActive: true, order: 8 },
+    { key: 'feedback', label: 'Feedback', description: 'Share your feedback', icon: 'message-square', isActive: true, order: 9 },
+    { key: 'app_issues', label: 'App Issues', description: 'Report bugs and crashes', icon: 'smartphone', isActive: true, order: 10 },
+    { key: 'general_inquiry', label: 'General Inquiry', description: 'Ask us anything', icon: 'help-circle', isActive: true, order: 11 },
   ],
   search: {
     placeholder: 'Search products...',

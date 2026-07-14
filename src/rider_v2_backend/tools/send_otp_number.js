@@ -1,6 +1,6 @@
 // Test POST to send OTP for a specific phone number (same endpoint as Rider app: /api/signin/send-otp)
 const PHONE = process.argv[2] || "7418268091";
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 3333;
 const URL = `http://localhost:${PORT}/api/signin/send-otp`;
 
 (async () => {

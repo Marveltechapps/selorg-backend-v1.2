@@ -6,6 +6,8 @@
 const Integration = require('../../admin/models/Integration');
 
 const GEOCODE_BASE = 'https://maps.googleapis.com/maps/api/geocode/json';
+const PLACES_AUTOCOMPLETE_BASE = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
+const GEOLOCATE_BASE = 'https://www.googleapis.com/geolocation/v1/geolocate';
 
 async function getGoogleMapsApiKey() {
   try {
@@ -144,8 +146,103 @@ async function reverseGeocode(latitude, longitude) {
   }
 }
 
+async function searchAddressSuggestions(query, options = {}) {
+  if (!query || typeof query !== 'string') return [];
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const key = await getGoogleMapsApiKey();
+  if (!key) {
+    const geo = await geocodeAddress(trimmed);
+    if (!geo) return [];
+    const name = geo.line2 || geo.city || trimmed.split(',')[0].trim();
+    const addr = [geo.line1, geo.line2, geo.city, geo.state, geo.pincode].filter(Boolean).join(', ');
+    return [{ name, addr, latitude: geo.latitude, longitude: geo.longitude }];
+  }
+
+  try {
+    const url = new URL(PLACES_AUTOCOMPLETE_BASE);
+    url.searchParams.set('input', trimmed);
+    url.searchParams.set('key', key);
+    url.searchParams.set('components', 'country:in');
+    url.searchParams.set('types', 'geocode|establishment');
+
+    const { latitude, longitude } = options;
+    if (latitude != null && longitude != null && !Number.isNaN(Number(latitude)) && !Number.isNaN(Number(longitude))) {
+      url.searchParams.set('location', `${latitude},${longitude}`);
+      url.searchParams.set('radius', '50000');
+    }
+
+    const res = await fetch(url.toString());
+    const data = await res.json();
+
+    if (data.status !== 'OK' || !Array.isArray(data.predictions)) {
+      if (data.status === 'ZERO_RESULTS') return [];
+      const geo = await geocodeAddress(trimmed);
+      if (!geo) return [];
+      const name = geo.line2 || geo.city || trimmed.split(',')[0].trim();
+      const addr = [geo.line1, geo.line2, geo.city, geo.state, geo.pincode].filter(Boolean).join(', ');
+      return [{ name, addr, latitude: geo.latitude, longitude: geo.longitude }];
+    }
+
+    return data.predictions.slice(0, 8).map((p) => ({
+      name: p.structured_formatting?.main_text || p.description || trimmed,
+      addr: p.structured_formatting?.secondary_text || p.description || '',
+      placeId: p.place_id,
+    }));
+  } catch (err) {
+    console.error('Places autocomplete error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Approximate device location from IP/network when browser GPS is unavailable.
+ * Uses Google Geolocation API (enable "Geolocation API" in Google Cloud).
+ * @returns {Promise<{ latitude: number, longitude: number, accuracy?: number } | null>}
+ */
+async function getApproximateLocation() {
+  const key = await getGoogleMapsApiKey();
+  if (!key) {
+    console.warn('Approximate location: No Google Maps API key configured');
+    return null;
+  }
+
+  try {
+    const url = `${GEOLOCATE_BASE}?key=${encodeURIComponent(key)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ considerIp: true }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      console.warn('Approximate location API error:', data.error.message || data.error);
+      return null;
+    }
+
+    const lat = data.location?.lat;
+    const lng = data.location?.lng;
+    if (lat == null || lng == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lng))) {
+      return null;
+    }
+
+    return {
+      latitude: Number(lat),
+      longitude: Number(lng),
+      accuracy: data.accuracy != null ? Number(data.accuracy) : undefined,
+    };
+  } catch (err) {
+    console.error('Approximate location error:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   geocodeAddress,
   reverseGeocode,
+  searchAddressSuggestions,
+  getApproximateLocation,
   getGoogleMapsApiKey,
 };

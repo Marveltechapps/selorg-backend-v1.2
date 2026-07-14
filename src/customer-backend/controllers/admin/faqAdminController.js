@@ -1,13 +1,21 @@
 const { FaqItem } = require('../../models/FaqItem');
+const { FAQ_CATEGORIES } = require('../../data/faqSeedContent');
+
+function normalizeCategory(category) {
+  const value = String(category || '').trim();
+  if (!value) return '';
+  const match = FAQ_CATEGORIES.find((c) => c.toLowerCase() === value.toLowerCase());
+  return match || value;
+}
 
 exports.list = async (req, res) => {
   try {
     const { category, isActive } = req.query;
     const filter = {};
-    if (category) filter.category = category;
+    if (category) filter.category = normalizeCategory(category);
     if (isActive !== undefined) filter.isActive = isActive === 'true';
     const items = await FaqItem.find(filter).sort({ order: 1, createdAt: 1 }).lean();
-    res.json({ success: true, data: items });
+    res.json({ success: true, data: items, categories: FAQ_CATEGORIES });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -30,10 +38,10 @@ exports.create = async (req, res) => {
       return res.status(400).json({ success: false, error: 'question and answer are required' });
     }
     const item = await FaqItem.create({
-      question,
-      answer,
+      question: String(question).trim(),
+      answer: String(answer).trim(),
       order: order ?? 0,
-      category: category ?? '',
+      category: normalizeCategory(category),
       isActive: isActive !== false,
     });
     res.status(201).json({ success: true, data: item });
@@ -46,7 +54,13 @@ exports.update = async (req, res) => {
   try {
     const body = { ...req.body };
     delete body._id;
-    const updated = await FaqItem.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true }).lean();
+    if (body.category !== undefined) {
+      body.category = normalizeCategory(body.category);
+    }
+    const updated = await FaqItem.findByIdAndUpdate(req.params.id, body, {
+      new: true,
+      runValidators: true,
+    }).lean();
     if (!updated) return res.status(404).json({ success: false, error: 'FAQ item not found' });
     res.json({ success: true, data: updated });
   } catch (err) {
@@ -62,4 +76,15 @@ exports.delete = async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+};
+
+exports.listCategories = async (_req, res) => {
+  res.json({
+    success: true,
+    data: FAQ_CATEGORIES.map((name, index) => ({
+      id: name.toLowerCase().replace(/\s+/g, '_'),
+      name,
+      order: index + 1,
+    })),
+  });
 };

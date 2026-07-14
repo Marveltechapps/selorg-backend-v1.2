@@ -1,7 +1,9 @@
+const RefundRequest = require('../../finance/models/RefundRequest');
 const { CancellationPolicy } = require('../models/CancellationPolicy');
 const { Order } = require('../models/Order');
+const { CustomerUser } = require('../models/CustomerUser');
 const { sendOrderStatusNotification } = require('./notificationService');
-const { triggerAutoRefundForMissingItems, creditWallet } = require('./autoRefundService');
+const { creditWallet } = require('./autoRefundService');
 const { restoreCartFromOrder } = require('./cartService');
 
 /** Daily cancel cap per user (calendar day). Default 1000; override with CUSTOMER_MAX_CANCELLATIONS_PER_DAY. */
@@ -82,6 +84,40 @@ async function canCustomerCancel(userId, orderId) {
   return { allowed: true, cancellationFee, isPastFreeWindow, policy };
 }
 
+async function createCancelRefundRequest(order, refundAmount, refundMethod, reason) {
+  const user = await CustomerUser.findById(order.userId).lean();
+  const existing = await RefundRequest.findOne({
+    orderId: String(order._id),
+    customerId: String(order.userId),
+    status: { $in: ['pending', 'approved', 'processed'] },
+  });
+  if (existing) return existing;
+
+  return RefundRequest.create({
+    orderId: String(order._id),
+    orderNumber: order.orderNumber || '',
+    customerId: String(order.userId),
+    customerName: user?.name || user?.email || user?.phoneNumber || 'Customer',
+    customerEmail: user?.email || '',
+    customerPhone: user?.phoneNumber || '',
+    reasonCode: 'customer_cancelled',
+    reasonText: reason || 'Cancelled by customer',
+    amount: refundAmount,
+    currency: 'INR',
+    status: 'pending',
+    channel: 'self_service',
+    refundMethod: refundMethod === 'wallet' ? 'wallet' : 'original_payment',
+    timeline: [
+      {
+        status: 'pending',
+        timestamp: new Date(),
+        actor: 'customer',
+        note: 'Auto-created from customer order cancellation',
+      },
+    ],
+  });
+}
+
 async function executeCancellation(userId, orderId, reason = '') {
   const check = await canCustomerCancel(userId, orderId);
   if (!check.allowed) return { error: check.reason };
@@ -107,6 +143,42 @@ async function executeCancellation(userId, orderId, reason = '') {
     order.paymentStatus = 'failed';
   }
 
+  let refundAmount = 0;
+  let refundMethod = check.policy.refundMethod || 'original_payment';
+
+  if (
+    check.policy.autoRefundOnCancel &&
+    order.paymentMethod?.methodType !== 'cash' &&
+    order.paymentStatus === 'paid'
+  ) {
+    refundAmount = Math.max(0, Number(order.totalBill || 0) - (check.cancellationFee || 0));
+    if (refundAmount > 0) {
+      order.refundAmount = refundAmount;
+      order.refundStatus = 'pending';
+
+      if (refundMethod === 'wallet') {
+        await creditWallet(userId, refundAmount, String(order._id), String(order._id));
+        order.refundStatus = 'processed';
+      } else if (refundMethod === 'manual') {
+        order.refundStatus = 'pending';
+      } else {
+        // original_payment — create finance refund request for ops processing
+        try {
+          const refund = await createCancelRefundRequest(
+            order,
+            refundAmount,
+            'original_payment',
+            reason
+          );
+          order.refundId = refund._id;
+          order.refundStatus = refund.status || 'pending';
+        } catch (e) {
+          console.warn('createCancelRefundRequest failed (non-blocking):', e?.message);
+        }
+      }
+    }
+  }
+
   await order.save();
 
   if (isUnreleasedGateway) {
@@ -114,19 +186,6 @@ async function executeCancellation(userId, orderId, reason = '') {
       await restoreCartFromOrder(userId, order);
     } catch (e) {
       console.warn('restoreCartFromOrder on cancel failed (non-blocking):', e?.message);
-    }
-  }
-
-  if (
-    check.policy.autoRefundOnCancel &&
-    order.paymentMethod?.methodType !== 'cash' &&
-    order.paymentStatus === 'paid'
-  ) {
-    const refundAmount = order.totalBill - (check.cancellationFee || 0);
-    if (refundAmount > 0) {
-      if (check.policy.refundMethod === 'wallet') {
-        await creditWallet(userId, refundAmount, String(order._id), String(order._id));
-      }
     }
   }
 

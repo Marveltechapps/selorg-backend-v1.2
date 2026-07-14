@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const { Order } = require('../models/Order');
 const { WorldlinePayment } = require('../models/WorldlinePayment');
 const { releaseOrderFulfillment, voidUnpaidOnlineOrder } = require('./orderService');
+const { creditWallet, MAX_TOP_UP_AMOUNT } = require('./walletService');
 const logger = require('../../core/utils/logger');
 const fs = require('fs');
 
@@ -67,6 +68,7 @@ function normalizePlatform(platform) {
   const p = String(platform || '').toLowerCase();
   if (p === 'android') return 'android';
   if (p === 'ios') return 'ios';
+  if (p === 'web') return 'web';
   return null;
 }
 
@@ -145,9 +147,35 @@ function resolveWorldlineHashAlgo(requestAlgo) {
   return 'sh2';
 }
 
+function resolveWebAppBaseUrl() {
+  const candidates = [
+    process.env.WORLDLINE_WEB_APP_URL,
+    process.env.CUSTOMER_WEB_URL,
+    process.env.FRONTEND_URL,
+  ];
+  for (const candidate of candidates) {
+    const trimmed = String(candidate ?? '').trim();
+    if (trimmed) return trimmed.replace(/\/$/, '');
+  }
+  return 'http://localhost:5173';
+}
+
+/**
+ * Web checkout must return to a silent static bridge page (not a React response route).
+ * The bridge postMessages the opener or bounces to /payment without exposing a callback URL.
+ */
+function resolveReturnUrlForPlatform(platform) {
+  const normalized = normalizePlatform(platform);
+  if (normalized === 'web') {
+    return `${resolveWebAppBaseUrl()}/paynimo-return.html`;
+  }
+  return trimEnv(process.env.WORLDLINE_RETURN_URL);
+}
+
 function deviceIdForPlatform(platform, algo) {
   const resolved = resolveWorldlineHashAlgo(algo);
   const isSh1 = resolved === 'sh1';
+  if (platform === 'web') return isSh1 ? 'WEBSH1' : 'WEBSH2';
   // Paynimo Android SDK native code samples use "AndroidSH1"/"AndroidSH2" (mixed case).
   // Documentation shows "ANDROIDSH1" but actual SDK code uses "AndroidSH1" (capital A, lowercase ndroid, capital SH).
   if (platform === 'android') return isSh1 ? 'AndroidSH1' : 'AndroidSH2';
@@ -450,6 +478,80 @@ function isTerminal(status) {
 }
 
 /**
+ * After a verified Worldline success for purpose=wallet_topup, credit the customer wallet once.
+ * Safe against webhook + app complete + status poll retries.
+ */
+async function maybeCreditWalletForSuccessfulPayment(paymentInput) {
+  if (!paymentInput) return null;
+  const paymentId = paymentInput._id || paymentInput.id;
+  if (!paymentId) return null;
+  if (String(paymentInput.purpose || '') !== 'wallet_topup') return null;
+  if (paymentInput.status !== 'success' || paymentInput.verificationError !== 'none') return null;
+
+  const claimed = await WorldlinePayment.findOneAndUpdate(
+    { _id: paymentId, purpose: 'wallet_topup', walletCredited: { $ne: true } },
+    { $set: { walletCredited: true, walletCreditedAt: new Date() } },
+    { new: true }
+  );
+  if (!claimed) {
+    return { alreadyCredited: true };
+  }
+
+  try {
+    const result = await creditWallet(claimed.userId, claimed.amountInr, {
+      source: 'payment_topup',
+      description: 'Money added to wallet',
+      referenceId: claimed.txnId,
+      referenceType: 'payment',
+    });
+
+    if (result.error) {
+      await WorldlinePayment.updateOne(
+        { _id: claimed._id },
+        { $set: { walletCredited: false }, $unset: { walletCreditedAt: 1 } }
+      );
+      logger.error('Wallet top-up credit failed after verified payment', {
+        paymentId: String(claimed._id),
+        txnId: claimed.txnId,
+        error: result.error,
+      });
+      return { error: result.error };
+    }
+
+    try {
+      const { sendPushNotification } = require('./notificationService');
+      sendPushNotification(claimed.userId, 'WALLET_CREDIT', {
+        amount: result.credited || claimed.amountInr,
+        balance: result.balance,
+      }).catch(() => {});
+    } catch (_) {
+      /* optional */
+    }
+
+    logger.info('Wallet topped up after Worldline payment', {
+      paymentId: String(claimed._id),
+      txnId: claimed.txnId,
+      userId: String(claimed.userId),
+      amount: claimed.amountInr,
+      balance: result.balance,
+      alreadyCredited: !!result.alreadyCredited,
+    });
+
+    return result;
+  } catch (err) {
+    await WorldlinePayment.updateOne(
+      { _id: claimed._id },
+      { $set: { walletCredited: false }, $unset: { walletCreditedAt: 1 } }
+    );
+    logger.error('Wallet top-up credit exception', {
+      paymentId: String(claimed._id),
+      error: err?.message,
+    });
+    throw err;
+  }
+}
+
+/**
  * Type O helper: find callback-verified payment snapshot by transaction + order.
  * Never throws; returns null on db issues / no record.
  */
@@ -555,7 +657,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   warnWorldlineMerchantEnvMismatchOnce();
 
   const normalizedPlatform = normalizePlatform(platform);
-  if (!normalizedPlatform) return { error: 'platform must be android or ios' };
+  if (!normalizedPlatform) return { error: 'platform must be android, ios, or web' };
 
   const deviceId = deviceIdForPlatform(normalizedPlatform, algo);
   if (!deviceId) return { error: 'Unable to determine deviceId for platform' };
@@ -563,7 +665,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
   const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
   const salt = trimEnv(process.env.WORLDLINE_SALT);
-  const returnUrl = trimEnv(process.env.WORLDLINE_RETURN_URL);
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform);
 
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
@@ -771,6 +873,209 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
 }
 
 /**
+ * Start a Paynimo session to add money to the customer wallet.
+ * Credits the wallet only after verified payment success (see maybeCreditWalletForSuccessfulPayment).
+ */
+async function createWalletTopUpSession(userId, {
+  amount,
+  platform = 'web',
+  algo,
+  consumerEmailId,
+  consumerMobileNo,
+  paymentMode,
+}) {
+  if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
+  warnWorldlineMerchantEnvMismatchOnce();
+
+  const uidRaw = userId != null ? String(userId).trim() : '';
+  if (!uidRaw || !mongoose.Types.ObjectId.isValid(uidRaw)) {
+    return { error: 'Authenticated user id is required' };
+  }
+  const userObjectId = new mongoose.Types.ObjectId(uidRaw);
+
+  const parsedAmount = Number(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return { error: 'Invalid amount' };
+  }
+  if (parsedAmount > MAX_TOP_UP_AMOUNT) {
+    return { error: `Amount cannot exceed ₹${MAX_TOP_UP_AMOUNT}` };
+  }
+
+  const { min, max } = getAmountLimits();
+  if (!(parsedAmount >= min && parsedAmount <= max)) {
+    return {
+      error:
+        `Wallet top-up amount must be between ₹${min} and ₹${max} in this payment environment. ` +
+        `Requested ₹${Math.round(parsedAmount * 100) / 100}.`,
+    };
+  }
+
+  const normalizedPlatform = normalizePlatform(platform) || 'web';
+  const deviceId = deviceIdForPlatform(normalizedPlatform, algo);
+  if (!deviceId) return { error: 'Unable to determine deviceId for platform' };
+
+  const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
+  const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
+  const salt = trimEnv(process.env.WORLDLINE_SALT);
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform);
+  if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
+
+  const amountStr = formatWorldlineTxnAmount(parsedAmount);
+  const externalOrderRef = `wallet-${String(userObjectId).slice(-8)}-${uuidv4().slice(0, 8)}`;
+  const syntheticOrderId = syntheticOrderObjectIdForExternalRef(externalOrderRef, userObjectId);
+
+  const latestAttempt = await WorldlinePayment.findOne({
+    purpose: 'wallet_topup',
+    standaloneCheckout: true,
+    userId: userObjectId,
+    amountInr: parsedAmount,
+    platform: normalizedPlatform,
+    status: { $nin: ['success', 'failed', 'cancelled'] },
+  }).sort({ attemptNo: -1 });
+
+  let attemptNo = 1;
+  let txnId;
+  let shouldCreateNew = true;
+
+  if (latestAttempt) {
+    const isExpired = latestAttempt.sessionExpiresAt && new Date() > latestAttempt.sessionExpiresAt;
+    if (!isExpired) {
+      txnId = latestAttempt.txnId;
+      attemptNo = latestAttempt.attemptNo;
+      shouldCreateNew = false;
+    }
+  }
+
+  if (shouldCreateNew) {
+    const lastForRef = await WorldlinePayment.findOne({
+      purpose: 'wallet_topup',
+      orderId: syntheticOrderId,
+    }).sort({ attemptNo: -1 });
+    attemptNo = lastForRef ? lastForRef.attemptNo + 1 : 1;
+    txnId = `${Date.now()}-${uuidv4().slice(0, 8)}-${attemptNo}`;
+  }
+
+  // When reusing an active session, return its existing payload.
+  if (!shouldCreateNew && latestAttempt) {
+    return {
+      data: {
+        paymentId: String(latestAttempt._id),
+        purpose: 'wallet_topup',
+        clientOrderRef: latestAttempt.externalOrderRef,
+        orderId: String(latestAttempt.orderId),
+        txnId: latestAttempt.txnId,
+        attemptNo: latestAttempt.attemptNo,
+        amount: latestAttempt.amountInr,
+        hashAlgo: resolveWorldlineHashAlgo(algo),
+        sessionPayload: latestAttempt.rawSessionRequest,
+      },
+    };
+  }
+
+  const consumerId = String(userObjectId).slice(-20);
+  const mobileForHash = consumerMobileNo ? String(consumerMobileNo).trim() : '';
+  const emailForHash = consumerEmailId ? String(consumerEmailId).trim() : '';
+
+  const token = computeToken({
+    merchantId,
+    txnId,
+    totalAmount: amountStr,
+    consumerId,
+    consumerMobileNo: mobileForHash,
+    consumerEmailId: emailForHash,
+    salt,
+    deviceId,
+  });
+
+  const resolvedPaymentMode = canonicalizePaynimoPaymentMode(paymentMode);
+  const idempotencyKey = `worldline:wallet_topup:${String(userObjectId)}:${externalOrderRef}:${normalizedPlatform}:${attemptNo}`;
+
+  const sessionPayload = {
+    features: {
+      enableAbortResponse: true,
+      enableExpressPay: true,
+      enableInstrumentDeRegistration: true,
+      enableMerTxnDetails: true,
+    },
+    consumerData: {
+      deviceId,
+      token,
+      returnUrl,
+      paymentMode: resolvedPaymentMode,
+      merchantId,
+      currency: 'INR',
+      consumerId,
+      consumerMobileNo: mobileForHash,
+      consumerEmailId: emailForHash,
+      txnId,
+      totalAmount: amountStr,
+      items: [{ itemId: schemeCode, amount: amountStr, comAmt: '0.00' }],
+      customStyle: {
+        PRIMARY_COLOR_CODE: '#034703',
+        SECONDARY_COLOR_CODE: '#FFFFFF',
+        BUTTON_COLOR_CODE_1: '#034703',
+        BUTTON_COLOR_CODE_2: '#FFFFFF',
+      },
+    },
+  };
+
+  const sessionExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+  const doc = await WorldlinePayment.findOneAndUpdate(
+    { orderId: syntheticOrderId, attemptNo },
+    {
+      $set: {
+        token,
+        txnId,
+        deviceId,
+        amountInr: parsedAmount,
+        status: 'created',
+        sessionExpiresAt,
+        rawSessionRequest: sessionPayload,
+        standaloneCheckout: true,
+        externalOrderRef,
+        purpose: 'wallet_topup',
+        walletCredited: false,
+        walletCreditedAt: null,
+      },
+      $setOnInsert: {
+        userId: userObjectId,
+        orderId: syntheticOrderId,
+        idempotencyKey,
+        merchantId,
+        schemeCode,
+        platform: normalizedPlatform,
+        attemptNo,
+      },
+    },
+    { upsert: true, new: true }
+  ).lean();
+
+  logger.info('Worldline wallet top-up session', {
+    userId: String(userObjectId),
+    externalOrderRef,
+    orderId: String(syntheticOrderId),
+    txnId: doc.txnId,
+    amount: parsedAmount,
+    attemptNo: doc.attemptNo,
+  });
+
+  return {
+    data: {
+      paymentId: String(doc._id),
+      purpose: 'wallet_topup',
+      clientOrderRef: externalOrderRef,
+      orderId: String(syntheticOrderId),
+      txnId: doc.txnId,
+      attemptNo: doc.attemptNo,
+      amount: parsedAmount,
+      hashAlgo: resolveWorldlineHashAlgo(algo),
+      sessionPayload,
+    },
+  };
+}
+
+/**
  * Standalone Paynimo session (string client order ref, amount from body). No CustomerOrder row.
  * @param {string|import('mongoose').Types.ObjectId} userId — authenticated customer (JWT `sub`), required.
  */
@@ -803,7 +1108,7 @@ async function createStandalonePaymentSession({
   const userId = new mongoose.Types.ObjectId(uidRaw);
 
   const normalizedPlatform = normalizePlatform(platform);
-  if (!normalizedPlatform) return { error: 'platform must be android or ios (or omit for default android)' };
+  if (!normalizedPlatform) return { error: 'platform must be android, ios, or web (or omit for default android)' };
 
   const deviceId = deviceIdForPlatform(normalizedPlatform, algo);
   if (!deviceId) return { error: 'Unable to determine deviceId for platform' };
@@ -1047,6 +1352,25 @@ async function getStandalonePaymentStatus(externalOrderRef, userIdInput) {
   };
 }
 
+async function resolvePaymentContextFromGatewayResponse(userId, response) {
+  const normalized = normalizeWorldlineGatewayPayload(response || {});
+  const txnId = String(
+    normalized.clnt_txn_ref ||
+      response?.clnt_txn_ref ||
+      response?.txnId ||
+      response?.TXN_ID ||
+      response?.clntTxnRef ||
+      ''
+  ).trim();
+  if (!txnId) return { error: 'Could not resolve transaction id from gateway response' };
+
+  const payment = await WorldlinePayment.findOne({ txnId });
+  if (!payment) return { error: 'Payment session not found for txnId' };
+  if (String(payment.userId) !== String(userId)) return { error: 'Unauthorized' };
+
+  return { orderId: String(payment.orderId), txnId };
+}
+
 async function completePayment(userId, { orderId, txnId, response, clientDebug }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
 
@@ -1074,6 +1398,11 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
           logger.warn('releaseOrderFulfillment idempotent path failed', { orderId: String(orderId), error: e?.message });
         }
       }
+      try {
+        await maybeCreditWalletForSuccessfulPayment(payment);
+      } catch (e) {
+        logger.warn('wallet top-up credit idempotent path failed', { orderId: String(orderId), error: e?.message });
+      }
     }
     return {
       data: {
@@ -1085,6 +1414,7 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
         hashOk: payment.verificationError === 'none',
         tpslTxnId: payment.tpslTxnId,
         bankTxnId: payment.bankTxnId,
+        purpose: payment.purpose || 'order',
       },
     };
   }
@@ -1171,6 +1501,14 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
         logger.warn('releaseOrderFulfillment failed', { orderId: String(orderId), error: e?.message });
       }
     }
+    try {
+      await maybeCreditWalletForSuccessfulPayment(effectivePayment);
+    } catch (e) {
+      logger.warn('wallet top-up credit failed in completePayment', {
+        orderId: String(orderId),
+        error: e?.message,
+      });
+    }
   } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
     // Only move to failed if verified, or if we decide to trust cancelled even if unverified (risky)
     if (effectivePayment.verificationError === 'none') {
@@ -1186,7 +1524,9 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
     }
   }
 
-  const outOrderId = payment.standaloneCheckout && payment.externalOrderRef ? payment.externalOrderRef : String(orderId);
+  const outOrderId = payment.standaloneCheckout && payment.purpose !== 'wallet_topup' && payment.externalOrderRef
+    ? payment.externalOrderRef
+    : String(orderId);
 
   const baseData = {
     orderId: outOrderId,
@@ -1198,6 +1538,7 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
     tpslTxnId: effectivePayment.tpslTxnId,
     bankTxnId: effectivePayment.bankTxnId,
     verificationError: effectivePayment.verificationError,
+    purpose: payment.purpose || 'order',
   };
 
   if (payloadError) {
@@ -1268,15 +1609,30 @@ async function processGatewayReturn({ response, allowedUserId }) {
           });
         }
       }
+      try {
+        await maybeCreditWalletForSuccessfulPayment(payment);
+      } catch (e) {
+        logger.warn('wallet top-up credit gateway return idempotent path failed', {
+          paymentId: String(payment._id),
+          error: e?.message,
+        });
+      }
     }
     return {
       data: {
-        orderId: payment.standaloneCheckout && payment.externalOrderRef ? payment.externalOrderRef : String(order._id),
+        orderId:
+          payment.purpose === 'wallet_topup'
+            ? String(payment.orderId)
+            : payment.standaloneCheckout && payment.externalOrderRef
+              ? payment.externalOrderRef
+              : String(order._id),
         txnId,
         status: payment.status,
         statusCode: payment.statusCode,
         statusMessage: payment.statusMessage,
         hashOk: payment.verificationError === 'none',
+        purpose: payment.purpose || 'order',
+        amountInr: payment.amountInr,
       },
     };
   }
@@ -1349,6 +1705,14 @@ async function processGatewayReturn({ response, allowedUserId }) {
         logger.warn('releaseOrderFulfillment gateway return failed', { orderId: String(order._id), error: e?.message });
       }
     }
+    try {
+      await maybeCreditWalletForSuccessfulPayment(effectivePayment);
+    } catch (e) {
+      logger.warn('wallet top-up credit failed in processGatewayReturn', {
+        paymentId: String(effectivePayment._id),
+        error: e?.message,
+      });
+    }
   } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
     if (effectivePayment.verificationError === 'none') {
       if (order) {
@@ -1376,7 +1740,12 @@ async function processGatewayReturn({ response, allowedUserId }) {
   });
 
   const baseData = {
-    orderId: payment.standaloneCheckout && payment.externalOrderRef ? payment.externalOrderRef : logOrderId,
+    orderId:
+      payment.purpose === 'wallet_topup'
+        ? String(payment.orderId)
+        : payment.standaloneCheckout && payment.externalOrderRef
+          ? payment.externalOrderRef
+          : logOrderId,
     txnId,
     status: effectivePayment.status,
     statusCode: effectivePayment.statusCode,
@@ -1385,6 +1754,8 @@ async function processGatewayReturn({ response, allowedUserId }) {
     amountOk,
     verificationError: effectivePayment.verificationError,
     tpslTxnId: effectivePayment.tpslTxnId,
+    amountInr: effectivePayment.amountInr,
+    purpose: payment.purpose || 'order',
   };
 
   if (payloadError) {
@@ -1400,10 +1771,86 @@ async function processGatewayReturn({ response, allowedUserId }) {
 }
 
 async function getStatus(userId, { orderId }) {
-  const order = await Order.findOne({ _id: orderId, userId: new mongoose.Types.ObjectId(userId) }).lean();
-  if (!order) return { error: 'Order not found' };
+  if (!mongoose.Types.ObjectId.isValid(String(orderId))) {
+    return { error: 'Invalid orderId' };
+  }
+  const oid = new mongoose.Types.ObjectId(orderId);
+  const userOid = new mongoose.Types.ObjectId(userId);
 
-  const payments = await WorldlinePayment.find({ orderId: new mongoose.Types.ObjectId(orderId) }).sort({ attemptNo: -1 });
+  const order = await Order.findOne({ _id: oid, userId: userOid }).lean();
+
+  // Wallet top-up / standalone: no CustomerOrder row.
+  if (!order) {
+    const payments = await WorldlinePayment.find({ orderId: oid, userId: userOid }).sort({
+      attemptNo: -1,
+    });
+    const payment = payments[0];
+    if (!payment || (payment.purpose !== 'wallet_topup' && !payment.standaloneCheckout)) {
+      return { error: 'Order not found' };
+    }
+
+    if (payment.status === 'success' && payment.verificationError === 'none') {
+      try {
+        await maybeCreditWalletForSuccessfulPayment(payment);
+      } catch (e) {
+        logger.warn('wallet top-up credit getStatus self-heal failed', {
+          orderId: String(orderId),
+          error: e?.message,
+        });
+      }
+    }
+
+    let uiState = 'WAITING_FOR_PAYMENT';
+    let recommendedAction = 'NONE';
+    const isExpired = payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt;
+
+    if (payment.status === 'success' && payment.verificationError === 'none') {
+      uiState = 'PAID';
+      recommendedAction = 'NONE';
+    } else if (payment.status === 'pending') {
+      uiState = 'PENDING_VERIFICATION';
+      recommendedAction = 'POLL_STATUS';
+    } else if (payment.status === 'unknown') {
+      uiState = 'UNKNOWN';
+      recommendedAction = 'CONTACT_SUPPORT';
+    } else if (isTerminal(payment.status) || isExpired) {
+      uiState = 'RETRY_AVAILABLE';
+      recommendedAction = 'RETRY_PAYMENT';
+    } else if (payment.status === 'created' || payment.status === 'initiated') {
+      uiState = 'WAITING_FOR_PAYMENT';
+      recommendedAction = 'OPEN_GATEWAY';
+    } else if (payment.status === 'failed') {
+      uiState = 'FAILED';
+      recommendedAction = 'RETRY_PAYMENT';
+    } else if (payment.status === 'cancelled') {
+      uiState = 'RETRY_AVAILABLE';
+      recommendedAction = 'RETRY_PAYMENT';
+    }
+
+    return {
+      data: {
+        orderId: String(orderId),
+        orderPaymentStatus:
+          payment.status === 'success' && payment.verificationError === 'none' ? 'paid' : 'pending',
+        uiState,
+        recommendedAction,
+        purpose: payment.purpose || 'order',
+        walletCredited: !!payment.walletCredited,
+        latestPayment: {
+          txnId: payment.txnId,
+          attemptNo: payment.attemptNo,
+          status: payment.status,
+          statusCode: payment.statusCode,
+          statusMessage: payment.statusMessage,
+          verificationError: payment.verificationError,
+          isExpired: !!(payment.sessionExpiresAt && new Date() > payment.sessionExpiresAt),
+          updatedAt: payment.updatedAt,
+        },
+      },
+    };
+  }
+
+  const payments = await WorldlinePayment.find({ orderId: oid }).sort({ attemptNo: -1 });
   const payment = payments[0]; // Latest attempt
 
   let uiState = 'WAITING_FOR_PAYMENT';
@@ -1469,6 +1916,7 @@ async function getStatus(userId, { orderId }) {
       orderPaymentStatus: order.paymentStatus,
       uiState,
       recommendedAction,
+      purpose: 'order',
       latestPayment: payment
         ? {
             txnId: payment.txnId,
@@ -1498,7 +1946,9 @@ async function getStatus(userId, { orderId }) {
 
 module.exports = {
   createSession,
+  createWalletTopUpSession,
   completePayment,
+  resolvePaymentContextFromGatewayResponse,
   processGatewayReturn,
   getStatus,
   createStandalonePaymentSession,
@@ -1507,6 +1957,7 @@ module.exports = {
   mapStatusLabel,
   formatTimeElapsed,
   standaloneInitiateEnabled,
+  maybeCreditWalletForSuccessfulPayment,
   // exported for tests
   _internals: {
     computeToken,

@@ -13,7 +13,7 @@ const ApplicationSchema = new Schema(
     name: { type: String, required: true },
     displayName: { type: String, required: true },
     description: { type: String, default: '' },
-    baseUrl: { type: String, required: true }, // Health check URL (e.g. http://localhost:5001)
+    baseUrl: { type: String, required: true }, // Health check URL (e.g. http://localhost:3333)
     healthPath: { type: String, default: '/health' }, // /health or /healthz
     enabled: { type: Boolean, default: true },
     config: { type: Schema.Types.Mixed, default: {} },

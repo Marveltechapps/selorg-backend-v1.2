@@ -6,6 +6,7 @@ const router = Router();
 const adminAuth = [authenticateToken, requireRole('admin', 'super_admin')];
 
 router.get('/', adminAuth, ctrl.list);
+router.get('/categories', adminAuth, ctrl.listCategories);
 router.get('/:id', adminAuth, ctrl.getById);
 router.post('/', adminAuth, ctrl.create);
 router.put('/:id', adminAuth, ctrl.update);

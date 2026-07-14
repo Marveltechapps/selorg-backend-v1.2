@@ -9,9 +9,10 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Selorg Admin Operations API',
+      title: 'Selorg Backend API',
       version: process.env.API_VERSION || '1.0.0',
-      description: 'Multi-Dashboard Operations Platform API Documentation',
+      description:
+        'Multi-Dashboard Operations Platform API Documentation (includes Customer Help & Support)',
       contact: {
         name: 'API Support',
         email: 'support@selorg.com',

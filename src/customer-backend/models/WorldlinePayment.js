@@ -10,8 +10,12 @@ const worldlinePaymentSchema = new mongoose.Schema(
     merchantId: { type: String, required: true },
     schemeCode: { type: String, required: true }, // itemId in Paynimo request (e.g. FIRST)
 
-    platform: { type: String, enum: ['android', 'ios'], required: true },
-    deviceId: { type: String, enum: ['AndroidSH1', 'AndroidSH2', 'iOSSH1', 'iOSSH2'], required: true },
+    platform: { type: String, enum: ['android', 'ios', 'web'], required: true },
+    deviceId: {
+      type: String,
+      enum: ['AndroidSH1', 'AndroidSH2', 'iOSSH1', 'iOSSH2', 'WEBSH1', 'WEBSH2'],
+      required: true,
+    },
 
     txnId: { type: String, required: true }, // merchant txn id
     attemptNo: { type: Number, default: 1 },
@@ -22,6 +26,20 @@ const worldlinePaymentSchema = new mongoose.Schema(
     standaloneCheckout: { type: Boolean, default: false },
     /** Client reference when standaloneCheckout (e.g. TEST_001). */
     externalOrderRef: { type: String, default: '' },
+
+    /**
+     * `order` — grocery CustomerOrder checkout.
+     * `wallet_topup` — Paynimo payment that credits Selorg Wallet after verification.
+     */
+    purpose: {
+      type: String,
+      enum: ['order', 'wallet_topup'],
+      default: 'order',
+      index: true,
+    },
+    /** Set once after a successful wallet_topup payment has credited the customer wallet. */
+    walletCredited: { type: Boolean, default: false },
+    walletCreditedAt: { type: Date, default: null },
 
     status: {
       type: String,

@@ -9,10 +9,148 @@ const { CouponRedemption } = require('../models/CouponRedemption');
 const { calculatePricing, compareWithLegacy } = require('./pricingEngineService');
 const { clearCart: clearUserCart } = require('./cartService');
 const { resolveStoreId } = require('./storeLocator');
+const { geocodeAddress } = require('./geocodingService');
 
 /** All orders route to Adyar darkstore only */
 const ADYAR_STORE_ID = 'DS-Adyar-01';
+const ADYAR_FALLBACK_COORDINATES = { latitude: 13.0067, longitude: 80.2573 };
 const usePricingEngineForOrders = true;
+
+function toValidCoordinate(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { latitude: lat, longitude: lng };
+}
+
+function coordinatesFromGeoJsonLocation(location) {
+  const coords = location?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  return toValidCoordinate(coords[1], coords[0]);
+}
+
+function buildDeliveryAddressString(address) {
+  if (!address || typeof address !== 'object') return '';
+  return [address.line1, address.line2, address.landmark, address.city, address.state, address.pincode]
+    .filter(Boolean)
+    .map(String)
+    .join(', ')
+    .trim();
+}
+
+async function resolveStoreTrackingDetails(order) {
+  const Store = require('../../merch/models/Store');
+  const { DarkStore } = require('../models/DarkStore');
+
+  const attachFromStoreDoc = (store) => {
+    const coordinates =
+      toValidCoordinate(store?.latitude, store?.longitude) ||
+      coordinatesFromGeoJsonLocation(store?.location);
+    if (!coordinates) return null;
+    return {
+      coordinates,
+      name: store.name || 'Store',
+      address: store.address || '',
+      phone: store.phone || '',
+    };
+  };
+
+  if (order.storeId) {
+    const store = await Store.findById(order.storeId, {
+      latitude: 1,
+      longitude: 1,
+      name: 1,
+      address: 1,
+      phone: 1,
+      location: 1,
+    }).lean();
+    const resolved = attachFromStoreDoc(store);
+    if (resolved) return resolved;
+  }
+
+  const storeByCode = await Store.findOne(
+    { code: ADYAR_STORE_ID },
+    { latitude: 1, longitude: 1, name: 1, address: 1, phone: 1, location: 1 }
+  ).lean();
+  const resolvedByCode = attachFromStoreDoc(storeByCode);
+  if (resolvedByCode) return resolvedByCode;
+
+  const darkStore = await DarkStore.findOne(
+    { code: ADYAR_STORE_ID, isActive: true },
+    { name: 1, address: 1, contactPhone: 1, location: 1 }
+  ).lean();
+  const darkCoords = coordinatesFromGeoJsonLocation(darkStore?.location);
+  if (darkCoords) {
+    const addr = darkStore?.address || {};
+    return {
+      coordinates: darkCoords,
+      name: darkStore.name || 'Adyar',
+      address: [addr.line1, addr.line2, addr.city, addr.state, addr.pincode].filter(Boolean).join(', '),
+      phone: darkStore.contactPhone || '',
+    };
+  }
+
+  return {
+    coordinates: ADYAR_FALLBACK_COORDINATES,
+    name: 'Adyar',
+    address: '',
+    phone: '',
+  };
+}
+
+async function resolveAddressTrackingDetails(order) {
+  const snapshotCoords = toValidCoordinate(
+    order.deliveryAddress?.latitude,
+    order.deliveryAddress?.longitude
+  );
+  if (snapshotCoords) {
+    return {
+      coordinates: snapshotCoords,
+      label: order.deliveryAddress?.landmark || 'Home',
+    };
+  }
+
+  if (order.addressId) {
+    const address = await CustomerAddress.findById(order.addressId, {
+      latitude: 1,
+      longitude: 1,
+      label: 1,
+      line1: 1,
+      line2: 1,
+      landmark: 1,
+      city: 1,
+      state: 1,
+      pincode: 1,
+    }).lean();
+    if (address) {
+      const savedCoords = toValidCoordinate(address.latitude, address.longitude);
+      if (savedCoords) {
+        return { coordinates: savedCoords, label: address.label || 'Home' };
+      }
+      const geo = await geocodeAddress(buildDeliveryAddressString(address));
+      if (geo) {
+        return {
+          coordinates: { latitude: geo.latitude, longitude: geo.longitude },
+          label: address.label || 'Home',
+        };
+      }
+    }
+  }
+
+  const deliveryAddressStr = buildDeliveryAddressString(order.deliveryAddress);
+  if (deliveryAddressStr) {
+    const geo = await geocodeAddress(deliveryAddressStr);
+    if (geo) {
+      return {
+        coordinates: { latitude: geo.latitude, longitude: geo.longitude },
+        label: order.deliveryAddress?.landmark || 'Home',
+      };
+    }
+  }
+
+  return null;
+}
 
 function formatOrderForApp(doc) {
   const o = doc.toObject ? doc.toObject() : doc;
@@ -68,7 +206,7 @@ function formatOrderForApp(doc) {
     pricingSnapshot: o.pricingSnapshot || null,
     walletDeduction: o.walletDeduction || 0,
     totalBill: o.totalBill,
-    createdAt: o.createdAt,
+    createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : null,
     estimatedDelivery: o.estimatedDelivery,
     deliveredAt: o.deliveredAt,
     deliveryOtp: o.deliveryOtp,
@@ -536,6 +674,16 @@ async function createOrder(userId, body) {
   const address = await CustomerAddress.findOne({ _id: addressId, userId }).lean();
   if (!address) return { error: 'Address not found' };
 
+  let deliveryLatitude = address.latitude;
+  let deliveryLongitude = address.longitude;
+  if (deliveryLatitude == null || deliveryLongitude == null) {
+    const geo = await geocodeAddress(buildDeliveryAddressString(address));
+    if (geo) {
+      deliveryLatitude = geo.latitude;
+      deliveryLongitude = geo.longitude;
+    }
+  }
+
   let itemTotal = 0;
   let totalTax = 0;
   const orderItems = [];
@@ -616,7 +764,11 @@ async function createOrder(userId, body) {
   }
 
   const orderNumber = await generateOrderNumber();
-  const estimatedDelivery = new Date(Date.now() + 60 * 60 * 1000 * 24); // +1 day
+  const slaMinutes = Math.max(
+    10,
+    Number(process.env.DEFAULT_DELIVERY_SLA_MINUTES) || 45
+  );
+  const estimatedDelivery = new Date(Date.now() + slaMinutes * 60 * 1000);
 
   const matchedStoreObjectId = await resolveStoreId(ADYAR_STORE_ID);
 
@@ -651,6 +803,8 @@ async function createOrder(userId, body) {
               state: address.state,
               pincode: address.pincode,
               landmark: address.label,
+              latitude: deliveryLatitude,
+              longitude: deliveryLongitude,
             },
             deliveryNotes: body.deliveryNotes || '',
             paymentMethodId: paymentMethodId || '',
@@ -884,56 +1038,86 @@ async function getActiveOrder(userId) {
 
   const formatted = formatOrderForApp({ ...order, _id: order._id });
 
-  // Attach store coordinates if the order has a storeId
-  if (order.storeId) {
-    const Store = require('../../merch/models/Store');
-    const store = await Store.findById(order.storeId, {
-      latitude: 1,
-      longitude: 1,
-      name: 1,
-      address: 1,
-      phone: 1,
-    }).lean();
-    if (store) {
-      formatted.storeCoordinates = {
-        latitude: store.latitude,
-        longitude: store.longitude,
-      };
-      formatted.storeName = store.name || '';
-      formatted.storeAddress = store.address || '';
-      formatted.storePhone = store.phone || '';
-    }
+  const [storeDetails, addressDetails] = await Promise.all([
+    resolveStoreTrackingDetails(order),
+    resolveAddressTrackingDetails(order),
+  ]);
+
+  if (storeDetails?.coordinates) {
+    formatted.storeCoordinates = storeDetails.coordinates;
+    formatted.storeName = storeDetails.name || formatted.storeName || '';
+    formatted.storeAddress = storeDetails.address || '';
+    formatted.storePhone = storeDetails.phone || '';
   }
 
-  // Attach delivery address coordinates from the saved address
-  if (order.addressId) {
-    const address = await CustomerAddress.findById(order.addressId, {
-      latitude: 1,
-      longitude: 1,
-      label: 1,
-    }).lean();
-    if (address) {
-      formatted.addressCoordinates = {
-        latitude: address.latitude,
-        longitude: address.longitude,
-      };
-      formatted.addressLabel = address.label || 'Home';
-    }
+  if (addressDetails?.coordinates) {
+    formatted.addressCoordinates = addressDetails.coordinates;
+    formatted.addressLabel = addressDetails.label || 'Home';
   }
+
+  formatted.deliveryAddressLine = buildDeliveryAddressString(order.deliveryAddress);
 
   // Attach rider details if assigned
   if (order.riderId) {
     try {
       const Rider = require('../../rider/models/Rider');
-      const rider = await Rider.findOne(
-        { _id: order.riderId },
-        { name: 1, avatarInitials: 1, location: 1 }
-      ).lean();
+      const RiderHR = require('../../rider/models/RiderHR');
+      const Vehicle = require('../../rider/models/Vehicle');
+      const riderIdValue = order.riderId;
+      const riderQuery = mongoose.isValidObjectId(riderIdValue)
+        ? { $or: [{ _id: riderIdValue }, { id: String(riderIdValue) }] }
+        : { id: String(riderIdValue) };
+
+      const rider = await Rider.findOne(riderQuery).lean();
       if (rider) {
+        let phone = '';
+        try {
+          const hr = await RiderHR.findOne(
+            { id: rider.id },
+            { phone: 1 }
+          ).lean();
+          phone = hr?.phone || '';
+        } catch {
+          // RiderHR optional
+        }
+
+        let vehicleLabel = '';
+        try {
+          const vehicle = await Vehicle.findOne({
+            assignedRiderId: rider.id,
+            status: { $ne: 'inactive' },
+          })
+            .select('type vehicleId')
+            .lean();
+          if (vehicle) {
+            vehicleLabel = [vehicle.type, vehicle.vehicleId].filter(Boolean).join(' · ');
+          }
+        } catch {
+          // Vehicle lookup optional
+        }
+
         formatted.deliveryPartner = {
           name: rider.name || '',
           initials: rider.avatarInitials || '',
+          phone,
+          vehicle: vehicleLabel || undefined,
         };
+
+        if (rider.location) {
+          const lat = rider.location.lat ?? rider.location.latitude;
+          const lng = rider.location.lng ?? rider.location.longitude;
+          if (typeof lat === 'number' && typeof lng === 'number') {
+            formatted.riderLocation = {
+              latitude: lat,
+              longitude: lng,
+              updatedAt:
+                rider.location.updatedAt ||
+                rider.location.lastUpdated ||
+                rider.updatedAt ||
+                null,
+            };
+          }
+        }
       }
     } catch {
       // Rider model lookup optional
@@ -947,6 +1131,7 @@ async function getActiveOrder(userId) {
       Math.round((new Date(order.estimatedDelivery).getTime() - Date.now()) / 60000)
     );
     formatted.deliveryTimeMinutes = remaining;
+    formatted.estimatedDelivery = new Date(order.estimatedDelivery).toISOString();
   } else {
     formatted.deliveryTimeMinutes = null;
   }

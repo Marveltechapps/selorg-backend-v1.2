@@ -13,7 +13,7 @@ function validateEnvironment() {
   var errors = [];
 
   // Validate API base URL format
-  var apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:5001";
+  var apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:3333";
   try {
     var url = new URL(apiBaseUrl);
     if (!['http:', 'https:'].includes(url.protocol)) {

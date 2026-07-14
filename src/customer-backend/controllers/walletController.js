@@ -1,15 +1,14 @@
 const { CustomerWallet } = require('../models/CustomerWallet');
 const { WalletTransaction } = require('../models/WalletTransaction');
+const { getOrCreateWallet } = require('../services/walletService');
+const { createWalletTopUpSession } = require('../services/worldlinePaymentsService');
 
 async function getBalance(req, res) {
   try {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    let wallet = await CustomerWallet.findOne({ customerId: userId });
-    if (!wallet) {
-      wallet = await CustomerWallet.create({ customerId: userId, balance: 0 });
-    }
+    const wallet = await getOrCreateWallet(userId);
     res.status(200).json({
       success: true,
       data: {
@@ -96,7 +95,7 @@ async function debitForCheckout(req, res) {
       source: 'order_payment',
       referenceId: orderId,
       referenceType: 'order',
-      description: `Payment for order`,
+      description: 'Payment for order',
     });
 
     res.status(200).json({
@@ -109,4 +108,60 @@ async function debitForCheckout(req, res) {
   }
 }
 
-module.exports = { getBalance, getTransactions, debitForCheckout };
+/**
+ * Direct free credit is disabled for customers.
+ * Use POST /wallet/top-up/session → Paynimo → verified complete instead.
+ * Manual credits remain available via admin APIs.
+ */
+async function creditForTopUp(req, res) {
+  return res.status(403).json({
+    success: false,
+    message: 'Direct wallet credit is disabled. Please add money using payment.',
+  });
+}
+
+/**
+ * Start a Worldline/Paynimo checkout for wallet top-up.
+ * Body: { amount, platform?, paymentMode?, consumerEmailId?, consumerMobileNo? }
+ */
+async function initiateTopUp(req, res) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    const {
+      amount,
+      platform = 'web',
+      algo,
+      consumerEmailId,
+      consumerMobileNo,
+      paymentMode = 'all',
+    } = req.body || {};
+
+    const result = await createWalletTopUpSession(userId, {
+      amount,
+      platform,
+      algo,
+      consumerEmailId,
+      consumerMobileNo,
+      paymentMode,
+    });
+
+    if (result.error) {
+      return res.status(400).json({ success: false, message: result.error });
+    }
+
+    return res.status(200).json({ success: true, data: result.data });
+  } catch (err) {
+    console.error('wallet initiateTopUp error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
+module.exports = {
+  getBalance,
+  getTransactions,
+  debitForCheckout,
+  creditForTopUp,
+  initiateTopUp,
+};

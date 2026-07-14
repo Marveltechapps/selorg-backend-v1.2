@@ -5,8 +5,10 @@ const faqItemSchema = new mongoose.Schema(
     question: { type: String, required: true },
     answer: { type: String, required: true },
     order: { type: Number, default: 0 },
-    category: { type: String, default: '' },
+    category: { type: String, default: '', index: true },
     isActive: { type: Boolean, default: true },
+    helpfulCount: { type: Number, default: 0 },
+    notHelpfulCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

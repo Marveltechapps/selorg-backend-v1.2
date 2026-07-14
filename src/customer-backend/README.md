@@ -42,9 +42,20 @@ These collections are separate from HHD (`User`, etc.) and Picker (`PickerUser`,
 - `/api/v1/customer/payments/methods` – list, add, remove, set default (auth required)
 - `/api/v1/customer/coupons` – list (public), validate (POST body: code, orderAmount), apply (auth, POST body: code, orderAmount)
 - `/api/v1/customer/notifications` – list, mark read (PUT /:id/read), mark all read (PUT /read-all) (auth required)
-- `/api/v1/customer/legal` – config, terms, privacy, accept
+- `/api/v1/customer/legal` – config, terms, privacy, license, accept
+- `/api/v1/customer/faq` – list active FAQs (`?category=`), `/categories`, `POST /:id/feedback` (JWT)
+- `/api/v1/customer/app-config` – public app config including support contact fields
+- `/api/v1/customer/support` – tickets + messages (JWT); multipart attachments (JPG/PNG/PDF, 5 MB)
 - `/api/v1/customer/admin/home` – admin CRUD (dashboard JWT + role admin/super_admin) for categories, banners, config, sections, lifestyle, promoblocks, products
 - `/api/v1/customer/health` – health check
+
+### Help & Support notes
+
+- FAQ categories: Orders, Payments, Delivery, Wallet, Refunds, Account, Offers, Technical Issues
+- Seed FAQs: auto on startup if empty, or `npm run seed:customer-faq`
+- App config `support`: `supportPhone`, `supportEmail`, `whatsappNumber`, `workingHours`, `responseTime` (+ aliases `contactPhone` / `contactEmail`)
+- Postman: `postman/Customer_Help_Support.postman_collection.json`
+- Migration: `src/migrations/004_help_support_indexes.js`
 
 ## Environment
 

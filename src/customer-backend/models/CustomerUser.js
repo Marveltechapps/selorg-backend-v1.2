@@ -27,6 +27,14 @@ const userSchema = new mongoose.Schema(
       email: { type: String, default: undefined },
       phone: { type: String, default: undefined },
     },
+    /** Communication channel preferences for the customer app / web */
+    notificationPreferences: {
+      push: { type: Boolean, default: true },
+      sms: { type: Boolean, default: true },
+      whatsapp: { type: Boolean, default: true },
+      email: { type: Boolean, default: true },
+      dnd: { type: Boolean, default: false },
+    },
   },
   { timestamps: true }
 );

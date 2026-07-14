@@ -77,3 +77,21 @@ postman/
 .env
 .env.*
 !.env.example
+
+# Firebase / Secrets
+google-services.json
+GoogleService-Info.plist
+serviceAccountKey.json
+firebase-adminsdk*.json
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+*.keystore
+
+# Temporary
+tmp/
+temp/

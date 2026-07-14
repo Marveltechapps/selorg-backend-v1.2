@@ -101,6 +101,26 @@ async function getPrivacy(req, res) {
   }
 }
 
+async function getLicense(req, res) {
+  try {
+    const version = req.query.version || req.query.v;
+    let doc;
+    if (version) {
+      doc = await LegalDocument.findOne({ type: 'license', version, ...customerDocQuery() }).lean();
+    } else {
+      doc = await LegalDocument.findOne({ type: 'license', isCurrent: true, ...customerDocQuery() }).lean();
+    }
+    if (!doc) {
+      res.status(404).json({ success: false, message: 'License not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: toLegalDocumentDto(doc) });
+  } catch (err) {
+    console.error('getLicense error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
 async function accept(req, res) {
   try {
     const userId = req.user?._id;
@@ -140,4 +160,4 @@ async function accept(req, res) {
   }
 }
 
-module.exports = { getConfig, getTerms, getPrivacy, accept };
+module.exports = { getConfig, getTerms, getPrivacy, getLicense, accept };
