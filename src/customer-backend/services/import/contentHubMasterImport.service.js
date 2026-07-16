@@ -78,6 +78,22 @@ function resolveProductPrices({ doc, rawSalePrice, rawMrp, rawPriceInclGst, exis
   };
 }
 
+/**
+ * When Fixed Stock is set, force listing flags if price + image are present so
+ * stocked SKUs are not left inactive solely from a stale Is Saleable cell.
+ */
+function reconcileSaleableForFixedStock(doc) {
+  const qty = Number(doc.stockQuantity);
+  if (!Number.isFinite(qty) || qty <= 0) return;
+  const price = Number(doc.price) || 0;
+  const hasImage = Boolean(String(doc.imageUrl || '').trim());
+  if (price > 0 && hasImage) {
+    doc.isSaleable = true;
+    doc.isActive = true;
+    doc.status = 'active';
+  }
+}
+
 function parseNumberCell(val, fallback = 0) {
   if (val == null || val === '') return fallback;
   const n = Number.parseFloat(String(val).replace(/,/g, '').replace(/[^\d.-]/g, ''));
@@ -586,6 +602,8 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
               ]);
               const baseCostCol = findHeaderCol(headerMap, ['Base Cost']);
               const isSaleableCol = findHeaderCol(headerMap, ['Is Saleable']);
+              /** @type {{ productId: string, quantity: number, fixedStock?: number }[]} */
+              const stockSyncItems = [];
 
               let firstDataRow = 6;
               for (let r = 2; r <= Math.min(20, skuWs.rowCount); r += 1) {
@@ -748,12 +766,14 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   doc.isActive = true;
                   doc.status = 'active';
                 }
+                reconcileSaleableForFixedStock(doc);
 
                 if (matched) {
                   doc.categoryId = matched.categoryId;
                   doc.subcategoryId = matched.subcategoryId;
                 }
 
+                let productId = existing?._id || null;
                 if (existing) {
                   if (!overwrite) {
                     counts.products.skipped += 1;
@@ -771,9 +791,31 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                   );
                   counts.products.updated += 1;
                 } else {
-                  await Product.create([doc], { session: txnSession });
+                  const created = await Product.create([doc], { session: txnSession });
+                  productId = created?.[0]?._id || null;
                   counts.products.created += 1;
                 }
+
+                if (productId && doc.stockQuantity !== undefined && Number.isFinite(Number(doc.stockQuantity))) {
+                  stockSyncItems.push({
+                    productId: String(productId),
+                    quantity: Number(doc.stockQuantity),
+                    fixedStock: Number.isFinite(Number(doc.fixedStock))
+                      ? Number(doc.fixedStock)
+                      : Number(doc.stockQuantity),
+                  });
+                }
+              }
+
+              if (stockSyncItems.length > 0) {
+                const { applyOperationalStockBatch } = require('../inventoryAvailabilitySync');
+                await applyOperationalStockBatch(stockSyncItems, {
+                  session: txnSession,
+                  mirrorCatalogStock: false,
+                  ensureListed: false,
+                  invalidateCache: false,
+                });
+                counts.storeInventory = { synced: stockSyncItems.length };
               }
 
           // -------------------------

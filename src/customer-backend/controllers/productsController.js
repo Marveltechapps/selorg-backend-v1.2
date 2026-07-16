@@ -9,6 +9,7 @@ const {
   normalizeImagesForClient,
 } = require('../utils/productVariantsPayload');
 const { normalizeDescriptionForClient } = require('../utils/productDescriptionNormalize');
+const { attachLiveSellableStock } = require('../utils/productStock');
 
 async function getProductDetail(req, res) {
   try {
@@ -141,13 +142,21 @@ async function getProductDetail(req, res) {
     }
     // One card per product line; pack SKUs collapse into variants on each card (dedupe by base title, max 8 lines).
     relatedProducts = await enrichProductsWithVariants(relatedProducts, { maxProductLines: 8 });
+    relatedProducts = await attachLiveSellableStock(relatedProducts, {
+      storeId: String(req.query.storeId || '').trim() || null,
+    });
     const homeConfig = await HomeConfig.findOne({ key: 'main' }).select('deliveryLabel').lean();
-    const enrichedProduct = {
-      ...product,
-      images: normalizeImagesForClient(product),
-      description: normalizeDescriptionForClient(product.description),
-      deliveryInfo: product.deliveryInfo || homeConfig?.deliveryLabel || '10-min delivery',
-    };
+    const [enrichedProduct] = await attachLiveSellableStock(
+      [
+        {
+          ...product,
+          images: normalizeImagesForClient(product),
+          description: normalizeDescriptionForClient(product.description),
+          deliveryInfo: product.deliveryInfo || homeConfig?.deliveryLabel || '10-min delivery',
+        },
+      ],
+      { storeId: String(req.query.storeId || '').trim() || null }
+    );
     res.status(200).json({ success: true, data: { product: enrichedProduct, variants, relatedProducts } });
   } catch (err) {
     console.error('getProductDetail error:', err);
@@ -227,7 +236,10 @@ async function searchProducts(req, res) {
     }
 
     const { rawProducts, total } = await runProductSearch(query, searchFilter, skip, limit);
-    const products = await enrichProductsWithVariants(rawProducts, { dedupeProductLines: false });
+    const products = await attachLiveSellableStock(
+      await enrichProductsWithVariants(rawProducts, { dedupeProductLines: false }),
+      { storeId: storeId || null }
+    );
 
     return res.status(200).json({
       success: true,

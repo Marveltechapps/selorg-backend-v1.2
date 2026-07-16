@@ -108,6 +108,8 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
   };
   const errors = [];
   const warnings = [];
+  /** @type {{ productId: string, quantity: number, fixedStock?: number }[]} */
+  const stockSyncItems = [];
 
   const runImport = async (session) => {
     // ── SKU Master ──────────────────────────────────────────────────────────
@@ -303,6 +305,7 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
           if (session) existingQ.session(session);
           // eslint-disable-next-line no-await-in-loop
           const existing = await existingQ;
+          let productId = existing?._id || null;
           if (existing) {
             if (!overwrite) {
               counts.products.skipped += 1;
@@ -318,12 +321,23 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
           } else {
             const createData = [doc];
             // eslint-disable-next-line no-await-in-loop
+            let created;
             if (session) {
-              await Product.create(createData, { session });
+              created = await Product.create(createData, { session });
             } else {
-              await Product.create(createData);
+              created = await Product.create(createData);
             }
+            productId = created?.[0]?._id || created?._id || null;
             counts.products.created += 1;
+          }
+
+          // Fixed Stock cell present → sync store_inventory so web app sellable qty updates.
+          if (productId && doc.stockQuantity !== undefined && Number.isFinite(Number(doc.stockQuantity))) {
+            stockSyncItems.push({
+              productId: String(productId),
+              quantity: Number(doc.stockQuantity),
+              fixedStock: Number.isFinite(Number(doc.fixedStock)) ? Number(doc.fixedStock) : Number(doc.stockQuantity),
+            });
           }
         }
 
@@ -337,6 +351,20 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
         
         // Log processing summary
         console.log(`SKU Master processed: ${productRows} total rows, ${productErrors} errors, ${Math.round(errorRate * 100)}% error rate`);
+
+        if (stockSyncItems.length > 0) {
+          const { applyOperationalStockBatch } = require('../inventoryAvailabilitySync');
+          // Catalog stock already written on Product; only upsert store_inventory.
+          // eslint-disable-next-line no-await-in-loop
+          await applyOperationalStockBatch(stockSyncItems, {
+            session,
+            mirrorCatalogStock: false,
+            // Respect import isActive rules (price/image); restock path activates separately.
+            ensureListed: false,
+            invalidateCache: false,
+          });
+          counts.storeInventory = { synced: stockSyncItems.length };
+        }
       }
     }
 

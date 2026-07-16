@@ -196,7 +196,7 @@ async function createAddress(userId, body) {
 
   if (existing) {
     const result = await applyExistingAddressUpdate(existing, merged, uid);
-    return { address: result, wasUpdated: true };
+    return { address: toAddressDto(result), wasUpdated: true };
   }
 
   const count = await CustomerAddress.countDocuments({ userId: uid });
@@ -226,7 +226,7 @@ async function createAddress(userId, body) {
       });
       if (duplicate) {
         const result = await applyExistingAddressUpdate(duplicate, merged, uid);
-        return { address: result, wasUpdated: true };
+        return { address: toAddressDto(result), wasUpdated: true };
       }
     }
     throw err;

@@ -11,7 +11,10 @@ const { LifestyleItem } = require('../models/LifestyleItem');
 const { PromoBlock } = require('../models/PromoBlock');
 const { getDefaultAddress } = require('./addressService');
 const { resolveCollectionProducts } = require('./merchandising/collectionService');
+const { resolveCuratedSectionProducts } = require('./merchandising/curatedHomeSections');
 const { enrichHomePayloadLegacy } = require('../utils/customerMediaEnrichment');
+const { attachLiveSellableStock } = require('../utils/productStock');
+const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
 
 async function resolveProducts(productIds = []) {
   if (!Array.isArray(productIds) || productIds.length === 0) return [];
@@ -47,7 +50,8 @@ async function resolveProducts(productIds = []) {
     });
   const map = new Map(products.map((p) => [String(p._id), p]));
   const ordered = productIds.map((id) => map.get(String(id))).filter(Boolean);
-  return enrichProductsWithVariants(ordered);
+  const withVariants = await enrichProductsWithVariants(ordered);
+  return attachLiveSellableStock(withVariants);
 }
 
 async function getHomePayload(req = {}) {
@@ -103,7 +107,10 @@ async function getHomePayload(req = {}) {
       }
     }
   }
-  const categories = categoryByKey[Object.keys(categoryByKey)[0]] || [];
+  const categories = filterCatalogLabels(categoryByKey[Object.keys(categoryByKey)[0]] || []);
+  for (const key of Object.keys(categoryByKey)) {
+    categoryByKey[key] = filterCatalogLabels(categoryByKey[key] || []);
+  }
   const now = new Date();
   const scheduleQuery = {
     $and: [
@@ -219,6 +226,25 @@ async function getHomePayload(req = {}) {
       sections[d.key] = { title: d.label || d.key, products };
     }
   }
+
+  // Seed health / wellness product rails from mastersheet catalog when lifestyle CMS is empty.
+  for (const curatedKey of ['health', 'wellness']) {
+    const existing = sections[curatedKey];
+    if (Array.isArray(existing?.products) && existing.products.length > 0) continue;
+    try {
+      const curated = await resolveCuratedSectionProducts(curatedKey, { limit: 12 });
+      if (curated?.products?.length) {
+        sections[curatedKey] = {
+          title: curated.title,
+          products: curated.products,
+          viewAllLink: curated.viewAllLink || '',
+        };
+      }
+    } catch (err) {
+      console.warn(`curated home section ${curatedKey} failed:`, err.message);
+    }
+  }
+
   const lifestyle = await LifestyleItem.find({ isActive: true }).sort({ order: 1 }).lean();
   const promoBlocksList = await PromoBlock.find({ isActive: true }).lean();
   const promoBlocks = {};
@@ -262,6 +288,8 @@ async function getHomePayload(req = {}) {
       }
     }
   }
+  if (sections.health?.products?.length) typeByKey.health = 'collections';
+  if (sections.wellness?.products?.length) typeByKey.wellness = 'collections';
 
   const carouselByKey = {};
   /** Expose configured banner id lists so the app can reconcile if resolved bannersByKey is short. */

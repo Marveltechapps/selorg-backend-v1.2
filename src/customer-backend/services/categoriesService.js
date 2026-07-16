@@ -7,6 +7,7 @@ const { Banner } = require('../models/Banner');
 const { Product } = require('../models/Product');
 const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
 const { enrichProduct, enrichCategory } = require('../utils/customerMediaEnrichment');
+const { attachLiveSellableStock } = require('../utils/productStock');
 
 const DEFAULT_PRODUCT_LIMIT = 50;
 
@@ -53,16 +54,53 @@ function productTaxonomyOrForSubcategory(subCategoryId, hierarchyCodes) {
 }
 
 /**
+ * Collect hierarchy codes for a level-1 category and all of its level-2/3 descendants.
+ * @param {string|import('mongoose').Types.ObjectId} mainCategoryId
+ * @param {Array<{ _id: import('mongoose').Types.ObjectId }>} subcategoryDocs
+ * @returns {Promise<string[]>}
+ */
+async function collectHierarchyCodesForMainCategory(mainCategoryId, subcategoryDocs) {
+  const set = new Set();
+  if (mainCategoryId != null && mongoose.Types.ObjectId.isValid(String(mainCategoryId))) {
+    const main = await Category.findById(mainCategoryId).select('hierarchyCodes').lean();
+    for (const c of main?.hierarchyCodes || []) {
+      const t = String(c || '').trim();
+      if (t) set.add(t);
+    }
+  }
+  for (const sub of subcategoryDocs || []) {
+    const codes = await collectHierarchyCodesForSubcategory(sub._id);
+    for (const c of codes) set.add(c);
+  }
+  return [...set];
+}
+
+/**
  * @param {import('mongoose').Types.ObjectId} mainCategoryId
  * @param {Array<{ _id: import('mongoose').Types.ObjectId }>} subcategoryDocs
+ * @param {string[]} [hierarchyCodes]
+ * @param {import('mongoose').Types.ObjectId[]} [aliasCategoryIds] - prior category docs with same slug after re-import
  */
-function productTaxonomyOrForMainCategory(mainCategoryId, subcategoryDocs) {
+function productTaxonomyOrForMainCategory(
+  mainCategoryId,
+  subcategoryDocs,
+  hierarchyCodes = [],
+  aliasCategoryIds = []
+) {
   const subIds = (subcategoryDocs || []).map((s) => s._id);
-  return [
-    { categoryId: mainCategoryId },
-    { subcategoryId: { $in: subIds } },
-    { categoryId: { $in: subIds } },
+  const categoryIds = [
+    mainCategoryId,
+    ...subIds,
+    ...(aliasCategoryIds || []).filter(Boolean),
   ];
+  const or = [
+    { categoryId: { $in: categoryIds } },
+    { subcategoryId: { $in: subIds } },
+  ];
+  if (Array.isArray(hierarchyCodes) && hierarchyCodes.length > 0) {
+    or.push({ hierarchyCode: { $in: hierarchyCodes } });
+  }
+  return or;
 }
 
 /**
@@ -119,9 +157,10 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
       };
     }
   } else {
+    const hierarchyCodes = await collectHierarchyCodesForMainCategory(catId, subcategories);
     productFilter = {
       ...productQueryBase,
-      $or: productTaxonomyOrForMainCategory(catId, subcategories),
+      $or: productTaxonomyOrForMainCategory(catId, subcategories, hierarchyCodes),
     };
   }
 
@@ -133,9 +172,10 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
   // FALLBACK: If subcategory selected but no products found, try broader category-level query
   // This handles cases where products have hierarchyCode but categoryId/subcategoryId weren't set during import
   if (subCategoryId != null && String(subCategoryId).trim() !== '' && rawProducts.length === 0) {
+    const hierarchyCodes = await collectHierarchyCodesForMainCategory(catId, subcategories);
     const fallbackFilter = {
       ...productQueryBase,
-      $or: productTaxonomyOrForMainCategory(catId, subcategories),
+      $or: productTaxonomyOrForMainCategory(catId, subcategories, hierarchyCodes),
     };
     rawProducts = await Product.find(fallbackFilter)
       .sort({ order: 1 })
@@ -143,7 +183,9 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
       .lean();
   }
 
-  const products = await enrichProductsWithVariants(rawProducts);
+  const products = await attachLiveSellableStock(
+    await enrichProductsWithVariants(rawProducts)
+  );
 
   const categoryOut = enrichCategory(category);
   return {
@@ -191,6 +233,14 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
           p.quantity ||
           (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : ''),
         variants: Array.isArray(p.variants) ? p.variants : [],
+        stock: p.stock,
+        stockQuantity: p.stockQuantity,
+        availableStock: p.availableStock,
+        storeStock: p.storeStock,
+        catalogStockQuantity: p.catalogStockQuantity,
+        isSaleable: p.isSaleable,
+        isActive: p.isActive,
+        status: p.status,
       };
     }),
   };
@@ -199,6 +249,7 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
 module.exports = {
   getCategoryPayload,
   collectHierarchyCodesForSubcategory,
+  collectHierarchyCodesForMainCategory,
   productTaxonomyOrForSubcategory,
   productTaxonomyOrForMainCategory,
 };

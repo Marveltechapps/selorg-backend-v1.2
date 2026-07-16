@@ -95,3 +95,22 @@ firebase-adminsdk*.json
 # Temporary
 tmp/
 temp/
+# Logs / temp files
+*.txt
+*_out.json
+*_err.txt
+
+# Environment
+.env
+.env.*
+
+# Dependencies
+node_modules/
+
+# Uploads
+uploads/
+
+# Build
+dist/
+build/
+coverage/

@@ -356,8 +356,28 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
   }
   doc.gstRate = Number(doc.taxPercent) || 0;
 
-  if (doc.fixedStock != null && doc.fixedStock !== '') {
-    doc.stockQuantity = parseNumberCell(doc.fixedStock, 0);
+  // Only copy Fixed Stock → stockQuantity when the sheet cell has a real value.
+  // Empty Fixed Stock must NOT coerce to 0 and wipe sellable qty on re-import —
+  // operational inventory lives in StoreInventory / previous stockQuantity.
+  const fixedStockRaw = (() => {
+    for (const [header, col] of headerMap.entries()) {
+      if (normalizeHeaderKey(header) === 'fixed stock') {
+        return io.getCellText(row, col);
+      }
+    }
+    return undefined;
+  })();
+  if (fixedStockRaw != null && String(fixedStockRaw).trim() !== '') {
+    const parsed = parseNumberCell(fixedStockRaw, NaN);
+    if (Number.isFinite(parsed)) {
+      doc.fixedStock = parsed;
+      doc.stockQuantity = parsed;
+    }
+  } else {
+    // Leave existing stockQuantity alone on updates; avoid writing a false 0 from empty cells.
+    if (doc.fixedStock === 0 && (fixedStockRaw == null || String(fixedStockRaw).trim() === '')) {
+      delete doc.fixedStock;
+    }
   }
   const tq = Number(doc.thresholdQty);
   if (Number.isFinite(tq) && tq > 0) {

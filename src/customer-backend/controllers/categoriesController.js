@@ -5,11 +5,13 @@ const { StoreInventory } = require('../models/StoreInventory');
 const {
   getCategoryPayload,
   collectHierarchyCodesForSubcategory,
+  collectHierarchyCodesForMainCategory,
   productTaxonomyOrForSubcategory,
   productTaxonomyOrForMainCategory,
 } = require('../services/categoriesService');
 const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
 const { enrichProduct } = require('../utils/customerMediaEnrichment');
+const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
 
 function isValidObjectId(id) {
@@ -85,14 +87,39 @@ async function getCategoryProductsBySlug(req, res) {
     if (!category) return res.status(404).json({ success: false, message: 'Category not found' });
 
     const subcategories = await Category.find({ parentId: category._id, isActive: true }).sort({ order: 1 }).lean();
-    const subcategoryId = subcategory ? subcategories.find((s) => s.slug === subcategory)?._id : null;
+    const subcategoryLower = subcategory.toLowerCase();
+    const subcategoryId = subcategory
+      ? subcategories.find(
+          (s) =>
+            s.slug === subcategory ||
+            s.slug === subcategoryLower ||
+            String(s.name || '').toLowerCase() === subcategoryLower
+        )?._id
+      : null;
+
+    // Include prior category docs with the same slug (inactive/superseded after mastersheet re-import)
+    // so products still linked to older category ObjectIds remain discoverable.
+    const aliasCategoryIds = (
+      await Category.find({ slug: category.slug }).select('_id').lean()
+    )
+      .map((c) => c._id)
+      .filter((id) => String(id) !== String(category._id));
 
     let taxonomyOr;
     if (subcategoryId) {
       const codes = await collectHierarchyCodesForSubcategory(subcategoryId);
       taxonomyOr = productTaxonomyOrForSubcategory(subcategoryId, codes);
+      for (const aliasId of aliasCategoryIds) {
+        taxonomyOr.push({ categoryId: aliasId });
+      }
     } else {
-      taxonomyOr = productTaxonomyOrForMainCategory(category._id, subcategories);
+      const codes = await collectHierarchyCodesForMainCategory(category._id, subcategories);
+      taxonomyOr = productTaxonomyOrForMainCategory(
+        category._id,
+        subcategories,
+        codes,
+        aliasCategoryIds
+      );
     }
 
     const storeId = String(req.query.storeId || '').trim();
@@ -136,12 +163,15 @@ async function getCategoryProductsBySlug(req, res) {
         .skip(skip)
         .limit(limit)
         .select(
-          '_id sku name size tag price mrp taxPercent imageUrl thumbnailUrl cardImageUrl images isSaleable stock stockQuantity categoryId subcategoryId',
+          '_id sku name size tag price mrp taxPercent imageUrl thumbnailUrl cardImageUrl images isSaleable isActive status stock stockQuantity categoryId subcategoryId',
         )
         .lean(),
       Product.countDocuments(query),
     ]);
     const products = await enrichProductsWithVariants(rawProducts, { dedupeProductLines: false });
+    const productsWithStock = await attachLiveSellableStock(products, {
+      storeId: storeId || null,
+    });
 
     const productCountEntries = await Promise.all(
       subcategories.map(async (s) => {
@@ -175,7 +205,7 @@ async function getCategoryProductsBySlug(req, res) {
           emoji: s.emoji || '',
           productCount: countMap.get(String(s._id)) || 0,
         })),
-        products: products.map((p) => {
+        products: productsWithStock.map((p) => {
           const enriched = enrichProduct(p);
           const media = pickImageFields(enriched);
           return {
@@ -190,6 +220,14 @@ async function getCategoryProductsBySlug(req, res) {
             cardImageUrl: media.cardImageUrl || null,
             images: Array.isArray(media.images) ? media.images : [],
             variants: Array.isArray(p.variants) ? p.variants : [],
+            stock: p.stock,
+            stockQuantity: p.stockQuantity,
+            availableStock: p.availableStock,
+            storeStock: p.storeStock,
+            catalogStockQuantity: p.catalogStockQuantity,
+            isSaleable: p.isSaleable,
+            isActive: p.isActive,
+            status: p.status,
           };
         }),
         pagination: {

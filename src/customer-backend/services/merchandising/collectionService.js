@@ -3,6 +3,7 @@ const { Product } = require('../../models/Product');
 const { Tag } = require('../../models/Tag');
 const { enrichProduct } = require('../../utils/customerMediaEnrichment');
 const { enrichProductsWithVariants } = require('../../utils/productVariantsPayload');
+const { attachLiveSellableStock } = require('../../utils/productStock');
 
 /**
  * Resolve products for a collection (manual or rule-based)
@@ -75,7 +76,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
     const start = (page - 1) * limit;
     const sliced = products.slice(start, start + limit);
     const withVariants = await enrichProductsWithVariants(sliced);
-    return withVariants.map(enrichProduct);
+    return attachLiveSellableStock(withVariants.map(enrichProduct));
   }
 
   if (productIds.length === 0) return [];
@@ -107,7 +108,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
   const start = (page - 1) * limit;
   const sliced = ordered.slice(start, start + limit);
   const withVariants = await enrichProductsWithVariants(sliced);
-  return withVariants.map(enrichProduct);
+  return attachLiveSellableStock(withVariants.map(enrichProduct));
 }
 
 module.exports = { resolveCollectionProducts };

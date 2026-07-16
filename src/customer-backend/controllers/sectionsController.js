@@ -1,5 +1,30 @@
 const { HomeSection } = require('../models/HomeSection');
 const { Product } = require('../models/Product');
+const { resolveCuratedSectionProducts } = require('../services/merchandising/curatedHomeSections');
+
+async function respondCurated(res, key, page, limit) {
+  const curated = await resolveCuratedSectionProducts(key, { limit: Math.min(50, limit * page) });
+  if (!curated || !Array.isArray(curated.products) || curated.products.length === 0) {
+    return null;
+  }
+  const total = curated.products.length;
+  const start = (page - 1) * limit;
+  const paged = curated.products.slice(start, start + limit);
+  return res.json({
+    success: true,
+    data: {
+      title: curated.title,
+      viewAllLink: curated.viewAllLink || '',
+      products: paged,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    },
+  });
+}
 
 async function getSectionProducts(req, res) {
   try {
@@ -10,6 +35,8 @@ async function getSectionProducts(req, res) {
 
     const section = await HomeSection.findOne({ sectionKey: key, isActive: true }).lean();
     if (!section) {
+      const curatedRes = await respondCurated(res, key, page, limit);
+      if (curatedRes) return curatedRes;
       return res.status(404).json({ success: false, message: 'Section not found' });
     }
 
@@ -37,6 +64,13 @@ async function getSectionProducts(req, res) {
       const orderMap = new Map((section.productIds || []).map((id, idx) => [String(id), idx]));
       ordered = products.sort((a, b) => (orderMap.get(String(a._id)) ?? 9999) - (orderMap.get(String(b._id)) ?? 9999));
     }
+
+    // Empty CMS section (or all SKUs unsaleable) → curated catalog for virtual rails.
+    if (ordered.length === 0) {
+      const curatedRes = await respondCurated(res, key, page, limit);
+      if (curatedRes) return curatedRes;
+    }
+
     const total = ordered.length;
     const start = (page - 1) * limit;
     const paged = ordered.slice(start, start + limit);
@@ -45,12 +79,13 @@ async function getSectionProducts(req, res) {
       success: true,
       data: {
         title: section.title || section.sectionKey,
+        viewAllLink: section.viewAllLink || '',
         products: paged,
         pagination: {
           page,
           limit,
           total,
-          totalPages: Math.ceil(total / limit),
+          totalPages: Math.max(1, Math.ceil(total / limit) || 1),
         },
       },
     });

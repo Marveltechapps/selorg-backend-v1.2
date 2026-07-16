@@ -1002,6 +1002,32 @@ exports.updateProduct = async (req, res) => {
   if (!updated) {
     return res.status(404).json({ success: false, message: 'Product not found' });
   }
+
+  // Keep store_inventory + customer caches in sync when admin edits stock.
+  if (body.stockQuantity !== undefined || body.stock !== undefined) {
+    const {
+      applyOperationalStock,
+    } = require('../../services/inventoryAvailabilitySync');
+    const qty =
+      body.stockQuantity !== undefined ? body.stockQuantity : body.stock;
+    await applyOperationalStock({
+      productId: updated._id,
+      quantity: qty,
+      mirrorCatalogStock: true,
+      ensureListed: true,
+      invalidateCache: true,
+    });
+  } else {
+    try {
+      const {
+        invalidateCustomerCatalogCaches,
+      } = require('../../services/inventoryAvailabilitySync');
+      await invalidateCustomerCatalogCaches();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   res.json({ success: true, data: updated });
 };
 exports.deleteProduct = async (req, res) => {
@@ -1038,6 +1064,14 @@ exports.patchProductStatus = async (req, res) => {
     { new: true }
   ).lean();
   if (!updated) return res.status(404).json({ success: false, message: 'Product not found' });
+  try {
+    const {
+      invalidateCustomerCatalogCaches,
+    } = require('../../services/inventoryAvailabilitySync');
+    await invalidateCustomerCatalogCaches();
+  } catch (_) {
+    /* ignore */
+  }
   res.json({ success: true, data: updated });
 };
 
@@ -1062,6 +1096,14 @@ exports.publishProduct = async (req, res) => {
     .populate('subcategoryId', 'name slug')
     .lean();
   // TODO: emit product.published event for sync to Warehouse/Dark Store (async)
+  try {
+    const {
+      invalidateCustomerCatalogCaches,
+    } = require('../../services/inventoryAvailabilitySync');
+    await invalidateCustomerCatalogCaches();
+  } catch (_) {
+    /* ignore */
+  }
   res.json({ success: true, data: updated });
 };
 
@@ -1106,6 +1148,41 @@ exports.bulkUpdateProducts = async (req, res) => {
   }
 
   const result = await Product.updateMany({ _id: { $in: validIds } }, updateOp);
+
+  const stockTouched =
+    setPayload.stockQuantity !== undefined ||
+    (typeof stockIncrement === 'number' && stockIncrement !== 0);
+
+  if (stockTouched) {
+    const {
+      applyOperationalStock,
+      invalidateCustomerCatalogCaches,
+    } = require('../../services/inventoryAvailabilitySync');
+    const products = await Product.find({ _id: { $in: validIds } })
+      .select('_id stockQuantity')
+      .lean();
+    for (const p of products) {
+      // eslint-disable-next-line no-await-in-loop
+      await applyOperationalStock({
+        productId: p._id,
+        quantity: p.stockQuantity,
+        mirrorCatalogStock: false,
+        ensureListed: true,
+        invalidateCache: false,
+      });
+    }
+    await invalidateCustomerCatalogCaches();
+  } else {
+    try {
+      const {
+        invalidateCustomerCatalogCaches,
+      } = require('../../services/inventoryAvailabilitySync');
+      await invalidateCustomerCatalogCaches();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   res.json({ success: true, count: result.modifiedCount });
 };
 exports.bulkUpdateProductStatus = async (req, res) => {

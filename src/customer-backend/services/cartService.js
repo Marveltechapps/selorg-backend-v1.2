@@ -3,6 +3,12 @@ const { Cart } = require('../models/Cart');
 const { Product } = require('../models/Product');
 const { calculatePricing, compareWithLegacy } = require('./pricingEngineService');
 const { pickFirstNonStubString } = require('../utils/mediaUrl');
+const {
+  resolveAvailableStock,
+  isProductPurchasable,
+  assertStockAllowsAsync,
+  attachLiveSellableStock,
+} = require('../utils/productStock');
 
 const usePricingEngine = true;
 
@@ -109,6 +115,7 @@ async function formatCartResponse(cart, options = {}) {
     image: pickFirstString(it.image),
   }));
   items = await hydrateCartItemImages(items);
+  items = await hydrateCartItemStock(items);
   const legacyItemTotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
   const legacyDeliveryFee = 0;
   const legacyDiscount = 0;
@@ -225,6 +232,34 @@ async function hydrateCartItemImages(items) {
   });
 }
 
+/** Attach live stockStatus from Product + StoreInventory onto each cart line. */
+async function hydrateCartItemStock(items) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  const productIds = [
+    ...new Set(
+      items
+        .map((it) => String(it.productId || '').trim())
+        .filter((id) => id && mongoose.Types.ObjectId.isValid(id)),
+    ),
+  ];
+  if (productIds.length === 0) {
+    return items.map((it) => ({ ...it, stock: 0, inStock: false }));
+  }
+
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select('stock stockQuantity isActive isSaleable isPurchasable status')
+    .lean();
+  const withStock = await attachLiveSellableStock(products);
+  const byId = new Map(withStock.map((p) => [String(p._id), p]));
+
+  return items.map((it) => {
+    const catalog = byId.get(String(it.productId));
+    const stock = resolveAvailableStock(catalog);
+    const inStock = isProductPurchasable(catalog);
+    return { ...it, stock, inStock, storeStock: catalog?.storeStock, catalogStockQuantity: catalog?.catalogStockQuantity };
+  });
+}
+
 /**
  * Resolve catalog row + line keys for add-to-cart (embedded variants, single SKU, hierarchy sibling).
  */
@@ -287,6 +322,7 @@ async function resolveLineSnapshot(productId, variantId) {
     productName,
     image,
     gstRate,
+    catalogProduct,
   };
 }
 
@@ -339,11 +375,19 @@ async function addItem(userId, body) {
     productName,
     image,
     gstRate,
+    catalogProduct,
   } = snapshot;
 
   await dedupeCartLines(userId);
 
   let cart = await Cart.findOne({ userId });
+  const existingQty = cart
+    ? Number(cart.items.find((it) => matchCartLine(it, lineProductId, lineVariantId))?.quantity) || 0
+    : 0;
+
+  const stockCheck = await assertStockAllowsAsync(catalogProduct, qty, existingQty, 'add');
+  if (stockCheck.error) return { error: stockCheck.error };
+
   if (!cart) {
     cart = await Cart.create({
       userId,
@@ -406,6 +450,23 @@ async function updateItem(userId, itemId, quantity, opts = {}) {
         ? new mongoose.Types.ObjectId(String(userId))
         : null;
   if (!uid) return { error: 'Invalid user id' };
+
+  // Resolve live product stock before mutating quantity.
+  let productForStock = null;
+  if (productId && mongoose.Types.ObjectId.isValid(String(productId))) {
+    const snapshot = await resolveLineSnapshot(productId, variantId);
+    if (!snapshot.error) productForStock = snapshot.catalogProduct;
+  } else if (itemId && mongoose.Types.ObjectId.isValid(itemId)) {
+    const existingCart = await Cart.findOne({ userId: uid }).lean();
+    const line = existingCart?.items?.find((it) => String(it._id) === String(itemId));
+    if (line?.productId) {
+      productForStock = await Product.findById(line.productId).lean();
+    }
+  }
+  if (productForStock) {
+    const stockCheck = await assertStockAllowsAsync(productForStock, quantity, 0, 'set');
+    if (stockCheck.error) return { error: stockCheck.error };
+  }
 
   let filter = { userId: uid };
   let update = { $set: { 'items.$.quantity': quantity } };

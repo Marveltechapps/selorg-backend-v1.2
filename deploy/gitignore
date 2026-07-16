@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Build
+dist/
+build/
+coverage/
+.next/
+.nuxt/
+.vite/
+.cache/
+
+# Expo / React Native
+.expo/
+.expo-shared/
+android/.gradle/
+android/local.properties
+android/app/build/
+ios/Pods/
+ios/build/
+ios/DerivedData/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
+
+# Firebase / Secrets
+google-services.json
+GoogleService-Info.plist
+serviceAccountKey.json
+firebase-adminsdk*.json
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+*.keystore
+
+# Temporary
+tmp/
+temp/
+*.tmp

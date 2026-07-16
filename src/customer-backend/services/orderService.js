@@ -10,6 +10,7 @@ const { calculatePricing, compareWithLegacy } = require('./pricingEngineService'
 const { clearCart: clearUserCart } = require('./cartService');
 const { resolveStoreId } = require('./storeLocator');
 const { geocodeAddress } = require('./geocodingService');
+const { assertStockAllowsAsync } = require('../utils/productStock');
 
 /** All orders route to Adyar darkstore only */
 const ADYAR_STORE_ID = 'DS-Adyar-01';
@@ -698,6 +699,12 @@ async function createOrder(userId, body) {
       variantSize = v.size || '';
     }
     const qty = Math.max(1, line.quantity || 1);
+    const stockCheck = await assertStockAllowsAsync(product, qty, 0, 'set');
+    if (stockCheck.error) {
+      return {
+        error: `${product.name || 'Product'}: ${stockCheck.error}`,
+      };
+    }
     const lineTotal = price * qty;
     const gstRate = product.gstRate || 0;
     const taxAmount = lineTotal * (gstRate / (100 + gstRate));

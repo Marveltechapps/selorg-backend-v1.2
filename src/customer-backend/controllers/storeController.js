@@ -22,7 +22,8 @@ async function assignStore(req, res) {
     });
 
     if (!store) {
-      return res.status(404).json({
+      // 200 + serviceable:false — clients (e.g. axios) treat 404 as a hard failure
+      return res.status(200).json({
         error: 'No serviceable store found near your location',
         serviceable: false,
       });
@@ -31,7 +32,7 @@ async function assignStore(req, res) {
     const distanceKm = getDistanceKm(latitude, longitude, store.location.coordinates[1], store.location.coordinates[0]);
 
     if (distanceKm > store.serviceRadius) {
-      return res.status(404).json({
+      return res.status(200).json({
         error: 'Your location is outside our delivery area',
         serviceable: false,
         nearestStore: store.name,
@@ -261,7 +262,8 @@ async function deleteStore(req, res) {
 
 /**
  * PUT /admin/inventory/:storeId
- * Update store inventory quantities
+ * Update store inventory quantities — mirrors catalog stock, activates listing
+ * when qty > 0, and busts customer caches so the web app reflects stock immediately.
  */
 async function updateInventory(req, res) {
   try {
@@ -272,15 +274,24 @@ async function updateInventory(req, res) {
       return res.status(400).json({ success: false, error: 'updates must be an array' });
     }
 
-    const results = await Promise.all(
-      updates.map(({ productId, quantity, isAvailable }) =>
-        StoreInventory.findOneAndUpdate(
-          { storeId, productId },
-          { quantity: Number(quantity), isAvailable: isAvailable !== false, lastUpdatedAt: new Date() },
-          { new: true, upsert: true }
-        )
-      )
-    );
+    const {
+      applyOperationalStock,
+      invalidateCustomerCatalogCaches,
+    } = require('../services/inventoryAvailabilitySync');
+
+    const results = [];
+    for (const row of updates) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await applyOperationalStock({
+        productId: row.productId,
+        quantity: row.quantity,
+        storeId,
+        isAvailable: row.isAvailable !== false,
+        invalidateCache: false,
+      });
+      results.push(r);
+    }
+    await invalidateCustomerCatalogCaches();
 
     return res.json({
       success: true,
@@ -306,19 +317,24 @@ async function syncInventory(req, res) {
       return res.status(400).json({ success: false, error: 'productAllocations must be an array' });
     }
 
-    const results = await Promise.all(
-      productAllocations.map(({ productId, allocatedQty }) =>
-        StoreInventory.findOneAndUpdate(
-          { storeId, productId },
-          {
-            quantity: Number(allocatedQty),
-            isAvailable: allocatedQty > 0,
-            lastSyncAt: new Date(),
-          },
-          { new: true, upsert: true }
-        )
-      )
-    );
+    const {
+      applyOperationalStock,
+      invalidateCustomerCatalogCaches,
+    } = require('../services/inventoryAvailabilitySync');
+
+    const results = [];
+    for (const row of productAllocations) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await applyOperationalStock({
+        productId: row.productId,
+        quantity: row.allocatedQty,
+        storeId,
+        isAvailable: Number(row.allocatedQty) > 0,
+        invalidateCache: false,
+      });
+      results.push(r);
+    }
+    await invalidateCustomerCatalogCaches();
 
     return res.json({
       success: true,

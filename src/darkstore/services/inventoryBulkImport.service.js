@@ -237,6 +237,20 @@ async function processInventoryRows(rows, options = {}) {
         if (shelf) await syncShelfSku(shelf, sku, name, stock);
       }
 
+      try {
+        const {
+          applyOperationalStockBySku,
+        } = require('../../customer-backend/services/inventoryAvailabilitySync');
+        // eslint-disable-next-line no-await-in-loop
+        await applyOperationalStockBySku(sku, stock, {
+          ensureListed: true,
+          mirrorCatalogStock: true,
+          invalidateCache: false,
+        });
+      } catch (_) {
+        /* customer product may not exist for this darkstore SKU yet */
+      }
+
       processedRows++;
     } catch (err) {
       errors.push({ row: rowNum, error: err.message || 'Failed to save row' });
@@ -244,6 +258,14 @@ async function processInventoryRows(rows, options = {}) {
   }
 
   if (!validateOnly && processedRows > 0) {
+    try {
+      const {
+        invalidateCustomerCatalogCaches,
+      } = require('../../customer-backend/services/inventoryAvailabilitySync');
+      await invalidateCustomerCatalogCaches();
+    } catch (_) {
+      /* ignore */
+    }
     await AuditLog.create({
       id: generateId('AUD'),
       timestamp: new Date().toISOString(),

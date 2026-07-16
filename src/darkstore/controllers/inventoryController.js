@@ -24,6 +24,25 @@ const {
 } = require('../utils/inventoryStockSync');
 const cycleCountReportService = require('../services/cycleCountReport.service');
 
+/** Push darkstore stock into customer store_inventory + catalog so the web app updates immediately. */
+async function syncCustomerAvailability(sku, quantity) {
+  try {
+    const {
+      applyOperationalStockBySku,
+    } = require('../../customer-backend/services/inventoryAvailabilitySync');
+    const result = await applyOperationalStockBySku(sku, quantity, {
+      ensureListed: true,
+      mirrorCatalogStock: true,
+      invalidateCache: true,
+    });
+    if (!result?.ok) {
+      logger.warn('Customer inventory sync skipped', { sku, error: result?.error });
+    }
+  } catch (err) {
+    logger.warn('Customer inventory sync failed', { sku, error: err?.message || err });
+  }
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -301,6 +320,8 @@ const updateStockLevel = async (req, res) => {
       },
       store_id: item.store_id,
     });
+
+    await syncCustomerAvailability(sku, stock);
 
     res.status(200).json({
       success: true,
@@ -654,6 +675,8 @@ const createAdjustment = async (req, res) => {
       },
       store_id: storeId,
     });
+
+    await syncCustomerAvailability(item.sku, newStock);
 
     res.status(200).json({
       success: true,
