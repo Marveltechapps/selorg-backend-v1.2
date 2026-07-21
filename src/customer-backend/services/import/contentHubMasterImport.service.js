@@ -1,14 +1,74 @@
 const ExcelJS = require('exceljs');
+const mongoose = require('mongoose');
 
 const { Category } = require('../../models/Category');
 const { Product } = require('../../models/Product');
 const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
 const { applyBannerDetails } = require('./bannerDetailsImport.service');
 const { applyHomePageContent } = require('./homePageContentImport.service');
+const { applyCollectionsSheet } = require('./cmsPagesImport.service');
+const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassification');
+
+const PRODUCT_BULK_CHUNK = 250;
 
 /** Apply Mongo session when present; when null/undefined, run without session (non-transactional). */
 function bindSession(query, sess) {
   return sess == null ? query : query.session(sess);
+}
+
+async function flushBulkWrite(Model, ops, session) {
+  if (!ops.length) return;
+  const opts = { ordered: false };
+  if (session) opts.session = session;
+  await Model.bulkWrite(ops, opts);
+  ops.length = 0;
+}
+
+function createStageTimer(onProgress) {
+  const stageTimings = {};
+  let currentStage = null;
+  let stageStartedAt = 0;
+  const importStartedAt = Date.now();
+
+  async function report(stage, progress, message) {
+    if (typeof onProgress === 'function') {
+      try {
+        await onProgress({
+          stage,
+          progress,
+          message,
+          stageTimings: { ...stageTimings },
+        });
+      } catch (e) {
+        console.warn('[ContentHubImport] onProgress failed', e?.message || e);
+      }
+    }
+  }
+
+  async function begin(stage, progress, message) {
+    const now = Date.now();
+    if (currentStage) {
+      stageTimings[currentStage] = (stageTimings[currentStage] || 0) + (now - stageStartedAt);
+    }
+    currentStage = stage;
+    stageStartedAt = now;
+    console.log(`[ContentHubImport] stage=${stage} progress=${progress}% ${message || ''}`);
+    await report(stage, progress, message || stage);
+  }
+
+  async function end() {
+    const now = Date.now();
+    if (currentStage) {
+      stageTimings[currentStage] = (stageTimings[currentStage] || 0) + (now - stageStartedAt);
+    }
+    stageTimings.total = now - importStartedAt;
+    currentStage = null;
+    console.log('[ContentHubImport] stage timings (ms)', stageTimings);
+    await report('done', 100, 'Import finished');
+    return stageTimings;
+  }
+
+  return { begin, end, stageTimings, report };
 }
 
 function slugify(str) {
@@ -209,8 +269,9 @@ function splitDescription(val) {
 }
 
 function parseHierarchyCode(code) {
+  // Mastersheets sometimes contain whitespace inside codes ("A 3506"); treat as "A3506".
   const raw = String(code || '').trim();
-  const m = /^([A-Za-z])(\d+)$/.exec(raw);
+  const m = /^([A-Za-z])\s*(\d+)$/.exec(raw);
   if (!m) return null;
   const letter = m[1].toUpperCase();
   const digitsStr = m[2];
@@ -248,7 +309,13 @@ function normalizeForMatch(str) {
 // ─── Top-level category name → token set (used by Display Image name fallback) ───
 // Handles plural/singular ("Millet" vs "Millets"), filler words like "category",
 // and well-known typos ("Diary" vs "Dairy") that appear between the sheet tabs.
-const CATEGORY_NAME_ALIASES = new Map([['diary', 'dairy']]);
+const CATEGORY_NAME_ALIASES = new Map([
+  ['diary', 'dairy'],
+  ['basmati', 'basmathi'],
+  ['basmathi', 'basmati'],
+  ['vermicelli', 'vermecelli'],
+  ['vermecelli', 'vermicelli'],
+]);
 const CATEGORY_NAME_STOPWORDS = new Set(['category', 'categories', 'the', 'a', 'an']);
 
 function stemCategoryToken(t) {
@@ -305,6 +372,76 @@ async function applyMainCategoryImageByName(sheetName, imageUrl, txnSession) {
   return updated;
 }
 
+/**
+ * Update imageUrl for level-2 subcategories under matching main category(ies)
+ * when the Display Image sheet row has no Hierarchy Code Ref.
+ * Matches sheet sub name tokens against DB sub names (same approach as main categories).
+ */
+async function applySubCategoryImageByName(mainSheetName, subSheetName, imageUrl, txnSession, allowGlobalFallback = true) {
+  const url = String(imageUrl || '').trim();
+  if (!url || !subSheetName) return 0;
+
+  const subSheetTokens = categoryTokenSet(subSheetName);
+  const subNorm = normalizeForMatch(subSheetName);
+  if (subSheetTokens.size === 0 && !subNorm) return 0;
+
+  const tops = await bindSession(
+    Category.find({ parentId: null, isActive: true, level: 1 }).select('_id name'),
+    txnSession
+  ).lean();
+
+  const resolveParentIds = (scopedMainName) => {
+    let parentIds = tops.map((c) => c._id);
+    const mainSheetTokens = categoryTokenSet(scopedMainName || '');
+    if (scopedMainName && mainSheetTokens.size > 0) {
+      parentIds = tops
+        .filter((cat) => {
+          const dbTokens = categoryTokenSet(cat.name);
+          return [...mainSheetTokens].every((t) => dbTokens.has(t));
+        })
+        .map((c) => c._id);
+    }
+    return parentIds;
+  };
+
+  const tryUpdate = async (parentIds) => {
+    if (parentIds.length === 0) return 0;
+    const subs = await bindSession(
+      Category.find({ parentId: { $in: parentIds }, isActive: true, level: 2 }).select(
+        '_id name imageUrl'
+      ),
+      txnSession
+    ).lean();
+
+    let updated = 0;
+    for (const sub of subs) {
+      const dbTokens = categoryTokenSet(sub.name);
+      const dbNorm = normalizeForMatch(sub.name);
+      const sheetInDb = subSheetTokens.size > 0 && [...subSheetTokens].every((t) => dbTokens.has(t));
+      const dbInSheet = subSheetTokens.size > 0 && [...dbTokens].every((t) => subSheetTokens.has(t));
+      const normMatch =
+        subNorm && dbNorm && (subNorm === dbNorm || subNorm.includes(dbNorm) || dbNorm.includes(subNorm));
+      if (!sheetInDb && !dbInSheet && !normMatch) continue;
+      if (String(sub.imageUrl || '').trim() === url) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await Category.updateOne(
+        { _id: sub._id },
+        { $set: { imageUrl: url } },
+        { session: txnSession || undefined }
+      );
+      updated += 1;
+    }
+    return updated;
+  };
+
+  let updated = await tryUpdate(resolveParentIds(mainSheetName));
+  // Mastersheet rows are occasionally mis-ordered (e.g. "Breads" before "Tea & Breakfast" main row).
+  if (updated === 0 && allowGlobalFallback && mainSheetName) {
+    updated = await tryUpdate(resolveParentIds(''));
+  }
+  return updated;
+}
+
 function getSkuBaseName(skuName) {
   const raw = String(skuName || '').trim();
   if (!raw) return '';
@@ -334,9 +471,15 @@ function expandCodeRange(codeRef) {
   return out;
 }
 
-async function importContentHubMaster(buffer, { overwrite = true } = {}) {
+async function importContentHubMaster(buffer, { overwrite = true, onProgress = null } = {}) {
+  const timer = createStageTimer(onProgress);
+  await timer.begin('parsing', 2, 'Loading workbook');
+
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
+  console.log(
+    `[ContentHubImport] workbook loaded sheets=${wb.worksheets.map((s) => s.name).join(', ')}`
+  );
 
   const counts = {
     categories: { created: 0, updated: 0, skipped: 0 },
@@ -349,10 +492,38 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
   const errors = [];
   const warnings = [];
 
+  // In-memory caches to avoid repeated findOne during category upserts.
+  const categoryByHierarchyCode = new Map();
+  const categoryByParentLevelName = new Map();
+  const categoryById = new Map();
+
+  const cacheCategory = (doc) => {
+    if (!doc?._id) return;
+    const id = String(doc._id);
+    categoryById.set(id, doc);
+    for (const code of Array.isArray(doc.hierarchyCodes) ? doc.hierarchyCodes : []) {
+      if (!code) continue;
+      categoryByHierarchyCode.set(String(code), doc);
+      // Whitespace-insensitive alias so product codes like "A 3506" match category code "A3506".
+      const compact = String(code).replace(/\s+/g, '');
+      if (compact && compact !== String(code)) categoryByHierarchyCode.set(compact, doc);
+    }
+    const key = `${doc.parentId || 'null'}|${doc.level}|${String(doc.name || '').toLowerCase()}`;
+    categoryByParentLevelName.set(key, doc);
+  };
+
+  /** Whitespace-insensitive lookup for product hierarchy codes ("A 3506" vs "A3506"). */
+  const lookupCategoryByCode = (code) => {
+    const raw = String(code || '').trim();
+    if (!raw) return undefined;
+    return categoryByHierarchyCode.get(raw) || categoryByHierarchyCode.get(raw.replace(/\s+/g, ''));
+  };
+
   const executeImport = async (txnSession) => {
       // -------------------------
       // 1) Categories hierarchy
       // -------------------------
+      await timer.begin('categories', 8, 'Importing categories hierarchy');
       const catsWs = wb.getWorksheet('Categories');
       if (!catsWs) {
         errors.push({ sheet: 'Categories', message: 'Sheet "Categories" not found' });
@@ -409,11 +580,20 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             const codeTrim = String(userCode || '').trim();
             const internalKey = codeTrim || stableSheetHierarchyCode(level, carryMain, carrySub, name, rowNum);
             let existing = null;
-            if (codeTrim) {
+            if (codeTrim && categoryByHierarchyCode.has(codeTrim)) {
+              existing = categoryByHierarchyCode.get(codeTrim);
+            } else if (codeTrim) {
               existing = await Category.findOne({ hierarchyCodes: codeTrim }).session(txnSession).lean();
+              if (existing) cacheCategory(existing);
             }
             if (!existing && parentId != null) {
-              existing = await Category.findOne({ parentId, level, name }).session(txnSession).lean();
+              const cacheKey = `${parentId}|${level}|${String(name).toLowerCase()}`;
+              if (categoryByParentLevelName.has(cacheKey)) {
+                existing = categoryByParentLevelName.get(cacheKey);
+              } else {
+                existing = await Category.findOne({ parentId, level, name }).session(txnSession).lean();
+                if (existing) cacheCategory(existing);
+              }
             }
             if (!existing && level === 1) {
               // Case-insensitive match prevents the mastersheet's "RICE Mandi" / "Rice Mandi" rows
@@ -424,6 +604,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 parentId: null,
                 name: { $regex: `^${escaped}$`, $options: 'i' },
               }).session(txnSession).lean();
+              if (existing) cacheCategory(existing);
             }
             const desiredSlug = slugify(name);
             const slug = existing
@@ -449,6 +630,18 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 },
                 { session: txnSession }
               );
+              const updated = {
+                ...existing,
+                name,
+                slug,
+                isActive: true,
+                order: orderVal,
+                parentId: parentId || null,
+                level,
+                importRaw: rawRow,
+                hierarchyCodes: codesToSet,
+              };
+              cacheCategory(updated);
               counts.categories.updated += 1;
               return String(existing._id);
             }
@@ -469,6 +662,7 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
               ],
               { session: txnSession }
             );
+            cacheCategory(created[0].toObject ? created[0].toObject() : created[0]);
             counts.categories.created += 1;
             return String(created[0]._id);
           };
@@ -564,14 +758,10 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
             }
           }
 
-          const productNameCandidates = [...productNameToParent.entries()].map(([normName, ids]) => ({
-            normName,
-            ...ids,
-          }));
-
           // -------------------------
-          // 2) Products from SKU Master
+          // 2) Products from SKU Master (prefetch + bulkWrite)
           // -------------------------
+          await timer.begin('products', 22, 'Importing SKU Master products');
           const skuWs = wb.getWorksheet('SKU Master');
           if (!skuWs) {
             errors.push({ sheet: 'SKU Master', message: 'Sheet "SKU Master" not found' });
@@ -620,14 +810,23 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 }
               }
 
+              /** @type {Array<{ rowNum: number, sku: string, name: string, doc: object, rawSalePrice: string, rawMrp: string, rawPriceInclGst: string, rawBaseCost: string, rawIsSaleable: string }>} */
+              const preparedRows = [];
+              const hierarchyCodesNeeded = new Set();
+
               for (let r = firstDataRow; r <= skuWs.rowCount; r += 1) {
                 const row = skuWs.getRow(r);
                 const sku = getCellText(row, skuCol);
                 const name = getCellText(row, nameCol);
-                if (!sku || !name) {
+                if (!sku || !name) continue;
+                if (SKIP_VALUES.has(sku)) {
+                  counts.products.skipped += 1;
                   continue;
                 }
-                if (SKIP_VALUES.has(sku)) {
+                // PROD-* is the legacy seed/demo SKU namespace (placeholder images,
+                // no hierarchy code). Never import or re-activate them from a sheet.
+                if (/^PROD-\d+$/i.test(sku)) {
+                  warnings.push({ sheet: 'SKU Master', row: r, sku, message: 'Seed/demo SKU (PROD-*) skipped — not a catalog product' });
                   counts.products.skipped += 1;
                   continue;
                 }
@@ -643,59 +842,143 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 doc.price = doc.price == null || Number.isNaN(Number(doc.price)) ? 0 : Number(doc.price);
                 doc.mrp = doc.mrp == null || Number.isNaN(Number(doc.mrp)) ? 0 : Number(doc.mrp);
                 doc.baseCost = doc.baseCost == null || Number.isNaN(Number(doc.baseCost)) ? 0 : Number(doc.baseCost);
-                if (doc.mrp < doc.price) {
-                  doc.mrp = doc.price;
-                }
+                if (doc.mrp < doc.price) doc.mrp = doc.price;
                 doc.originalPrice = doc.mrp;
                 doc.costPrice = doc.baseCost || 0;
 
-                // Best-effort taxonomy linkage from Categories sheet (level-3 "Products").
-                const baseName = normalizeForMatch(getSkuBaseName(name));
-                let matched = null;
-                for (const cand of productNameCandidates) {
-                  if (!cand.normName) continue;
-                  if (!baseName || (!baseName.includes(cand.normName) && !cand.normName.includes(baseName))) continue;
-                  // Prefer the most specific (longest) match.
-                  if (!matched || cand.normName.length > matched.normName.length) matched = cand;
+                if (doc.hierarchyCode) {
+                  const rawHc = String(doc.hierarchyCode || '').trim();
+                  if (rawHc) hierarchyCodesNeeded.add(rawHc);
+                  const hc = parseHierarchyCode(rawHc);
+                  if (hc) {
+                    hierarchyCodesNeeded.add(hc.mainCode);
+                    hierarchyCodesNeeded.add(hc.subCode);
+                    if (hc.productCode) hierarchyCodesNeeded.add(hc.productCode);
+                    if (hc.fullCode) hierarchyCodesNeeded.add(hc.fullCode);
+                  }
                 }
 
-                // Fallback: Try hierarchy-code-based matching when name matching fails
-                if (!matched && doc.hierarchyCode) {
-                  const hc = parseHierarchyCode(String(doc.hierarchyCode || '').trim());
-                  if (hc) {
-                    // eslint-disable-next-line no-await-in-loop
-                    const leaf = await Category.findOne({ hierarchyCodes: hc.productCode || hc.fullCode, level: 3 }).session(txnSession).lean();
-                    if (leaf?.parentId) {
-                      // eslint-disable-next-line no-await-in-loop
-                      const subDoc = await Category.findById(leaf.parentId).session(txnSession).lean();
-                      if (subDoc?.parentId) {
-                        matched = { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
-                      }
-                    }
-                    if (!matched && hc.subCode) {
-                      // eslint-disable-next-line no-await-in-loop
-                      const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode, level: 2 }).session(txnSession).lean();
-                      if (subDoc?._id && subDoc.parentId) {
-                        matched = { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
-                      }
+                preparedRows.push({
+                  rowNum: r,
+                  sku,
+                  name,
+                  doc,
+                  rawSalePrice: salePriceCol ? getCellText(row, salePriceCol) : '',
+                  rawMrp: mrpCol ? getCellText(row, mrpCol) : '',
+                  rawPriceInclGst: priceInclGstCol ? getCellText(row, priceInclGstCol) : '',
+                  rawBaseCost: baseCostCol ? getCellText(row, baseCostCol) : '',
+                  rawIsSaleable: isSaleableCol ? getCellText(row, isSaleableCol) : '',
+                });
+              }
+
+              console.log(`[ContentHubImport] SKU rows prepared=${preparedRows.length}`);
+
+              // Prefetch existing products by SKU (one query instead of N findOne).
+              const allSkus = preparedRows.map((p) => p.sku);
+              const existingBySku = new Map();
+              for (let i = 0; i < allSkus.length; i += 1000) {
+                const chunk = allSkus.slice(i, i + 1000);
+                // eslint-disable-next-line no-await-in-loop
+                const existingDocs = await Product.find({ sku: { $in: chunk } })
+                  .session(txnSession)
+                  .lean();
+                for (const p of existingDocs) {
+                  existingBySku.set(String(p.sku), p);
+                }
+              }
+
+              // Prefetch categories referenced by hierarchy codes.
+              const codeList = [...hierarchyCodesNeeded].filter(Boolean);
+              if (codeList.length > 0) {
+                const cats = await Category.find({ hierarchyCodes: { $in: codeList } })
+                  .session(txnSession)
+                  .lean();
+                for (const c of cats) cacheCategory(c);
+                const parentIds = [
+                  ...new Set(cats.map((c) => (c.parentId ? String(c.parentId) : null)).filter(Boolean)),
+                ];
+                if (parentIds.length > 0) {
+                  const parents = await Category.find({
+                    _id: { $in: parentIds.map((id) => new mongoose.Types.ObjectId(id)) },
+                  })
+                    .session(txnSession)
+                    .lean();
+                  for (const p of parents) cacheCategory(p);
+                }
+              }
+
+              const resolveHierarchyMatch = (hierarchyCodeRaw) => {
+                const raw = String(hierarchyCodeRaw || '').trim();
+                if (!raw) return null;
+                const hc = parseHierarchyCode(raw);
+                const leafCode = (hc && (hc.productCode || hc.fullCode)) || raw;
+                const leaf = lookupCategoryByCode(leafCode);
+                if (leaf?.parentId && leaf.level === 3) {
+                  const subDoc =
+                    categoryById.get(String(leaf.parentId)) ||
+                    lookupCategoryByCode(String(leaf.parentId));
+                  if (subDoc?.parentId) {
+                    return { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
+                  }
+                }
+                // A leaf-level code may be attached directly to a level-2 subcategory
+                // (e.g. repaired mappings where the sheet has no matching leaf row).
+                if (leaf?.parentId && leaf.level === 2) {
+                  return { categoryId: leaf.parentId, subcategoryId: leaf._id };
+                }
+                // Preserve prior behavior: try productCode/fullCode then subCode.
+                if (hc) {
+                  const leaf2 = lookupCategoryByCode(hc.productCode || hc.fullCode);
+                  if (leaf2?.parentId) {
+                    const subDoc = categoryById.get(String(leaf2.parentId));
+                    if (subDoc?.parentId) {
+                      return { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
                     }
                   }
+                  if (hc.subCode) {
+                    const subDoc = lookupCategoryByCode(hc.subCode);
+                    if (subDoc?._id && subDoc.parentId && (subDoc.level === 2 || !subDoc.level)) {
+                      return { categoryId: subDoc.parentId, subcategoryId: subDoc._id };
+                    }
+                  }
+                }
+                return null;
+              };
+
+              const bulkOps = [];
+              let processed = 0;
+
+              for (const prepared of preparedRows) {
+                const { rowNum: r, sku, name, doc } = prepared;
+                const {
+                  rawSalePrice,
+                  rawMrp,
+                  rawPriceInclGst,
+                  rawBaseCost,
+                  rawIsSaleable,
+                } = prepared;
+
+                // Taxonomy linkage. Hierarchy code is authoritative; name matching is a
+                // fallback and must be EXACT on the normalized name (never substring —
+                // "Lemon Rice Masala" must not match the L3 leaf "Lemon").
+                let matched = null;
+                if (doc.hierarchyCode) {
+                  matched = resolveHierarchyMatch(doc.hierarchyCode);
+                }
+                if (!matched) {
+                  const fullName = normalizeForMatch(name);
+                  const baseName = normalizeForMatch(getSkuBaseName(name));
+                  matched =
+                    (fullName && productNameToParent.get(fullName)) ||
+                    (baseName && productNameToParent.get(baseName)) ||
+                    null;
                 }
 
                 if (!matched) {
                   counts.products.unmatched += 1;
-                  // Leave category/subcategory unset (still upserts, but won't appear in category listing).
                 }
 
-                // Reuse existing media when SKU row omits image columns.
-                // This prevents unnecessary skips for maintenance-only sheet updates.
-                // eslint-disable-next-line no-await-in-loop
-                const existing = await Product.findOne({ sku: doc.sku }).session(txnSession).lean();
-                const rawSalePrice = salePriceCol ? getCellText(row, salePriceCol) : '';
-                const rawMrp = mrpCol ? getCellText(row, mrpCol) : '';
-                const rawPriceInclGst = priceInclGstCol ? getCellText(row, priceInclGstCol) : '';
-                const rawBaseCost = baseCostCol ? getCellText(row, baseCostCol) : '';
-                const rawIsSaleable = isSaleableCol ? getCellText(row, isSaleableCol) : '';
+                const existing = existingBySku.get(sku) || null;
                 const hasSalePrice = String(rawSalePrice || '').trim() !== '';
                 const hasMrp = String(rawMrp || '').trim() !== '';
                 const hasPriceInclGst = String(rawPriceInclGst || '').trim() !== '';
@@ -768,6 +1051,26 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 }
                 reconcileSaleableForFixedStock(doc);
 
+                // Hierarchy codes in the sheet are sometimes shared by two unrelated
+                // product families (e.g. Big Onion and Basmati Rice both carry A501).
+                // Never let a code collision silently move an already-categorized
+                // product into a different main category.
+                if (
+                  matched &&
+                  existing?.categoryId &&
+                  String(existing.categoryId) !== String(matched.categoryId)
+                ) {
+                  warnings.push({
+                    sheet: 'SKU Master',
+                    row: r,
+                    sku,
+                    message: `Hierarchy code ${doc.hierarchyCode || '(none)'} resolves to a different main category than the product's current one — keeping existing taxonomy`,
+                  });
+                  matched = null;
+                  doc.categoryId = existing.categoryId;
+                  doc.subcategoryId = existing.subcategoryId ?? null;
+                }
+
                 if (matched) {
                   doc.categoryId = matched.categoryId;
                   doc.subcategoryId = matched.subcategoryId;
@@ -777,22 +1080,29 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                 if (existing) {
                   if (!overwrite) {
                     counts.products.skipped += 1;
+                    processed += 1;
                     continue;
                   }
                   const updateDoc = { ...doc };
                   delete updateDoc.sku;
-                  await Product.updateOne(
-                    { _id: existing._id },
-                    {
-                      $set: updateDoc,
-                      $unset: { importRaw: 1, mastersheetFields: 1 },
+                  bulkOps.push({
+                    updateOne: {
+                      filter: { _id: existing._id },
+                      update: {
+                        $set: updateDoc,
+                        $unset: { importRaw: 1, mastersheetFields: 1 },
+                      },
                     },
-                    { session: txnSession }
-                  );
+                  });
                   counts.products.updated += 1;
                 } else {
-                  const created = await Product.create([doc], { session: txnSession });
-                  productId = created?.[0]?._id || null;
+                  const newId = new mongoose.Types.ObjectId();
+                  productId = newId;
+                  bulkOps.push({
+                    insertOne: {
+                      document: { _id: newId, ...doc },
+                    },
+                  });
                   counts.products.created += 1;
                 }
 
@@ -805,8 +1115,27 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                       : Number(doc.stockQuantity),
                   });
                 }
+
+                processed += 1;
+                if (bulkOps.length >= PRODUCT_BULK_CHUNK) {
+                  // eslint-disable-next-line no-await-in-loop
+                  await flushBulkWrite(Product, bulkOps, txnSession);
+                  const pct = 22 + Math.min(45, Math.round((processed / Math.max(1, preparedRows.length)) * 45));
+                  // eslint-disable-next-line no-await-in-loop
+                  await timer.report(
+                    'products',
+                    pct,
+                    `Upserted ${processed}/${preparedRows.length} products`
+                  );
+                }
               }
 
+              await flushBulkWrite(Product, bulkOps, txnSession);
+              console.log(
+                `[ContentHubImport] products created=${counts.products.created} updated=${counts.products.updated} skipped=${counts.products.skipped}`
+              );
+
+              await timer.begin('inventory', 70, `Syncing inventory for ${stockSyncItems.length} SKUs`);
               if (stockSyncItems.length > 0) {
                 const { applyOperationalStockBatch } = require('../inventoryAvailabilitySync');
                 await applyOperationalStockBatch(stockSyncItems, {
@@ -819,43 +1148,105 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
               }
 
           // -------------------------
-          // 5) Reconcile product taxonomy links after all category/image upserts
+          // Relink product taxonomy after category/image upserts (batched)
           // -------------------------
           const productsForRelink = await Product.find({
             $or: [{ categoryId: { $exists: false } }, { categoryId: null }, { subcategoryId: null }],
             hierarchyCode: { $exists: true, $ne: '' },
           })
-            .select('_id hierarchyCode')
+            .select('_id hierarchyCode categoryId')
             .session(txnSession)
             .lean();
 
+          const relinkCodes = [
+            ...new Set(
+              productsForRelink
+                .flatMap((p) => {
+                  const raw = String(p.hierarchyCode || '').trim();
+                  return [raw, raw.replace(/\s+/g, '')];
+                })
+                .filter(Boolean)
+            ),
+          ];
+          if (relinkCodes.length > 0) {
+            const relinkCats = await Category.find({ hierarchyCodes: { $in: relinkCodes } })
+              .session(txnSession)
+              .lean();
+            for (const c of relinkCats) cacheCategory(c);
+            const parentIds = [
+              ...new Set(relinkCats.map((c) => (c.parentId ? String(c.parentId) : null)).filter(Boolean)),
+            ];
+            if (parentIds.length > 0) {
+              const parents = await Category.find({
+                _id: { $in: parentIds.map((id) => new mongoose.Types.ObjectId(id)) },
+              })
+                .session(txnSession)
+                .lean();
+              for (const p of parents) cacheCategory(p);
+            }
+            // Also load level-2 by parsed subCode
+            const subCodes = [];
+            for (const code of relinkCodes) {
+              const hc = parseHierarchyCode(code);
+              if (hc?.subCode) subCodes.push(hc.subCode);
+            }
+            if (subCodes.length > 0) {
+              const subs = await Category.find({ hierarchyCodes: { $in: subCodes } })
+                .session(txnSession)
+                .lean();
+              for (const s of subs) cacheCategory(s);
+            }
+          }
+
+          const relinkOps = [];
+          // Shared/colliding hierarchy codes must not move a product that already
+          // has a main category into a different tree — only fill missing taxonomy.
+          const pushRelink = (p, categoryId, subcategoryId) => {
+            if (p.categoryId && String(p.categoryId) !== String(categoryId)) return;
+            relinkOps.push({
+              updateOne: {
+                filter: { _id: p._id },
+                update: { $set: { categoryId, subcategoryId } },
+              },
+            });
+          };
           for (const p of productsForRelink) {
             const hcRaw = String(p.hierarchyCode || '').trim();
             if (!hcRaw) continue;
-            // eslint-disable-next-line no-await-in-loop
-            const leaf = await Category.findOne({ hierarchyCodes: hcRaw, level: 3 }).session(txnSession).lean();
+            const leaf = lookupCategoryByCode(hcRaw);
             if (leaf?.parentId) {
-              // eslint-disable-next-line no-await-in-loop
-              const subDoc = await Category.findById(leaf.parentId).session(txnSession).lean();
+              // Code attached directly to a level-2 subcategory: link to it.
+              if (leaf.level === 2) {
+                pushRelink(p, leaf.parentId, leaf._id);
+                continue;
+              }
+              const subDoc = categoryById.get(String(leaf.parentId));
               if (subDoc?.parentId) {
-                await Product.updateOne(
-                  { _id: p._id },
-                  { $set: { categoryId: subDoc.parentId, subcategoryId: subDoc._id } },
-                  { session: txnSession }
-                );
+                pushRelink(p, subDoc.parentId, subDoc._id);
                 continue;
               }
             }
             const hc = parseHierarchyCode(hcRaw);
             if (!hc) continue;
-            // eslint-disable-next-line no-await-in-loop
-            const subDoc = await Category.findOne({ hierarchyCodes: hc.subCode }).session(txnSession).lean();
+            const subDoc = lookupCategoryByCode(hc.subCode);
             if (!subDoc?._id || !subDoc.parentId) continue;
-            await Product.updateOne(
-              { _id: p._id },
-              { $set: { categoryId: subDoc.parentId, subcategoryId: subDoc._id } },
-              { session: txnSession }
-            );
+            pushRelink(p, subDoc.parentId, subDoc._id);
+          }
+          while (relinkOps.length > 0) {
+            const chunk = relinkOps.splice(0, PRODUCT_BULK_CHUNK);
+            // eslint-disable-next-line no-await-in-loop
+            await flushBulkWrite(Product, chunk, txnSession);
+          }
+
+          // Product lines where the sheet marked every pack size "Varient" would otherwise be
+          // invisible (customer queries filter classification: 'Style').
+          const promotedToStyle = await promoteStyleForVariantOnlyGroups({
+            session: txnSession,
+            warnings,
+          });
+          if (promotedToStyle > 0) {
+            counts.products.promotedToStyle = promotedToStyle;
+            console.log(`[ContentHubImport] promoted ${promotedToStyle} variant-only product lines to Style`);
           }
 
             }
@@ -864,11 +1255,13 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
           // -------------------------
           // 3) Banners from Banner Details sheet (auto-detects legacy vs Selorg_Final_Template format)
           // -------------------------
+          await timer.begin('banners', 80, 'Importing banners');
           await applyBannerDetails(wb, { session: txnSession, counts, warnings, errors });
 
           // -------------------------
           // 4) Category Display Images
           // -------------------------
+          await timer.begin('images', 85, 'Importing category display images');
           const cdWs = wb.getWorksheet('Category Display Image');
           const cdAltWs = wb.getWorksheet('Catogory display Image');
           const imgWs = cdWs || cdAltWs;
@@ -1059,6 +1452,23 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
                         });
                       }
                     }
+                  } else {
+                    // No Hierarchy Code Ref — match by main + sub name (same as main category name fallback).
+                    // eslint-disable-next-line no-await-in-loop
+                    const updated = await applySubCategoryImageByName(
+                      currentMainName,
+                      catName,
+                      imageUrl,
+                      txnSession
+                    );
+                    counts.images.updated += updated;
+                    if (updated === 0) {
+                      warnings.push({
+                        sheet: 'Category Display Image',
+                        row: r,
+                        message: `Subcategory image row: no matching subcategory for "${catName}" under "${currentMainName || 'unknown main'}"`,
+                      });
+                    }
                   }
                   continue;
                 }
@@ -1146,10 +1556,21 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
       // If categories sheet existed but parsing failed early, product/banner/image counts may be partial.
 
       // -------------------------
-      // 5) Home Page Content sheet → customer_home_section_definitions
+      // 5) Collections sheet → customer_collections (cover images for collection pages)
+      // -------------------------
+      await timer.begin('collections', 90, 'Importing collection cover images');
+      try {
+        await applyCollectionsSheet(wb, { session: txnSession, counts, warnings, errors });
+      } catch (e) {
+        errors.push({ sheet: 'Collections', message: `Collection import failed: ${e.message}` });
+      }
+
+      // -------------------------
+      // 6) Home Page Content sheet → customer_home_section_definitions
       // Must run AFTER products/categories/banners are upserted so name/SKU/bannerId
       // references resolve against the freshly-imported data.
       // -------------------------
+      await timer.begin('homepage', 93, 'Importing home page content');
       try {
         await applyHomePageContent(wb, { session: txnSession, counts, warnings, errors });
       } catch (e) {
@@ -1161,11 +1582,14 @@ async function importContentHubMaster(buffer, { overwrite = true } = {}) {
   // MongoDB time/size limits; the previous fallback re-ran the entire import (2× duration + mixed counts).
   await executeImport(null);
 
+  const stageTimings = await timer.end();
+
   return {
     success: errors.length === 0,
     counts,
     warnings,
     errors,
+    stageTimings,
   };
 }
 

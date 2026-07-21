@@ -40,15 +40,25 @@ async function collectHierarchyCodesForSubcategory(subCategoryId) {
   return [...set];
 }
 
+/** Matches products whose stored taxonomy is missing (never set during import). */
+const MISSING_SUBCATEGORY = {
+  $or: [{ subcategoryId: null }, { subcategoryId: { $exists: false } }],
+};
+
 /**
+ * Strict subcategory filter: stored `subcategoryId` is authoritative.
+ * `hierarchyCode` is only consulted for products with NO stored subcategory,
+ * so a product explicitly linked elsewhere can never leak into this subcategory.
  * @param {string|import('mongoose').Types.ObjectId} subCategoryId
  * @param {string[]} hierarchyCodes
  */
 function productTaxonomyOrForSubcategory(subCategoryId, hierarchyCodes) {
   const subOid = new mongoose.Types.ObjectId(String(subCategoryId));
-  const or = [{ subcategoryId: subOid }, { categoryId: subOid }];
+  const or = [{ subcategoryId: subOid }];
   if (Array.isArray(hierarchyCodes) && hierarchyCodes.length > 0) {
-    or.push({ hierarchyCode: { $in: hierarchyCodes } });
+    or.push({
+      $and: [MISSING_SUBCATEGORY, { hierarchyCode: { $in: hierarchyCodes } }],
+    });
   }
   return or;
 }
@@ -76,6 +86,9 @@ async function collectHierarchyCodesForMainCategory(mainCategoryId, subcategoryD
 }
 
 /**
+ * Strict main-category filter: stored `categoryId` / `subcategoryId` are
+ * authoritative. `hierarchyCode` is only consulted for products with NO stored
+ * taxonomy at all, so products linked to another category can never leak in.
  * @param {import('mongoose').Types.ObjectId} mainCategoryId
  * @param {Array<{ _id: import('mongoose').Types.ObjectId }>} subcategoryDocs
  * @param {string[]} [hierarchyCodes]
@@ -90,7 +103,6 @@ function productTaxonomyOrForMainCategory(
   const subIds = (subcategoryDocs || []).map((s) => s._id);
   const categoryIds = [
     mainCategoryId,
-    ...subIds,
     ...(aliasCategoryIds || []).filter(Boolean),
   ];
   const or = [
@@ -98,7 +110,13 @@ function productTaxonomyOrForMainCategory(
     { subcategoryId: { $in: subIds } },
   ];
   if (Array.isArray(hierarchyCodes) && hierarchyCodes.length > 0) {
-    or.push({ hierarchyCode: { $in: hierarchyCodes } });
+    or.push({
+      $and: [
+        { $or: [{ categoryId: null }, { categoryId: { $exists: false } }] },
+        MISSING_SUBCATEGORY,
+        { hierarchyCode: { $in: hierarchyCodes } },
+      ],
+    });
   }
   return or;
 }
@@ -164,24 +182,12 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     };
   }
 
-  let rawProducts = await Product.find(productFilter)
+  // NOTE: no fallback to the whole category when a subcategory is empty —
+  // that used to leak unrelated products into subcategory views.
+  const rawProducts = await Product.find(productFilter)
     .sort({ order: 1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
     .lean();
-
-  // FALLBACK: If subcategory selected but no products found, try broader category-level query
-  // This handles cases where products have hierarchyCode but categoryId/subcategoryId weren't set during import
-  if (subCategoryId != null && String(subCategoryId).trim() !== '' && rawProducts.length === 0) {
-    const hierarchyCodes = await collectHierarchyCodesForMainCategory(catId, subcategories);
-    const fallbackFilter = {
-      ...productQueryBase,
-      $or: productTaxonomyOrForMainCategory(catId, subcategories, hierarchyCodes),
-    };
-    rawProducts = await Product.find(fallbackFilter)
-      .sort({ order: 1 })
-      .limit(DEFAULT_PRODUCT_LIMIT)
-      .lean();
-  }
 
   const products = await attachLiveSellableStock(
     await enrichProductsWithVariants(rawProducts)

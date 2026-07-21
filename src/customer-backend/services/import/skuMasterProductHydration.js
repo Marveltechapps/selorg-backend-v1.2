@@ -3,6 +3,8 @@
  * Headers: trim, lower, collapse spaces, strip parentheses (see normalizeHeaderKey).
  */
 
+const { isStubImageUrl } = require('../../utils/mediaUrl');
+
 function normalizeHeaderKey(raw) {
   return String(raw || '')
     .trim()
@@ -410,7 +412,10 @@ function parseCommaSeparatedImageUrls(raw) {
   return String(raw)
     .split(/[,;\n\r]+/)
     .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    // Placeholder hosts (via.placeholder.com, placehold.co, local://) are seed
+    // artifacts, never real catalog assets — importing them makes the product
+    // look "with image" while clients strip/ignore the URL. Treat as no image.
+    .filter((s) => s.length > 0 && !isStubImageUrl(s));
 }
 
 /**

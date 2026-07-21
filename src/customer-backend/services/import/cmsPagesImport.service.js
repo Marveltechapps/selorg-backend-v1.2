@@ -155,93 +155,7 @@ async function importCmsPages(buffer) {
     errors.push({ sheet: 'CMS Pages', message: err.message });
   }
 
-  // Collections
-  try {
-    const ws = wb.getWorksheet('Collections');
-    if (ws) {
-      const headerMap = makeHeaderIndexMap(ws, 1);
-      
-      // Core fields with flexible header matching
-      const idCol = headerMap.get('Collection ID') || headerMap.get('ID') || headerMap.get('Slug');
-      const nameCol = headerMap.get('Collection Name') || headerMap.get('Name');
-      const typeCol = headerMap.get('Type') || headerMap.get('Collection Type');
-      const statusCol = headerMap.get('Status') || headerMap.get('Is Active') || headerMap.get('Active');
-
-      let upserts = 0;
-      if (idCol || nameCol) {  // More flexible - allow import even without ID column
-        for (let r = 2; r <= ws.rowCount; r++) {
-          const row = ws.getRow(r);
-          
-          const collectionId = getCellText(row, idCol || 0);
-          const name = getCellText(row, nameCol || 0);
-          
-          // Must have either ID or name to proceed
-          if (!collectionId && !name) continue;
-          
-          const typeRaw = typeCol ? getCellText(row, typeCol) : '';
-          const statusRaw = statusCol ? getCellText(row, statusCol) : '';
-          
-          // Create slug from ID or name
-          const slug = (collectionId || normalizeSlug(name)).trim();
-          const finalName = name || collectionId || slug;
-          const type = typeRaw === 'manual' || typeRaw === 'rule-based' ? typeRaw : 'rule-based';
-          const isActive = String(statusRaw || '').toLowerCase() !== 'hidden' && 
-                           String(statusRaw || '').toLowerCase() !== 'false' &&
-                           String(statusRaw || '').toLowerCase() !== 'inactive';
-          
-          // Capture all additional fields from the Excel sheet
-          const additionalFields = {};
-          for (const [header, col] of headerMap.entries()) {
-            const normalizedHeader = header.trim().toLowerCase();
-            // Skip core fields we already processed
-            if (['collection id', 'id', 'slug', 'collection name', 'name', 'type', 'collection type', 
-                 'status', 'is active', 'active'].includes(normalizedHeader)) {
-              continue;
-            }
-            
-            const cellValue = getCellText(row, col);
-            if (cellValue && cellValue.trim() !== '') {
-              // Store with original header name for reference
-              additionalFields[header] = cellValue.trim();
-            }
-          }
-          
-          const updateData = {
-            siteId: null,
-            slug,
-            name: finalName,
-            type,
-            isActive,
-          };
-          
-          // Add collection ID if provided
-          if (collectionId) {
-            updateData.collectionId = collectionId;
-          }
-          
-          // Add additional fields if any were captured
-          if (Object.keys(additionalFields).length > 0) {
-            updateData.additionalImportedFields = additionalFields;
-          }
-          
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            await Collection.findOneAndUpdate(
-              { siteId: null, slug },
-              { $set: updateData },
-              { upsert: true, new: false, setDefaultsOnInsert: true }
-            );
-            upserts += 1;
-          } catch (e) {
-            errors.push({ sheet: 'Collections', row: r, message: e.message });
-          }
-        }
-      }
-      counts.Collections = upserts;
-    }
-  } catch (err) {
-    errors.push({ sheet: 'Collections', message: err.message });
-  }
+  await applyCollectionsSheet(wb, { counts, warnings, errors });
 
   // Page Blocks
   try {
@@ -435,5 +349,122 @@ async function importCmsPages(buffer) {
   return { counts, errors, warnings, success: errors.length === 0 };
 }
 
-module.exports = { importCmsPages };
+/**
+ * Collections tab → customer_collections (cover images, metadata).
+ * Used by CMS Pages import and Content Hub master import.
+ *
+ * @param {import('exceljs').Workbook} wb
+ * @param {{ session?: import('mongoose').ClientSession|null, counts: object, warnings: any[], errors: any[] }} ctx
+ */
+async function applyCollectionsSheet(wb, { session = null, counts, warnings, errors }) {
+  try {
+    const ws = wb.getWorksheet('Collections') || wb.getWorksheet('Collection');
+    if (!ws) {
+      warnings.push({ sheet: 'Collections', message: 'Sheet not found — skipping collection images' });
+      counts.Collections = 0;
+      return;
+    }
 
+    const headerMap = makeHeaderIndexMap(ws, 1);
+    const idCol = headerMap.get('Collection ID') || headerMap.get('ID') || headerMap.get('Slug');
+    const nameCol = headerMap.get('Collection Name') || headerMap.get('Name');
+    const typeCol = headerMap.get('Type') || headerMap.get('Collection Type');
+    const statusCol = headerMap.get('Status') || headerMap.get('Is Active') || headerMap.get('Active');
+    const imageCol =
+      headerMap.get('Image URL') ||
+      headerMap.get('ImageUrl') ||
+      headerMap.get('Cover Image') ||
+      headerMap.get('Cover Image URL') ||
+      headerMap.get('imageUrl');
+
+    let upserts = 0;
+    if (idCol || nameCol) {
+      for (let r = 2; r <= ws.rowCount; r += 1) {
+        const row = ws.getRow(r);
+        const collectionId = getCellText(row, idCol || 0);
+        const name = getCellText(row, nameCol || 0);
+        if (!collectionId && !name) continue;
+
+        const typeRaw = typeCol ? getCellText(row, typeCol) : '';
+        const statusRaw = statusCol ? getCellText(row, statusCol) : '';
+        const imageUrl = imageCol ? getCellText(row, imageCol) : '';
+        const slug = (collectionId || normalizeSlug(name)).trim();
+        const finalName = name || collectionId || slug;
+        const type = typeRaw === 'manual' || typeRaw === 'rule-based' ? typeRaw : 'rule-based';
+        const isActive =
+          String(statusRaw || '').toLowerCase() !== 'hidden' &&
+          String(statusRaw || '').toLowerCase() !== 'false' &&
+          String(statusRaw || '').toLowerCase() !== 'inactive';
+
+        const additionalFields = {};
+        for (const [header, col] of headerMap.entries()) {
+          const normalizedHeader = header.trim().toLowerCase();
+          if (
+            [
+              'collection id',
+              'id',
+              'slug',
+              'collection name',
+              'name',
+              'type',
+              'collection type',
+              'status',
+              'is active',
+              'active',
+              'image url',
+              'imageurl',
+              'cover image',
+              'cover image url',
+            ].includes(normalizedHeader)
+          ) {
+            continue;
+          }
+          const cellValue = getCellText(row, col);
+          if (cellValue && cellValue.trim() !== '') {
+            additionalFields[header] = cellValue.trim();
+          }
+        }
+
+        const updateData = {
+          siteId: null,
+          slug,
+          name: finalName,
+          type,
+          isActive,
+        };
+
+        if (imageUrl && String(imageUrl).toLowerCase().includes('http')) {
+          updateData.imageUrl = String(imageUrl).trim();
+        }
+        if (collectionId) {
+          updateData.collectionId = collectionId;
+        }
+        if (Object.keys(additionalFields).length > 0) {
+          updateData.additionalImportedFields = additionalFields;
+        }
+
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await Collection.findOneAndUpdate(
+            { siteId: null, slug },
+            { $set: updateData },
+            {
+              upsert: true,
+              new: false,
+              setDefaultsOnInsert: true,
+              session: session || undefined,
+            }
+          );
+          upserts += 1;
+        } catch (e) {
+          errors.push({ sheet: 'Collections', row: r, message: e.message });
+        }
+      }
+    }
+    counts.Collections = upserts;
+  } catch (err) {
+    errors.push({ sheet: 'Collections', message: err.message });
+  }
+}
+
+module.exports = { importCmsPages, applyCollectionsSheet };

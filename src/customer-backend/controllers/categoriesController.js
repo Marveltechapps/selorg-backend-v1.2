@@ -10,7 +10,7 @@ const {
   productTaxonomyOrForMainCategory,
 } = require('../services/categoriesService');
 const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
-const { enrichProduct } = require('../utils/customerMediaEnrichment');
+const { enrichProduct, enrichCategory } = require('../utils/customerMediaEnrichment');
 const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
 
@@ -28,13 +28,19 @@ async function listCategories(req, res) {
       .sort({ order: 1 })
       .lean();
     const data = filterCatalogLabels(
-      (categories || []).map((c) => ({
-        id: String(c._id),
-        name: c.name,
-        slug: c.slug,
-        imageUrl: c.imageUrl || '',
-        order: c.order ?? 0,
-      }))
+      (categories || []).map((c) => {
+        const media = enrichCategory(c);
+        return {
+          id: String(c._id),
+          name: c.name,
+          slug: c.slug,
+          imageUrl: media.imageUrl || '',
+          thumbnailUrl: media.thumbnailUrl || '',
+          cardImageUrl: media.cardImageUrl || '',
+          emoji: c.emoji || '',
+          order: c.order ?? 0,
+        };
+      })
     );
     res.status(200).json({ success: true, data });
   } catch (err) {
@@ -107,11 +113,12 @@ async function getCategoryProductsBySlug(req, res) {
 
     let taxonomyOr;
     if (subcategoryId) {
+      // Strict: only products stored under this subcategory (plus taxonomy-less
+      // products carrying its hierarchy codes). Alias category ids are NOT added
+      // here — they previously leaked every legacy-linked product of the whole
+      // category into each subcategory.
       const codes = await collectHierarchyCodesForSubcategory(subcategoryId);
       taxonomyOr = productTaxonomyOrForSubcategory(subcategoryId, codes);
-      for (const aliasId of aliasCategoryIds) {
-        taxonomyOr.push({ categoryId: aliasId });
-      }
     } else {
       const codes = await collectHierarchyCodesForMainCategory(category._id, subcategories);
       taxonomyOr = productTaxonomyOrForMainCategory(
@@ -198,13 +205,19 @@ async function getCategoryProductsBySlug(req, res) {
           imageUrl: category.imageUrl || '',
           emoji: category.emoji || '',
         },
-        subcategories: subcategories.map((s) => ({
-          _id: String(s._id),
-          name: s.name,
-          slug: s.slug,
-          emoji: s.emoji || '',
-          productCount: countMap.get(String(s._id)) || 0,
-        })),
+        subcategories: subcategories.map((s) => {
+          const media = enrichCategory(s);
+          return {
+            _id: String(s._id),
+            name: s.name,
+            slug: s.slug,
+            emoji: s.emoji || '',
+            imageUrl: media.imageUrl || '',
+            thumbnailUrl: media.thumbnailUrl || '',
+            cardImageUrl: media.cardImageUrl || '',
+            productCount: countMap.get(String(s._id)) || 0,
+          };
+        }),
         products: productsWithStock.map((p) => {
           const enriched = enrichProduct(p);
           const media = pickImageFields(enriched);
@@ -266,13 +279,19 @@ async function getSubcategoriesByCategorySlug(req, res) {
     const countMap = new Map(countEntries);
     return res.json({
       success: true,
-      data: subcategories.map((s) => ({
-        _id: String(s._id),
-        name: s.name,
-        slug: s.slug,
-        emoji: s.emoji || '',
-        productCount: countMap.get(String(s._id)) || 0,
-      })),
+      data: subcategories.map((s) => {
+        const media = enrichCategory(s);
+        return {
+          _id: String(s._id),
+          name: s.name,
+          slug: s.slug,
+          emoji: s.emoji || '',
+          imageUrl: media.imageUrl || '',
+          thumbnailUrl: media.thumbnailUrl || '',
+          cardImageUrl: media.cardImageUrl || '',
+          productCount: countMap.get(String(s._id)) || 0,
+        };
+      }),
     });
   } catch (err) {
     console.error('getSubcategoriesByCategorySlug error:', err);

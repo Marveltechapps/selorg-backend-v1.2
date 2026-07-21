@@ -68,10 +68,13 @@ async function ensureListedWhenInStock(productId, quantity, session = null) {
   const oid = toObjectId(productId);
   if (!oid) return null;
 
-  const q = Product.findById(oid).select('price imageUrl images isActive isSaleable status').lean();
+  const q = Product.findById(oid).select('sku price imageUrl images isActive isSaleable status').lean();
   if (session) q.session(session);
   const product = await q;
   if (!product) return null;
+
+  // Legacy seed/demo SKUs (PROD-*) must never be re-activated by a restock.
+  if (/^PROD-\d+$/i.test(String(product.sku || ''))) return product;
 
   const price = Number(product.price) || 0;
   if (price <= 0) return product;

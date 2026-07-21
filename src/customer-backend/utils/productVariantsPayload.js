@@ -2,13 +2,27 @@ const { Product } = require('../models/Product');
 
 /**
  * Normalize a catalog title for "same product, different pack size" grouping.
- * Strips trailing weight / pack fragments so e.g. "Masala - 100g" and "Masala - 250g" match.
+ * Strips trailing weight / pack / container fragments so e.g.
+ * "Masala - 100g", "Masala - 250g", "Sunflower Oil - 250ml Bottle", and
+ * "Sunflower Oil - 1ltr Bottle" all collapse to the same line.
  */
 function productBaseName(name) {
   if (name == null || typeof name !== 'string') return '';
   let s = name.trim().replace(/\s+/g, ' ');
-  s = s.replace(/\s*[-–—]\s*\d+(\.\d+)?\s*(g|kg|ml|mL|l|L|pc|pcs|pack)\b\s*$/i, '').trim();
-  s = s.replace(/\s+\d+(\.\d+)?\s*(g|kg|ml|mL|l|L)\s*$/i, '').trim();
+  // "500g * 3 - Multipack" / "1 * 3 bundle" style tails
+  s = s.replace(
+    /\s*[-–—]?\s*\d+(\.\d+)?\s*(g|kg|ml|mL|l|L|ltr|lt|pc|pcs)?\s*\*\s*\d+(\s*[-–—]\s*)?(multipack|bundle|pack)?\s*$/i,
+    ''
+  ).trim();
+  // " - 250ml Bottle" / "-500ml pouch" / " 1ltr Jar"
+  s = s.replace(
+    /\s*[-–—]?\s*\d+(\.\d+)?\s*(g|kg|ml|mL|l|L|ltr|lt|pc|pcs|pack)\b(\s*(bottle|pouch|jar|tin|can|tub|pack|multipack|bundle))?\s*$/i,
+    ''
+  ).trim();
+  // Trailing bare container word left after size strip (e.g. "Oil Bottle")
+  s = s.replace(/\s+(bottle|pouch|jar|tin|can|tub|multipack|bundle)\s*$/i, '').trim();
+  // Normalize "Oil-" / "Oil -" leftovers
+  s = s.replace(/\s*[-–—]+\s*$/g, '').trim();
   return s.toLowerCase();
 }
 

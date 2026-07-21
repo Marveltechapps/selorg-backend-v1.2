@@ -8,6 +8,7 @@ const { Collection } = require('../../models/Collection');
 const { HomeSection } = require('../../models/HomeSection');
 const { Button } = require('../../models/Button');
 const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
+const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassification');
 
 const SKIP_VALUES = new Set(['SKU Code', 'Mandatory', 'Not Null, Unique', 'Not Null', 'varchar(20)', 'varchar(100)']);
 
@@ -80,8 +81,9 @@ function validatePriceField(value, fieldName, row, sku) {
 }
 
 function parseHierarchyCode(code) {
+  // Mastersheets sometimes contain whitespace inside codes ("A 3506"); treat as "A3506".
   const raw = String(code || '').trim();
-  const m = /^([A-Za-z])(\d+)$/.exec(raw);
+  const m = /^([A-Za-z])\s*(\d+)$/.exec(raw);
   if (!m) return null;
   const letter = m[1].toUpperCase();
   const digitsStr = m[2];
@@ -180,6 +182,13 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
             counts.products.skipped += 1;
             continue;
           }
+          // PROD-* is the legacy seed/demo SKU namespace (placeholder images, no
+          // hierarchy code). Never import or re-activate them from a sheet.
+          if (/^PROD-\d+$/i.test(sku)) {
+            warnings.push({ sheet: 'SKU Master', row: r, sku, message: 'Seed/demo SKU (PROD-*) skipped — not a catalog product' });
+            counts.products.skipped += 1;
+            continue;
+          }
 
           const doc = {};
           applySkuRowToProductDoc(doc, row, headerMap, { getCellText });
@@ -257,8 +266,31 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
           // Resolve categoryId from hierarchyCode
           if (doc.hierarchyCode && !doc.categoryId) {
             try {
-              const hc = parseHierarchyCode(String(doc.hierarchyCode || '').trim());
-              if (hc) {
+              const hcRaw = String(doc.hierarchyCode || '').trim();
+              const hc = parseHierarchyCode(hcRaw);
+              // Exact leaf code (possibly attached directly to a level-2 subcategory).
+              const exactQ = Category.findOne({
+                hierarchyCodes: { $in: [hcRaw, hcRaw.replace(/\s+/g, '')] },
+              })
+                .select('_id parentId level')
+                .lean();
+              if (session) exactQ.session(session);
+              // eslint-disable-next-line no-await-in-loop
+              const exactDoc = await exactQ;
+              if (exactDoc?.parentId && exactDoc.level === 2) {
+                doc.categoryId = exactDoc.parentId;
+                doc.subcategoryId = exactDoc._id;
+              } else if (exactDoc?.parentId && exactDoc.level === 3) {
+                const parentQ = Category.findOne({ _id: exactDoc.parentId }).select('_id parentId').lean();
+                if (session) parentQ.session(session);
+                // eslint-disable-next-line no-await-in-loop
+                const parentDoc = await parentQ;
+                if (parentDoc?.parentId) {
+                  doc.categoryId = parentDoc.parentId;
+                  doc.subcategoryId = parentDoc._id;
+                }
+              }
+              if (!doc.categoryId && hc) {
                 const subQ = Category.findOne({ hierarchyCodes: hc.subCode, level: 2 }).select('_id parentId').lean();
                 if (session) subQ.session(session);
                 // eslint-disable-next-line no-await-in-loop
@@ -281,7 +313,7 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
                     });
                   }
                 }
-              } else {
+              } else if (!doc.categoryId && !hc) {
                 warnings.push({ row: r, sku, message: `Invalid hierarchy code format: ${doc.hierarchyCode}` });
               }
             } catch (err) {
@@ -293,7 +325,9 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
             warnings.push({ row: r, sku, message: 'Missing imageUrl' });
           }
 
-          if (doc.price === 0) {
+          // Products need a price AND a real (non-placeholder) image to be listed;
+          // placeholder URLs were already stripped during media hydration.
+          if (doc.price === 0 || !doc.imageUrl) {
             doc.isActive = false;
             doc.status = 'inactive';
           } else {
@@ -305,6 +339,24 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
           if (session) existingQ.session(session);
           // eslint-disable-next-line no-await-in-loop
           const existing = await existingQ;
+
+          // Hierarchy codes in the sheet are sometimes shared by two unrelated
+          // product families (e.g. Big Onion and Basmati Rice both carry A501).
+          // Never let a code collision silently move an already-categorized
+          // product into a different main category.
+          if (
+            existing?.categoryId &&
+            doc.categoryId &&
+            String(existing.categoryId) !== String(doc.categoryId)
+          ) {
+            warnings.push({
+              row: r,
+              sku,
+              message: `Hierarchy code ${doc.hierarchyCode || '(none)'} resolves to a different main category than the product's current one — keeping existing taxonomy`,
+            });
+            doc.categoryId = existing.categoryId;
+            doc.subcategoryId = existing.subcategoryId ?? null;
+          }
           let productId = existing?._id || null;
           if (existing) {
             if (!overwrite) {
@@ -351,6 +403,14 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
         
         // Log processing summary
         console.log(`SKU Master processed: ${productRows} total rows, ${productErrors} errors, ${Math.round(errorRate * 100)}% error rate`);
+
+        // Product lines where the sheet marked every pack size "Varient" would otherwise be
+        // invisible (customer queries filter classification: 'Style').
+        const promotedToStyle = await promoteStyleForVariantOnlyGroups({ session, warnings });
+        if (promotedToStyle > 0) {
+          counts.products.promotedToStyle = promotedToStyle;
+          console.log(`SKU Master import: promoted ${promotedToStyle} variant-only product lines to Style`);
+        }
 
         if (stockSyncItems.length > 0) {
           const { applyOperationalStockBatch } = require('../inventoryAvailabilitySync');
