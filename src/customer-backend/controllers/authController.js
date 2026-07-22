@@ -503,6 +503,7 @@ async function verifyOtpController(req, res) {
         _id: String(user._id),
         phoneNumber: user.phoneNumber,
         email: user.email,
+        name: user.name || '',
         phoneVerified: user.phoneVerified,
       },
     };

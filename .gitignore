@@ -1,7 +1,28 @@
+# ==========================
 # Dependencies
+# ==========================
 node_modules/
 
+# ==========================
+# Build Outputs
+# ==========================
+dist/
+build/
+out/
+coverage/
+.tmp/
+.temp/
+
+# ==========================
+# Environment Files
+# ==========================
+.env
+.env.*
+!.env.example
+
+# ==========================
 # Logs
+# ==========================
 logs/
 *.log
 npm-debug.log*
@@ -9,108 +30,65 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Build outputs
-dist/
-build/
-coverage/
+# ==========================
+# Cache
+# ==========================
+.cache/
+.parcel-cache/
+.vite/
+.eslintcache
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# IDE
+# ==========================
+# IDE / Editor
+# ==========================
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# Cursor
-.cursor/
-.cursorrules
-.cursorignore
+# ==========================
+# OS Files
+# ==========================
+.DS_Store
+Thumbs.db
+Desktop.ini
 
-# Test
-tests/
-test-results/
-playwright-report/
-coverage/
-__tests__/
-*.test.js
-*.spec.js
+# ==========================
+# Testing
+# ==========================
+.nyc_output/
 
-# Docker
-Dockerfile
-docker-compose*.yml
-.docker/
-
-# Server files
-.server.pid
+# ==========================
+# Runtime Files
+# ==========================
+pids/
 *.pid
+*.seed
+*.pid.lock
 
-# Uploads (user-generated content)
-uploads/*
-!uploads/.gitkeep
+# ==========================
+# PM2
+# ==========================
+.pm2/
 
-# Scripts
-scripts/
+# ==========================
+# Uploads (if generated)
+# ==========================
+uploads/
+temp/
+tmp/
 
-# Temporary files
-*.tmp
-*.temp
-.cache/
-
-# TypeScript
-*.tsbuildinfo
-
-# Package manager caches
-.npm/
-.yarn/
-.pnpm-store/
-
-# Non-production
-docs/
-others/
-postman/
-
-# Environment secrets (NEVER commit)
-.env
-.env.*
-!.env.example
-
-# Firebase / Secrets
-google-services.json
-GoogleService-Info.plist
-serviceAccountKey.json
-firebase-adminsdk*.json
-
-# Certificates
+# ==========================
+# Secrets / Keys
+# ==========================
 *.pem
 *.key
 *.crt
 *.p12
-*.jks
-*.keystore
 
-# Temporary
-tmp/
-temp/
-# Logs / temp files
-*.txt
-*_out.json
-*_err.txt
-
-# Environment
-.env
-.env.*
-
-# Dependencies
-node_modules/
-
-# Uploads
-uploads/
-
-# Build
-dist/
-build/
-coverage/
+# ==========================
+# Misc
+# ==========================
+*.tgz
+*.zip
+*.tar.gz

@@ -72,9 +72,11 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # Long-running admin imports (Content Hub) now return 202 quickly and poll.
+        # Keep elevated timeouts as a temporary safeguard for other sync uploads.
         proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
         proxy_intercept_errors on;
         error_page 502 503 504 = @api_upstream_error;
     }

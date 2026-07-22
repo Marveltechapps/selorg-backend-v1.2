@@ -10,6 +10,7 @@ const {
 const {
   createWorldlineSession,
   completeWorldlinePayment,
+  abortWorldlinePayment,
   getWorldlineStatus,
   worldlineReturn,
   getPaymentRetryStatus,
@@ -30,6 +31,7 @@ router.post('/methods/:id/default', auth, setDefaultMethod);
 // Worldline / Paynimo (backend-led)
 router.post('/worldline/session', auth, createWorldlineSession);
 router.post('/worldline/complete', auth, completeWorldlinePayment);
+router.post('/worldline/abort', auth, abortWorldlinePayment);
 router.get('/worldline/status', auth, getWorldlineStatus);
 
 // Payment retry endpoints (new)

@@ -1,0 +1,1845 @@
+{
+  "generatedAt": "2026-07-21T11:32:26.184Z",
+  "mode": "dry-run",
+  "totals": {
+    "categoriesAudited": 474,
+    "activeL1": 9,
+    "activeL2": 47,
+    "activeL3": 398,
+    "productsAudited": 1751,
+    "productsToRepair": 0,
+    "productsRepaired": 0,
+    "keptCodeConflicts": 92,
+    "unresolved": 0,
+    "ambiguousCode": 0,
+    "missingCode": 16,
+    "duplicateCategoryCodes": 0,
+    "duplicateEmptyL2Deactivated": 0
+  },
+  "changesByReason": {},
+  "changes": [],
+  "keptConflicts": [
+    {
+      "sku": "S1686",
+      "name": "Zucchini (Green) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1687",
+      "name": "Zucchini (Green) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1692",
+      "name": "Zucchini (Yellow) - 250g",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1693",
+      "name": "Zucchini (Yellow) - 500g",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1694",
+      "name": "Zucchini (Yellow) - 1kg",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1695",
+      "name": "Zucchini (Yellow) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1696",
+      "name": "Zucchini (Yellow) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1396",
+      "name": "Lettuce (Iceberg) - 250g",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1397",
+      "name": "Lettuce (Iceberg) - 500g",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1398",
+      "name": "Lettuce (Iceberg) - 1kg",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1399",
+      "name": "Lettuce (Iceberg) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1400",
+      "name": "Lettuce (Iceberg) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S897",
+      "name": "Cherry Tomato - 250g",
+      "hierarchyCode": "A504",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecc9c6755a49b42190f1",
+        "subcategoryName": "Native Vegetables"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1573",
+      "name": "Big Onion - 250g",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1574",
+      "name": "Big Onion - 500g",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1575",
+      "name": "Big Onion - 1kg",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1576",
+      "name": "Big Onion - 2kg",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1577",
+      "name": "Big Onion - 1kg * 3 - Multipack",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1578",
+      "name": "Big Onion - 1kg * 5 - Multipack",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1583",
+      "name": "Small Onion - 250g",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1584",
+      "name": "Small Onion - 500g",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1585",
+      "name": "Small Onion - 1kg",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1586",
+      "name": "Small Onion - 2kg",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1587",
+      "name": "Small Onion - 500g * 3 - Multipack",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1588",
+      "name": "Small Onion - 1kg * 5 - Multipack",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1593",
+      "name": "Spring Onion - 250g",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1594",
+      "name": "Spring Onion - 500g",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1595",
+      "name": "Spring Onion - 1kg",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1596",
+      "name": "Spring Onion - 500g * 3 - Multipack",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1639",
+      "name": "Capsicum Yellow - 250g",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1640",
+      "name": "Capsicum Yellow - 500g",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1641",
+      "name": "Capsicum Yellow - 1kg",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1642",
+      "name": "Capsicum Yellow - 500g * 3 - Multipack",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1643",
+      "name": "Capsicum Yellow - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1648",
+      "name": "Capsicum Red - 250g",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1649",
+      "name": "Capsicum Red - 500g",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1650",
+      "name": "Capsicum Red - 1kg",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1651",
+      "name": "Capsicum Red - 500g * 3 - Multipack",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1652",
+      "name": "Capsicum Red - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1665",
+      "name": "Malabar Cucumber - 250g",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1666",
+      "name": "Malabar Cucumber - 500g",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1667",
+      "name": "Malabar Cucumber - 1kg",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1668",
+      "name": "Malabar Cucumber - 500g * 3 - Multipack",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1669",
+      "name": "Malabar Cucumber - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1674",
+      "name": "Cucumber Yellow - 250g",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1675",
+      "name": "Cucumber Yellow - 500g",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1676",
+      "name": "Cucumber Yellow - 1kg",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1677",
+      "name": "Cucumber Yellow - 500g * 3 - Multipack",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1678",
+      "name": "Cucumber Yellow - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1683",
+      "name": "Zucchini (Green) - 250g",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1684",
+      "name": "Zucchini (Green) - 500g",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1685",
+      "name": "Zucchini (Green) - 1kg",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1378",
+      "name": "Cabbage Red (Red Muttai Kose) - 250g",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1379",
+      "name": "Cabbage Red (Red Muttai Kose) - 500g",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1380",
+      "name": "Cabbage Red (Red Muttai Kose) - 1kg",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1381",
+      "name": "Cabbage Red (Red Muttai Kose) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1382",
+      "name": "Cabbage Red (Red Muttai Kose) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1387",
+      "name": "Broccoli - 250g",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1388",
+      "name": "Broccoli - 500g",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1389",
+      "name": "Broccoli - 1kg",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1390",
+      "name": "Broccoli - 500g * 3 - Multipack",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1391",
+      "name": "Broccoli - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1514",
+      "name": "Potato - 250g",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1515",
+      "name": "Potato - 500g",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1516",
+      "name": "Potato - 1kg",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1517",
+      "name": "Potato - 2kg",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1518",
+      "name": "Potato - 500g * 3 - Multipack",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1519",
+      "name": "Potato - 1kg * 2 - Multipack",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1524",
+      "name": "Baby Potato - 250g",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1525",
+      "name": "Baby Potato - 500g",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1526",
+      "name": "Baby Potato - 1kg",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1527",
+      "name": "Baby Potato - 500g * 3 - Multipack",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1428",
+      "name": "Mushroom - 250g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1429",
+      "name": "Mushroom - 500g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1430",
+      "name": "Mushroom - 1kg",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1431",
+      "name": "Mushroom - 500g * 3 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1432",
+      "name": "Mushroom - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1437",
+      "name": "Oyster Mushroom - 250g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1438",
+      "name": "Oyster Mushroom - 500g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1439",
+      "name": "Oyster Mushroom - 1kg",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1440",
+      "name": "Oyster Mushroom - 500g * 3 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1441",
+      "name": "Oyster Mushroom - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1446",
+      "name": "Corn - 250g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1447",
+      "name": "Corn - 500g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1448",
+      "name": "Corn - 1kg",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1449",
+      "name": "Corn - 500g * 3 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1450",
+      "name": "Corn - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1464",
+      "name": "Baby Corn - 250g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1465",
+      "name": "Baby Corn - 500g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1466",
+      "name": "Baby Corn - 1kg",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1467",
+      "name": "Baby Corn - 500g * 3 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1468",
+      "name": "Baby Corn - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    }
+  ],
+  "unresolved": [],
+  "ambiguousProducts": [],
+  "missingCode": [
+    {
+      "sku": "12",
+      "name": "dal and rice",
+      "stored": {
+        "categoryId": null,
+        "categoryName": null,
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-001",
+      "name": "Organic Milk - 1L",
+      "stored": {
+        "categoryId": "6a02ecdcc6755a49b42193fc",
+        "categoryName": "Dairy products",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-002",
+      "name": "Bread - Whole Wheat",
+      "stored": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-003",
+      "name": "Eggs - Pack of 6",
+      "stored": {
+        "categoryId": "6a02ecdcc6755a49b42193fc",
+        "categoryName": "Dairy products",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-004",
+      "name": "Tea - Premium Black",
+      "stored": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-005",
+      "name": "Rice - Basmati",
+      "stored": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-006",
+      "name": "Tomato - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      }
+    },
+    {
+      "sku": "PROD-007",
+      "name": "Onion - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-008",
+      "name": "Banana - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-009",
+      "name": "Apple - Red",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "PROD-010",
+      "name": "Orange - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1505",
+      "name": "Amla - 250g",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1506",
+      "name": "Amla - 500g",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1507",
+      "name": "Amla - 1kg",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1508",
+      "name": "Amla - 500g * 3 - Multipack",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1509",
+      "name": "Amla  - 1kg * 2 - Multipack",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    }
+  ],
+  "duplicateCategoryCodes": [],
+  "duplicateEmptyL2Deactivations": []
+}

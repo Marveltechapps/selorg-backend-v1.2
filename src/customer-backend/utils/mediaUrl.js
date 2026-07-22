@@ -28,7 +28,7 @@ function pickFirstNonStubString(...vals) {
   return '';
 }
 
-/** Remove SKU resize query params that break static CloudFront asset URLs in the mobile app. */
+/** Remove resize query params that break static CloudFront asset URLs. */
 function cleanClientImageUrl(url) {
   if (typeof url !== 'string' || !url.trim()) return '';
   const trimmed = url.trim();
@@ -43,12 +43,15 @@ function cleanClientImageUrl(url) {
     if (isStaticAsset || isCdnHost) {
       u.searchParams.delete('q');
       u.searchParams.delete('w');
+      const qs = u.searchParams.toString();
+      u.search = qs ? `?${qs}` : '';
+      return u.toString().replace(/\?$/, '');
     }
     return u.toString();
   } catch {
     return trimmed
-      .replace(/([?&])q=\d+(&|$)/gi, '$2')
-      .replace(/([?&])w=\d+(&|$)/gi, '$2')
+      .replace(/([?&])q=\d*(&|$)/gi, '$2')
+      .replace(/([?&])w=\d*(&|$)/gi, '$2')
       .replace(/\?&/, '?')
       .replace(/[?&]$/, '');
   }

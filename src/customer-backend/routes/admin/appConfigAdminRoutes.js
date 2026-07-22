@@ -9,5 +9,6 @@ router.get('/', adminAuth, ctrl.getConfig);
 router.put('/', adminAuth, ctrl.updateConfig);
 router.put('/section/:section', adminAuth, ctrl.updateSection);
 router.post('/reset', adminAuth, ctrl.resetConfig);
+router.post('/upload-image', adminAuth, ctrl.uploadCmsImage);
 
 module.exports = router;

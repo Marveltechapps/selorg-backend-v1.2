@@ -1,0 +1,4338 @@
+{
+  "generatedAt": "2026-07-21T11:30:53.760Z",
+  "mode": "dry-run",
+  "totals": {
+    "categoriesAudited": 474,
+    "activeL1": 9,
+    "activeL2": 58,
+    "activeL3": 398,
+    "productsAudited": 1751,
+    "productsToRepair": 127,
+    "productsRepaired": 0,
+    "keptCodeConflicts": 92,
+    "unresolved": 0,
+    "ambiguousCode": 0,
+    "missingCode": 16,
+    "duplicateCategoryCodes": 0,
+    "duplicateEmptyL2Deactivated": 11
+  },
+  "changesByReason": {
+    "hierarchy-code-exact-leaf": 23,
+    "line-align(hierarchy-code-exact-leaf)": 63,
+    "exact-leaf-name": 3,
+    "bucket-inferred(nearest=A3502)": 3,
+    "bucket-inferred(nearest=A3505)": 3,
+    "bucket-inferred(nearest=A3621)": 3,
+    "hierarchy-code-detainted": 18,
+    "bucket-inferred(nearest=A3518)": 3,
+    "bucket-inferred(nearest=A3515)": 3,
+    "bucket-inferred(nearest=A3513)": 3,
+    "bucket-inferred(nearest=A1012)": 2
+  },
+  "changes": [
+    {
+      "sku": "S3034",
+      "name": "Seeraga Samba Raw Rice - 1kg",
+      "classification": "Style",
+      "hierarchyCode": "A536",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab4ecfe7c8081fe8312",
+        "subcategoryName": "Raw RICE"
+      }
+    },
+    {
+      "sku": "S3035",
+      "name": "Seeraga Samba Raw Rice - 2kg",
+      "classification": "Variant",
+      "hierarchyCode": "A536",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab4ecfe7c8081fe8312",
+        "subcategoryName": "Raw RICE"
+      }
+    },
+    {
+      "sku": "S3036",
+      "name": "Seeraga Samba Raw Rice - 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A536",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab4ecfe7c8081fe8312",
+        "subcategoryName": "Raw RICE"
+      }
+    },
+    {
+      "sku": "S3094",
+      "name": "Red Raw Rice - 1kg",
+      "classification": "Style",
+      "hierarchyCode": "A541",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab7ecfe7c8081fe8367",
+        "subcategoryName": "Kerala RICE & Broken RICE"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab6ecfe7c8081fe834c",
+        "subcategoryName": "Red RICE & Brown RICE"
+      }
+    },
+    {
+      "sku": "S3095",
+      "name": "Red Raw Rice - 2kg",
+      "classification": "Variant",
+      "hierarchyCode": "A541",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab7ecfe7c8081fe8367",
+        "subcategoryName": "Kerala RICE & Broken RICE"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab6ecfe7c8081fe834c",
+        "subcategoryName": "Red RICE & Brown RICE"
+      }
+    },
+    {
+      "sku": "S3096",
+      "name": "Red Raw Rice - 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A541",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab7ecfe7c8081fe8367",
+        "subcategoryName": "Kerala RICE & Broken RICE"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab6ecfe7c8081fe834c",
+        "subcategoryName": "Red RICE & Brown RICE"
+      }
+    },
+    {
+      "sku": "S3130",
+      "name": "Red Kavuni Rice - 1kg",
+      "classification": "Style",
+      "hierarchyCode": "A544",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "69d8bfc39d463d9aaa3f6e1a",
+        "subcategoryName": "Red Rice & Brown Rice"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5b77363bc9e96166f0010d",
+        "subcategoryName": "Red Rice & Brown Rice"
+      }
+    },
+    {
+      "sku": "S3131",
+      "name": "Red Kavuni Rice - 2kg",
+      "classification": "Variant",
+      "hierarchyCode": "A544",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "69d8bfc39d463d9aaa3f6e1a",
+        "subcategoryName": "Red Rice & Brown Rice"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5b77363bc9e96166f0010d",
+        "subcategoryName": "Red Rice & Brown Rice"
+      }
+    },
+    {
+      "sku": "S3132",
+      "name": "Red Kavuni Rice - 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A544",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "69d8bfc39d463d9aaa3f6e1a",
+        "subcategoryName": "Red Rice & Brown Rice"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5b77363bc9e96166f0010d",
+        "subcategoryName": "Red Rice & Brown Rice"
+      }
+    },
+    {
+      "sku": "S2830",
+      "name": "Red-Brown Rice - 1kg",
+      "classification": "Style",
+      "hierarchyCode": "A519",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab6ecfe7c8081fe834c",
+        "subcategoryName": "Red RICE & Brown RICE"
+      }
+    },
+    {
+      "sku": "S2831",
+      "name": "Red-Brown Rice - 2kg",
+      "classification": "Variant",
+      "hierarchyCode": "A519",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab6ecfe7c8081fe834c",
+        "subcategoryName": "Red RICE & Brown RICE"
+      }
+    },
+    {
+      "sku": "S2832",
+      "name": "Red-Brown Rice - 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A519",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "after": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab6ecfe7c8081fe834c",
+        "subcategoryName": "Red RICE & Brown RICE"
+      }
+    },
+    {
+      "sku": "PROD-006",
+      "name": "Tomato - Fresh",
+      "classification": "Style",
+      "hierarchyCode": null,
+      "reason": "exact-leaf-name",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": null,
+        "subcategoryName": null
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      }
+    },
+    {
+      "sku": "PROD-009",
+      "name": "Apple - Red",
+      "classification": "Style",
+      "hierarchyCode": null,
+      "reason": "exact-leaf-name",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": null,
+        "subcategoryName": null
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "PROD-010",
+      "name": "Orange - Fresh",
+      "classification": "Style",
+      "hierarchyCode": null,
+      "reason": "exact-leaf-name",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": null,
+        "subcategoryName": null
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S3402",
+      "name": "Buckwheat  - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A657",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      }
+    },
+    {
+      "sku": "S3403",
+      "name": "Buckwheat  - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A657",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      }
+    },
+    {
+      "sku": "S3404",
+      "name": "Buckwheat  - 2kg",
+      "classification": "Variant",
+      "hierarchyCode": "A657",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      }
+    },
+    {
+      "sku": "S8441",
+      "name": "Atta - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A1705",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab7ecfe7c8081fe8367",
+        "subcategoryName": "Kerala RICE & Broken RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S8442",
+      "name": "Atta -1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A1705",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab7ecfe7c8081fe8367",
+        "subcategoryName": "Kerala RICE & Broken RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S8443",
+      "name": "Atta -5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A1705",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab7ecfe7c8081fe8367",
+        "subcategoryName": "Kerala RICE & Broken RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S4042",
+      "name": "Moong dal   - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A759",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4043",
+      "name": "Moong dal  - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A759",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4151",
+      "name": "Masoor Dal  - 200g",
+      "classification": "Style",
+      "hierarchyCode": "A768",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4152",
+      "name": "Masoor Dal  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A768",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4153",
+      "name": "Masoor Dal - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A768",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4030",
+      "name": "Black Channa  - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A758",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4031",
+      "name": "Black Channa   - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A758",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4139",
+      "name": "Lobia  - 200g",
+      "classification": "Style",
+      "hierarchyCode": "A767",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4140",
+      "name": "Lobia  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A767",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S4141",
+      "name": "Lobia   - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A767",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ece1c6755a49b42194b8",
+        "subcategoryName": "Sprouts"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece7c6755a49b42195c2",
+        "subcategoryName": "DALS & PULSES:"
+      }
+    },
+    {
+      "sku": "S6388",
+      "name": "Mustard - 50g",
+      "classification": "Style",
+      "hierarchyCode": "A1112",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece4c6755a49b421955c",
+        "subcategoryName": "Oil & Ghee"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      }
+    },
+    {
+      "sku": "S6389",
+      "name": "Mustard  -100g",
+      "classification": "Variant",
+      "hierarchyCode": "A1112",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece4c6755a49b421955c",
+        "subcategoryName": "Oil & Ghee"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      }
+    },
+    {
+      "sku": "S6390",
+      "name": "Mustard  -200g",
+      "classification": "Variant",
+      "hierarchyCode": "A1112",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece4c6755a49b421955c",
+        "subcategoryName": "Oil & Ghee"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      }
+    },
+    {
+      "sku": "S6391",
+      "name": "Mustard  -500g",
+      "classification": "Variant",
+      "hierarchyCode": "A1112",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece4c6755a49b421955c",
+        "subcategoryName": "Oil & Ghee"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      }
+    },
+    {
+      "sku": "S108",
+      "name": "Sapota - 250g",
+      "classification": "Style",
+      "hierarchyCode": "A09",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S109",
+      "name": "Sapota - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A09",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S110",
+      "name": "Sapota - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A09",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S111",
+      "name": "Sapota - 500g * 2 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A09",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S121",
+      "name": "Lemon - 250g",
+      "classification": "Style",
+      "hierarchyCode": "A10",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S122",
+      "name": "Lemon - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A10",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S123",
+      "name": "Lemon - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A10",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S124",
+      "name": "Lemon - 500g * 2 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A10",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      }
+    },
+    {
+      "sku": "S347",
+      "name": "Apple - 2 pcs (Approx. 250g - 400g)",
+      "classification": "Style",
+      "hierarchyCode": "A106",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S348",
+      "name": "Apple - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A106",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S349",
+      "name": "Apple - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A106",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S407",
+      "name": "Orange - 2 pcs (Approx. 250g - 350g)",
+      "classification": "Style",
+      "hierarchyCode": "A111",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S408",
+      "name": "Orange - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A111",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S409",
+      "name": "Orange - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A111",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf8c6755a49b42198bd",
+        "subcategoryName": "Fruits Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S433",
+      "name": "Amla - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A113",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S434",
+      "name": "Amla - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S435",
+      "name": "Amla - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S436",
+      "name": "Amla - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S485",
+      "name": "Amla - 100g",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S486",
+      "name": "Amla - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S487",
+      "name": "Amla - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S488",
+      "name": "Amla - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A113",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S703",
+      "name": "Fig - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A228",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S704",
+      "name": "Fig - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A228",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S705",
+      "name": "Fig - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A228",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S715",
+      "name": "Pear - 2 pcs (Approx. 300g - 400g)",
+      "classification": "Style",
+      "hierarchyCode": "A229",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S716",
+      "name": "Pear - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A229",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S717",
+      "name": "Pear - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A229",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S718",
+      "name": "Pear - 500g * 3 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A229",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      }
+    },
+    {
+      "sku": "S537",
+      "name": "Banganapalli - 500g",
+      "classification": "Style",
+      "hierarchyCode": "A166",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc8c6755a49b42190be",
+        "subcategoryName": "Mango Varieties"
+      }
+    },
+    {
+      "sku": "S538",
+      "name": "Banganapalli - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A166",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc8c6755a49b42190be",
+        "subcategoryName": "Mango Varieties"
+      }
+    },
+    {
+      "sku": "S539",
+      "name": "Banganapalli - 1kg * 2 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A166",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc8c6755a49b42190be",
+        "subcategoryName": "Mango Varieties"
+      }
+    },
+    {
+      "sku": "S540",
+      "name": "Banganapalli - 1kg * 3 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A166",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc8c6755a49b42190be",
+        "subcategoryName": "Mango Varieties"
+      }
+    },
+    {
+      "sku": "S881",
+      "name": "Tomato - 250g",
+      "classification": "Style",
+      "hierarchyCode": "A3100",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ecdfc6755a49b4219489",
+        "subcategoryName": "Sauces & Spreads"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      }
+    },
+    {
+      "sku": "S882",
+      "name": "Tomato - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A3100",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ecdfc6755a49b4219489",
+        "subcategoryName": "Sauces & Spreads"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      }
+    },
+    {
+      "sku": "S883",
+      "name": "Tomato - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A3100",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ecdfc6755a49b4219489",
+        "subcategoryName": "Sauces & Spreads"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      }
+    },
+    {
+      "sku": "S884",
+      "name": "Tomato - 500g * 3 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A3100",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": "6a02ecdfc6755a49b4219489",
+        "subcategoryName": "Sauces & Spreads"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      }
+    },
+    {
+      "sku": "S971",
+      "name": "Drumstick - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A602",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecc9c6755a49b42190f1",
+        "subcategoryName": "Native Vegetables"
+      }
+    },
+    {
+      "sku": "S972",
+      "name": "Drumstick - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A602",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecc9c6755a49b42190f1",
+        "subcategoryName": "Native Vegetables"
+      }
+    },
+    {
+      "sku": "S973",
+      "name": "Drumstick - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A602",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecc9c6755a49b42190f1",
+        "subcategoryName": "Native Vegetables"
+      }
+    },
+    {
+      "sku": "S974",
+      "name": "Drumstick - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A602",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd0c6755a49b4219226",
+        "subcategoryName": "Greens and Herbs"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecc9c6755a49b42190f1",
+        "subcategoryName": "Native Vegetables"
+      }
+    },
+    {
+      "sku": "S1323",
+      "name": "Ivy Gourd - 200g",
+      "classification": "Style",
+      "hierarchyCode": "A609",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccdc6755a49b4219197",
+        "subcategoryName": "Climbers"
+      }
+    },
+    {
+      "sku": "S1324",
+      "name": "Ivy Gourd - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A609",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccdc6755a49b4219197",
+        "subcategoryName": "Climbers"
+      }
+    },
+    {
+      "sku": "S1325",
+      "name": "Ivy Gourd - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A609",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccdc6755a49b4219197",
+        "subcategoryName": "Climbers"
+      }
+    },
+    {
+      "sku": "S1326",
+      "name": "Ivy Gourd - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A609",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccdc6755a49b4219197",
+        "subcategoryName": "Climbers"
+      }
+    },
+    {
+      "sku": "S1001",
+      "name": "Carrot - 250g",
+      "classification": "Style",
+      "hierarchyCode": "A907",
+      "reason": "hierarchy-code-exact-leaf",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccec6755a49b42191ce",
+        "subcategoryName": "Root vegetables"
+      }
+    },
+    {
+      "sku": "S1002",
+      "name": "Carrot - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A907",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccec6755a49b42191ce",
+        "subcategoryName": "Root vegetables"
+      }
+    },
+    {
+      "sku": "S1003",
+      "name": "Carrot - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A907",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccec6755a49b42191ce",
+        "subcategoryName": "Root vegetables"
+      }
+    },
+    {
+      "sku": "S1004",
+      "name": "Carrot - 1kg * 2 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": "A907",
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecf5c6755a49b4219825",
+        "categoryName": "Dry Powder Mix",
+        "subcategoryId": "6a02ecf7c6755a49b4219870",
+        "subcategoryName": "Vegetables Mix"
+      },
+      "after": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccec6755a49b42191ce",
+        "subcategoryName": "Root vegetables"
+      }
+    },
+    {
+      "sku": "S1505",
+      "name": "Amla - 250g",
+      "classification": "Style",
+      "hierarchyCode": null,
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1506",
+      "name": "Amla - 500g",
+      "classification": "Variant",
+      "hierarchyCode": null,
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1507",
+      "name": "Amla - 1kg",
+      "classification": "Variant",
+      "hierarchyCode": null,
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1508",
+      "name": "Amla - 500g * 3 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": null,
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S1509",
+      "name": "Amla  - 1kg * 2 - Multipack",
+      "classification": "Variant",
+      "hierarchyCode": null,
+      "reason": "line-align(hierarchy-code-exact-leaf)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc4c6755a49b4218ff5",
+        "subcategoryName": "Highly Nutritious Fruits"
+      }
+    },
+    {
+      "sku": "S13027",
+      "name": "Kambu flour / Pearl millet flour 500g",
+      "classification": "Style",
+      "hierarchyCode": "A 3503",
+      "reason": "bucket-inferred(nearest=A3502)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdbc6755a49b42193da",
+        "subcategoryName": "Millet Flours"
+      }
+    },
+    {
+      "sku": "S13028",
+      "name": "Kambu flour / Pearl millet flour 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3503",
+      "reason": "bucket-inferred(nearest=A3502)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdbc6755a49b42193da",
+        "subcategoryName": "Millet Flours"
+      }
+    },
+    {
+      "sku": "S13029",
+      "name": "Kambu flour / Pearl millet flour 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3503",
+      "reason": "bucket-inferred(nearest=A3502)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdbc6755a49b42193da",
+        "subcategoryName": "Millet Flours"
+      }
+    },
+    {
+      "sku": "S13030",
+      "name": "Buckwheat flour 500g",
+      "classification": "Style",
+      "hierarchyCode": "A 3504",
+      "reason": "bucket-inferred(nearest=A3505)",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdbc6755a49b42193da",
+        "subcategoryName": "Millet Flours"
+      }
+    },
+    {
+      "sku": "S13031",
+      "name": "Buckwheat flour 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3504",
+      "reason": "bucket-inferred(nearest=A3505)",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdbc6755a49b42193da",
+        "subcategoryName": "Millet Flours"
+      }
+    },
+    {
+      "sku": "S13032",
+      "name": "Buckwheat flour 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3504",
+      "reason": "bucket-inferred(nearest=A3505)",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdbc6755a49b42193da",
+        "subcategoryName": "Millet Flours"
+      }
+    },
+    {
+      "sku": "S13266",
+      "name": "Pearl millet noodles 100g",
+      "classification": "Style",
+      "hierarchyCode": "A 3622",
+      "reason": "bucket-inferred(nearest=A3621)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdcc6755a49b42193f7",
+        "subcategoryName": "Millet Noodles & pasta"
+      }
+    },
+    {
+      "sku": "S13267",
+      "name": "Pearl millet noodles 300g",
+      "classification": "Variant",
+      "hierarchyCode": "A 3622",
+      "reason": "bucket-inferred(nearest=A3621)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdcc6755a49b42193f7",
+        "subcategoryName": "Millet Noodles & pasta"
+      }
+    },
+    {
+      "sku": "S13268",
+      "name": "Pearl millet noodles 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3622",
+      "reason": "bucket-inferred(nearest=A3621)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc5c6755a49b421903c",
+        "subcategoryName": "Premium Fruits"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdcc6755a49b42193f7",
+        "subcategoryName": "Millet Noodles & pasta"
+      }
+    },
+    {
+      "sku": "S13386",
+      "name": "Buckwheat pasta 200g",
+      "classification": "Style",
+      "hierarchyCode": "A 3731",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdcc6755a49b42193f7",
+        "subcategoryName": "Millet Noodles & pasta"
+      }
+    },
+    {
+      "sku": "S13388",
+      "name": "Buckwheat pasta 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3731",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdcc6755a49b42193f7",
+        "subcategoryName": "Millet Noodles & pasta"
+      }
+    },
+    {
+      "sku": "S13212",
+      "name": "JackFruit Flour  500g",
+      "classification": "Style",
+      "hierarchyCode": "A 3519",
+      "reason": "bucket-inferred(nearest=A3518)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13213",
+      "name": "JackFruit Flour 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3519",
+      "reason": "bucket-inferred(nearest=A3518)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13214",
+      "name": "JackFruit Flour  5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3519",
+      "reason": "bucket-inferred(nearest=A3518)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13181",
+      "name": "IR 64 Raw Rice flour 500g",
+      "classification": "Style",
+      "hierarchyCode": "A 3516",
+      "reason": "bucket-inferred(nearest=A3515)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab4ecfe7c8081fe8312",
+        "subcategoryName": "Raw RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13182",
+      "name": "IR 64 Raw Rice flour 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3516",
+      "reason": "bucket-inferred(nearest=A3515)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab4ecfe7c8081fe8312",
+        "subcategoryName": "Raw RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13183",
+      "name": "IR 64 Raw Rice flour 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3516",
+      "reason": "bucket-inferred(nearest=A3515)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab4ecfe7c8081fe8312",
+        "subcategoryName": "Raw RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13157",
+      "name": "ADT 43 Boiled Rice flour 500g",
+      "classification": "Style",
+      "hierarchyCode": "A 3514",
+      "reason": "bucket-inferred(nearest=A3513)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13158",
+      "name": "ADT 43 Boiled Rice flour 1kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3514",
+      "reason": "bucket-inferred(nearest=A3513)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S13159",
+      "name": "ADT 43 Boiled Rice flour 5kg",
+      "classification": "Variant",
+      "hierarchyCode": "A 3514",
+      "reason": "bucket-inferred(nearest=A3513)",
+      "before": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02ece3c6755a49b4219521",
+        "subcategoryName": "ATTA & Flour"
+      }
+    },
+    {
+      "sku": "S9063",
+      "name": "Pepper Powder  - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9064",
+      "name": "Pepper Powder  - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9065",
+      "name": "Pepper Powder  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9217",
+      "name": "Lemon Rice Masala  - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9218",
+      "name": "Lemon Rice Masala  - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9219",
+      "name": "Lemon Rice Masala  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc0c6755a49b4218f49",
+        "subcategoryName": "NATIVE FRUITS"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9399",
+      "name": "Pepper Chicken Masala  - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9400",
+      "name": "Pepper Chicken Masala  - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9401",
+      "name": "Pepper Chicken Masala  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9315",
+      "name": "Cinnamon Powder  - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9316",
+      "name": "Cinnamon Powder  - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9317",
+      "name": "Cinnamon Powder  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9371",
+      "name": "Mace Powder  - 100g",
+      "classification": "Style",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9372",
+      "name": "Mace Powder  - 250g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S9373",
+      "name": "Mace Powder  - 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A2001",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219644",
+        "subcategoryName": "Whole Spices"
+      },
+      "after": {
+        "categoryId": "6a02ece3c6755a49b421951d",
+        "categoryName": "Groceries & Kitchen",
+        "subcategoryId": "6a02eceac6755a49b4219639",
+        "subcategoryName": "MASALAS & POWDERS"
+      }
+    },
+    {
+      "sku": "S5346",
+      "name": "Dried Cranberries-100g",
+      "classification": "Style",
+      "hierarchyCode": "A1013",
+      "reason": "bucket-inferred(nearest=A1012)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      }
+    },
+    {
+      "sku": "S5347",
+      "name": "Dried Cranberries-200g",
+      "classification": "Variant",
+      "hierarchyCode": "A1013",
+      "reason": "bucket-inferred(nearest=A1012)",
+      "before": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      },
+      "after": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      }
+    },
+    {
+      "sku": "S13387",
+      "name": "Buckwheat pasta 500g",
+      "classification": "Variant",
+      "hierarchyCode": "A 3731",
+      "reason": "hierarchy-code-detainted",
+      "before": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "after": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdcc6755a49b42193f7",
+        "subcategoryName": "Millet Noodles & pasta"
+      }
+    }
+  ],
+  "keptConflicts": [
+    {
+      "sku": "S1686",
+      "name": "Zucchini (Green) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1687",
+      "name": "Zucchini (Green) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1692",
+      "name": "Zucchini (Yellow) - 250g",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1693",
+      "name": "Zucchini (Yellow) - 500g",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1694",
+      "name": "Zucchini (Yellow) - 1kg",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1695",
+      "name": "Zucchini (Yellow) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1696",
+      "name": "Zucchini (Yellow) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1010",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1396",
+      "name": "Lettuce (Iceberg) - 250g",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1397",
+      "name": "Lettuce (Iceberg) - 500g",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1398",
+      "name": "Lettuce (Iceberg) - 1kg",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1399",
+      "name": "Lettuce (Iceberg) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1400",
+      "name": "Lettuce (Iceberg) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1011",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S897",
+      "name": "Cherry Tomato - 250g",
+      "hierarchyCode": "A504",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecc9c6755a49b42190f1",
+        "subcategoryName": "Native Vegetables"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1573",
+      "name": "Big Onion - 250g",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1574",
+      "name": "Big Onion - 500g",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1575",
+      "name": "Big Onion - 1kg",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1576",
+      "name": "Big Onion - 2kg",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1577",
+      "name": "Big Onion - 1kg * 3 - Multipack",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1578",
+      "name": "Big Onion - 1kg * 5 - Multipack",
+      "hierarchyCode": "A501",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1583",
+      "name": "Small Onion - 250g",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1584",
+      "name": "Small Onion - 500g",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1585",
+      "name": "Small Onion - 1kg",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1586",
+      "name": "Small Onion - 2kg",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1587",
+      "name": "Small Onion - 500g * 3 - Multipack",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1588",
+      "name": "Small Onion - 1kg * 5 - Multipack",
+      "hierarchyCode": "A502",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1593",
+      "name": "Spring Onion - 250g",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1594",
+      "name": "Spring Onion - 500g",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1595",
+      "name": "Spring Onion - 1kg",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1596",
+      "name": "Spring Onion - 500g * 3 - Multipack",
+      "hierarchyCode": "A503",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1639",
+      "name": "Capsicum Yellow - 250g",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1640",
+      "name": "Capsicum Yellow - 500g",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1641",
+      "name": "Capsicum Yellow - 1kg",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1642",
+      "name": "Capsicum Yellow - 500g * 3 - Multipack",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1643",
+      "name": "Capsicum Yellow - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1004",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1648",
+      "name": "Capsicum Red - 250g",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1649",
+      "name": "Capsicum Red - 500g",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1650",
+      "name": "Capsicum Red - 1kg",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1651",
+      "name": "Capsicum Red - 500g * 3 - Multipack",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1652",
+      "name": "Capsicum Red - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1005",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1665",
+      "name": "Malabar Cucumber - 250g",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1666",
+      "name": "Malabar Cucumber - 500g",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1667",
+      "name": "Malabar Cucumber - 1kg",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1668",
+      "name": "Malabar Cucumber - 500g * 3 - Multipack",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1669",
+      "name": "Malabar Cucumber - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1002",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1674",
+      "name": "Cucumber Yellow - 250g",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1675",
+      "name": "Cucumber Yellow - 500g",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1676",
+      "name": "Cucumber Yellow - 1kg",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1677",
+      "name": "Cucumber Yellow - 500g * 3 - Multipack",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1678",
+      "name": "Cucumber Yellow - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1008",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1683",
+      "name": "Zucchini (Green) - 250g",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1684",
+      "name": "Zucchini (Green) - 500g",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1685",
+      "name": "Zucchini (Green) - 1kg",
+      "hierarchyCode": "A1009",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccbc6755a49b4219144",
+        "subcategoryName": "Daily Essentials"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1378",
+      "name": "Cabbage Red (Red Muttai Kose) - 250g",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1379",
+      "name": "Cabbage Red (Red Muttai Kose) - 500g",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1380",
+      "name": "Cabbage Red (Red Muttai Kose) - 1kg",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1381",
+      "name": "Cabbage Red (Red Muttai Kose) - 500g * 3 - Multipack",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1382",
+      "name": "Cabbage Red (Red Muttai Kose) - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1003",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "tainted stored taxonomy but code target unconfirmed (possible leaf collision) — kept"
+    },
+    {
+      "sku": "S1387",
+      "name": "Broccoli - 250g",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1388",
+      "name": "Broccoli - 500g",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1389",
+      "name": "Broccoli - 1kg",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1390",
+      "name": "Broccoli - 500g * 3 - Multipack",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1391",
+      "name": "Broccoli - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1006",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02eccfc6755a49b4219203",
+        "subcategoryName": "Leafy Vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1514",
+      "name": "Potato - 250g",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1515",
+      "name": "Potato - 500g",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1516",
+      "name": "Potato - 1kg",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1517",
+      "name": "Potato - 2kg",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1518",
+      "name": "Potato - 500g * 3 - Multipack",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1519",
+      "name": "Potato - 1kg * 2 - Multipack",
+      "hierarchyCode": "A506",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a11677a7faf69a6fa40d4dd",
+        "subcategoryName": "Basmathi & Seeraga Samba RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1524",
+      "name": "Baby Potato - 250g",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1525",
+      "name": "Baby Potato - 500g",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1526",
+      "name": "Baby Potato - 1kg",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1527",
+      "name": "Baby Potato - 500g * 3 - Multipack",
+      "hierarchyCode": "A507",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd2c6755a49b421928b",
+        "subcategoryName": "Tuber vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": "6a5deab3ecfe7c8081fe82f9",
+        "subcategoryName": "Boiled RICE"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1428",
+      "name": "Mushroom - 250g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1429",
+      "name": "Mushroom - 500g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1430",
+      "name": "Mushroom - 1kg",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1431",
+      "name": "Mushroom - 500g * 3 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1432",
+      "name": "Mushroom - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1437",
+      "name": "Oyster Mushroom - 250g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1438",
+      "name": "Oyster Mushroom - 500g",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1439",
+      "name": "Oyster Mushroom - 1kg",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1440",
+      "name": "Oyster Mushroom - 500g * 3 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1441",
+      "name": "Oyster Mushroom - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1007",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1446",
+      "name": "Corn - 250g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1447",
+      "name": "Corn - 500g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1448",
+      "name": "Corn - 1kg",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1449",
+      "name": "Corn - 500g * 3 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1450",
+      "name": "Corn - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecdac6755a49b421939b",
+        "categoryName": "Millets Mandi",
+        "subcategoryId": "6a02ecdac6755a49b421939f",
+        "subcategoryName": "Raw MILLETS"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1464",
+      "name": "Baby Corn - 250g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1465",
+      "name": "Baby Corn - 500g",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1466",
+      "name": "Baby Corn - 1kg",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1467",
+      "name": "Baby Corn - 500g * 3 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    },
+    {
+      "sku": "S1468",
+      "name": "Baby Corn - 1kg * 2 - Multipack",
+      "hierarchyCode": "A1001",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": "6a02ecd3c6755a49b42192ac",
+        "subcategoryName": "Specialty vegetables"
+      },
+      "codeTarget": {
+        "categoryId": "6a02ecf2c6755a49b42197ad",
+        "categoryName": "DRY FRUITS & Seeds",
+        "subcategoryId": "6a02ecf2c6755a49b42197b1",
+        "subcategoryName": "Dry Fruits & Nuts"
+      },
+      "note": "reused/duplicate sheet code — stored taxonomy kept"
+    }
+  ],
+  "unresolved": [],
+  "ambiguousProducts": [],
+  "missingCode": [
+    {
+      "sku": "12",
+      "name": "dal and rice",
+      "stored": {
+        "categoryId": null,
+        "categoryName": null,
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-001",
+      "name": "Organic Milk - 1L",
+      "stored": {
+        "categoryId": "6a02ecdcc6755a49b42193fc",
+        "categoryName": "Dairy products",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-002",
+      "name": "Bread - Whole Wheat",
+      "stored": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-003",
+      "name": "Eggs - Pack of 6",
+      "stored": {
+        "categoryId": "6a02ecdcc6755a49b42193fc",
+        "categoryName": "Dairy products",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-004",
+      "name": "Tea - Premium Black",
+      "stored": {
+        "categoryId": "6a02ecdec6755a49b4219457",
+        "categoryName": "Tea & Breakfast",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-005",
+      "name": "Rice - Basmati",
+      "stored": {
+        "categoryId": "69d8bfc29d463d9aaa3f6d35",
+        "categoryName": "RICE Mandi",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-006",
+      "name": "Tomato - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-007",
+      "name": "Onion - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc9c6755a49b42190ed",
+        "categoryName": "VEGETABLES",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-008",
+      "name": "Banana - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-009",
+      "name": "Apple - Red",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "PROD-010",
+      "name": "Orange - Fresh",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": null,
+        "subcategoryName": null
+      }
+    },
+    {
+      "sku": "S1505",
+      "name": "Amla - 250g",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      }
+    },
+    {
+      "sku": "S1506",
+      "name": "Amla - 500g",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      }
+    },
+    {
+      "sku": "S1507",
+      "name": "Amla - 1kg",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      }
+    },
+    {
+      "sku": "S1508",
+      "name": "Amla - 500g * 3 - Multipack",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      }
+    },
+    {
+      "sku": "S1509",
+      "name": "Amla  - 1kg * 2 - Multipack",
+      "stored": {
+        "categoryId": "6a02ecc0c6755a49b4218f45",
+        "categoryName": "FRUITS",
+        "subcategoryId": "6a02ecc7c6755a49b4219083",
+        "subcategoryName": "Berries"
+      }
+    }
+  ],
+  "duplicateCategoryCodes": [],
+  "duplicateEmptyL2Deactivations": [
+    {
+      "_id": "69d8bfc29d463d9aaa3f6d39",
+      "name": "Boiled Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab3ecfe7c8081fe82f9"
+    },
+    {
+      "_id": "6a1167777faf69a6fa40d49e",
+      "name": "Boiled Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab3ecfe7c8081fe82f9"
+    },
+    {
+      "_id": "6a5b77333bc9e96166f000bc",
+      "name": "Boiled Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab3ecfe7c8081fe82f9"
+    },
+    {
+      "_id": "69d8bfc29d463d9aaa3f6d74",
+      "name": "Raw Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab4ecfe7c8081fe8312"
+    },
+    {
+      "_id": "6a1167787faf69a6fa40d4b6",
+      "name": "Raw Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab4ecfe7c8081fe8312"
+    },
+    {
+      "_id": "6a5b77343bc9e96166f000d4",
+      "name": "Raw Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab4ecfe7c8081fe8312"
+    },
+    {
+      "_id": "6a11677b7faf69a6fa40d4f5",
+      "name": "Red Rice & Brown Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab6ecfe7c8081fe834c"
+    },
+    {
+      "_id": "6a5b77363bc9e96166f0010d",
+      "name": "Red Rice & Brown Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab6ecfe7c8081fe834c"
+    },
+    {
+      "_id": "69d8bfc49d463d9aaa3f6e5b",
+      "name": "Kerala Rice & Broken Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab7ecfe7c8081fe8367"
+    },
+    {
+      "_id": "6a11677c7faf69a6fa40d50d",
+      "name": "Kerala Rice & Broken Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab7ecfe7c8081fe8367"
+    },
+    {
+      "_id": "6a5b77373bc9e96166f00126",
+      "name": "Kerala Rice & Broken Rice",
+      "parent": "RICE Mandi",
+      "keptTwin": "6a5deab7ecfe7c8081fe8367"
+    }
+  ]
+}

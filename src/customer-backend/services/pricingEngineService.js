@@ -11,9 +11,10 @@ const PRICING_VERSION = 'v1';
 const { Product } = require('../models/Product');
 const { PricingCoupon } = require('../../merch/models/PricingCoupon');
 const { validateCoupon } = require('./couponsService');
-const FREE_DELIVERY_THRESHOLD = Number(process.env.PRICING_FREE_DELIVERY_THRESHOLD || 499);
-const DEFAULT_DELIVERY_FEE = Number(process.env.PRICING_DELIVERY_FEE || 40);
-const DEFAULT_HANDLING_CHARGE = Number(process.env.PRICING_HANDLING_CHARGE || 5);
+const {
+  getDeliveryPricingConfig,
+  computeDeliveryFee,
+} = require('./deliveryPricingConfig');
 
 function nowIso() {
   return new Date().toISOString();
@@ -77,8 +78,9 @@ function ensureZeroTotals(totals) {
   };
 }
 
-function computeBaseDeliveryFee(itemTotal) {
-  return toNumber(itemTotal, 0) >= FREE_DELIVERY_THRESHOLD ? 0 : DEFAULT_DELIVERY_FEE;
+async function computeBaseDeliveryFee(itemTotal) {
+  const config = await getDeliveryPricingConfig();
+  return computeDeliveryFee(toNumber(itemTotal, 0), config);
 }
 
 function buildInitialContext(input) {
@@ -215,7 +217,7 @@ async function applyCoupon(context) {
   }
 
   const itemTotal = toNumber(next.totals.itemTotal, 0);
-  const deliveryFeeForValidation = computeBaseDeliveryFee(itemTotal);
+  const deliveryFeeForValidation = await computeBaseDeliveryFee(itemTotal);
   try {
     const coupon = await PricingCoupon.findOne({ code: String(couponCode).toUpperCase() }).lean();
     if (!coupon) {
@@ -289,19 +291,23 @@ async function applyCoupon(context) {
 async function applyFees(context) {
   const safeContext = context || buildInitialContext({});
   const itemTotal = toNumber(safeContext?.totals?.itemTotal, 0);
-  const baseDeliveryFee = computeBaseDeliveryFee(itemTotal);
+  const hasBillableItems = itemTotal > 0;
+  const config = await getDeliveryPricingConfig();
+  // Handling / delivery fees apply only when the cart has a positive item total.
+  const baseDeliveryFee = hasBillableItems ? computeDeliveryFee(itemTotal, config) : 0;
+  const handlingCharge = hasBillableItems ? config.handlingCharge : 0;
   const next = {
     ...safeContext,
     totals: {
       ...ensureZeroTotals(safeContext.totals),
       deliveryFee: baseDeliveryFee,
-      handlingCharge: DEFAULT_HANDLING_CHARGE,
+      handlingCharge,
     },
   };
   debugLog('applyFees', next, {
-    freeDeliveryThreshold: FREE_DELIVERY_THRESHOLD,
-    defaultDeliveryFee: DEFAULT_DELIVERY_FEE,
-    handlingCharge: DEFAULT_HANDLING_CHARGE,
+    freeDeliveryThreshold: config.freeDeliveryThreshold,
+    defaultDeliveryFee: config.deliveryFee,
+    handlingCharge,
   });
   return next;
 }

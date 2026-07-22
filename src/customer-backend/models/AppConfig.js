@@ -5,6 +5,8 @@ const paymentMethodSchema = new mongoose.Schema({
   label: { type: String, required: true },
   description: { type: String, default: '' },
   icon: { type: String, default: '' },
+  /** Optional CMS-managed image URL (preferred over Lucide icon key when set). */
+  imageUrl: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   order: { type: Number, default: 0 },
 }, { _id: false });
@@ -14,6 +16,8 @@ const supportCategorySchema = new mongoose.Schema({
   label: { type: String, required: true },
   description: { type: String, default: '' },
   icon: { type: String, default: '' },
+  /** Optional CMS-managed image URL (preferred over Lucide icon key when set). */
+  imageUrl: { type: String, default: '' },
   isActive: { type: Boolean, default: true },
   order: { type: Number, default: 0 },
 }, { _id: false });
@@ -67,6 +71,8 @@ const appConfigSchema = new mongoose.Schema(
     wallet: {
       topUpAmounts: [{ type: Number }],
       maxTopUpAmount: { type: Number, default: 10000 },
+      /** Optional illustration for wallet screen / empty wallet. */
+      imageUrl: { type: String, default: '' },
     },
 
     catalog: {
@@ -128,7 +134,15 @@ const appConfigSchema = new mongoose.Schema(
     },
 
     images: {
-      placeholderUrl: { type: String, default: 'https://placehold.co/200x200?text=No+Image' },
+      placeholderUrl: { type: String, default: '' },
+      outOfStockImageUrl: { type: String, default: '' },
+      emptyCartImageUrl: { type: String, default: '' },
+      emptyOrdersImageUrl: { type: String, default: '' },
+      emptyNotificationsImageUrl: { type: String, default: '' },
+      emptySearchImageUrl: { type: String, default: '' },
+      emptyWishlistImageUrl: { type: String, default: '' },
+      errorImageUrl: { type: String, default: '' },
+      noProductsImageUrl: { type: String, default: '' },
     },
 
     search: {
@@ -217,17 +231,19 @@ const DEFAULT_APP_CONFIG = {
   wallet: {
     topUpAmounts: [100, 250, 500],
     maxTopUpAmount: 10000,
+    imageUrl: '',
   },
   catalog: {
     defaultCollectionKey: '',
   },
   paymentMethods: [
-    { key: 'cash', label: 'Cash on Delivery', description: 'Pay when your order arrives', icon: 'cash', isActive: true, order: 0 },
+    { key: 'cash', label: 'Cash on Delivery', description: 'Pay when your order arrives', icon: 'cash', imageUrl: '', isActive: true, order: 0 },
     {
       key: 'digital',
       label: 'Digital Payment',
       description: 'Card, UPI, net banking, and wallets via Worldline',
       icon: 'card',
+      imageUrl: '',
       isActive: true,
       order: 1,
     },
@@ -277,21 +293,29 @@ const DEFAULT_APP_CONFIG = {
     showOtherUpiOption: true,
   },
   images: {
-    placeholderUrl: 'https://placehold.co/200x200?text=No+Image',
+    placeholderUrl: '',
+    outOfStockImageUrl: '',
+    emptyCartImageUrl: '',
+    emptyOrdersImageUrl: '',
+    emptyNotificationsImageUrl: '',
+    emptySearchImageUrl: '',
+    emptyWishlistImageUrl: '',
+    errorImageUrl: '',
+    noProductsImageUrl: '',
   },
   supportCategories: [
-    { key: 'contact_support', label: 'Contact Support', description: 'Get in touch with our team', icon: 'phone', isActive: true, order: 0 },
-    { key: 'orders', label: 'Orders', description: 'Track, cancel, or change orders', icon: 'package', isActive: true, order: 1 },
-    { key: 'payments', label: 'Payments', description: 'Payment methods and failed charges', icon: 'credit-card', isActive: true, order: 2 },
-    { key: 'delivery', label: 'Delivery', description: 'Delivery slots and issues', icon: 'truck', isActive: true, order: 3 },
-    { key: 'wallet', label: 'Wallet', description: 'Wallet balance and top-ups', icon: 'wallet', isActive: true, order: 4 },
-    { key: 'refunds', label: 'Refunds', description: 'Refund status and eligibility', icon: 'refresh-cw', isActive: true, order: 5 },
-    { key: 'account', label: 'Account', description: 'Profile, addresses, and settings', icon: 'settings', isActive: true, order: 6 },
-    { key: 'offers', label: 'Offers', description: 'Coupons and promotional offers', icon: 'star', isActive: true, order: 7 },
-    { key: 'technical_issues', label: 'Technical Issues', description: 'App or website problems', icon: 'alert-triangle', isActive: true, order: 8 },
-    { key: 'feedback', label: 'Feedback', description: 'Share your feedback', icon: 'message-square', isActive: true, order: 9 },
-    { key: 'app_issues', label: 'App Issues', description: 'Report bugs and crashes', icon: 'smartphone', isActive: true, order: 10 },
-    { key: 'general_inquiry', label: 'General Inquiry', description: 'Ask us anything', icon: 'help-circle', isActive: true, order: 11 },
+    { key: 'contact_support', label: 'Contact Support', description: 'Get in touch with our team', icon: 'phone', imageUrl: '', isActive: true, order: 0 },
+    { key: 'orders', label: 'Orders', description: 'Track, cancel, or change orders', icon: 'package', imageUrl: '', isActive: true, order: 1 },
+    { key: 'payments', label: 'Payments', description: 'Payment methods and failed charges', icon: 'credit-card', imageUrl: '', isActive: true, order: 2 },
+    { key: 'delivery', label: 'Delivery', description: 'Delivery slots and issues', icon: 'truck', imageUrl: '', isActive: true, order: 3 },
+    { key: 'wallet', label: 'Wallet', description: 'Wallet balance and top-ups', icon: 'wallet', imageUrl: '', isActive: true, order: 4 },
+    { key: 'refunds', label: 'Refunds', description: 'Refund status and eligibility', icon: 'refresh-cw', isActive: true, order: 5, imageUrl: '' },
+    { key: 'account', label: 'Account', description: 'Profile, addresses, and settings', icon: 'settings', imageUrl: '', isActive: true, order: 6 },
+    { key: 'offers', label: 'Offers', description: 'Coupons and promotional offers', icon: 'star', imageUrl: '', isActive: true, order: 7 },
+    { key: 'technical_issues', label: 'Technical Issues', description: 'App or website problems', icon: 'alert-triangle', imageUrl: '', isActive: true, order: 8 },
+    { key: 'feedback', label: 'Feedback', description: 'Share your feedback', icon: 'message-square', imageUrl: '', isActive: true, order: 9 },
+    { key: 'app_issues', label: 'App Issues', description: 'Report bugs and crashes', icon: 'smartphone', imageUrl: '', isActive: true, order: 10 },
+    { key: 'general_inquiry', label: 'General Inquiry', description: 'Ask us anything', icon: 'help-circle', imageUrl: '', isActive: true, order: 11 },
   ],
   search: {
     placeholder: 'Search products...',

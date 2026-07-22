@@ -4,6 +4,8 @@ const userSchema = new mongoose.Schema(
     phoneNumber: { type: String },
     email: { type: String, default: undefined },
     name: { type: String },
+    /** Public URL of the customer's profile photo (S3). */
+    avatarUrl: { type: String, default: '' },
     phoneVerified: { type: Boolean, default: false },
     phoneVerifiedAt: { type: Date, default: null },
     onboardingCompleted: { type: Boolean, default: false },

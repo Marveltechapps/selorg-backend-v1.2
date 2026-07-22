@@ -148,12 +148,40 @@ async function uploadVendorPaymentDocument(buffer, hubKey, paymentId, fileName, 
   return uploadBufferToS3(buffer, bucket, folder, fileName, contentType);
 }
 
+/**
+ * Upload customer avatar image
+ * @param {string} userId - Customer user ID
+ * @param {string} base64Data - Base64 encoded image
+ * @returns {Promise<string>} - S3 URL
+ */
+async function uploadCustomerAvatarImage(userId, base64Data) {
+  const bucket =
+    process.env.AWS_S3_BUCKET_CUSTOMER_AVATARS ||
+    process.env.AWS_S3_BUCKET_PRODUCT_IMAGES ||
+    'selorg-product-images';
+  const folder = `customer-avatars/${userId}`;
+  return uploadBase64ImageToS3(base64Data, bucket, folder);
+}
+
+/**
+ * Upload CMS / app-config illustration (empty states, OOS, etc.)
+ * @param {string} base64Data
+ * @param {string} [folder='cms-images']
+ * @returns {Promise<string>}
+ */
+async function uploadCmsIllustrationImage(base64Data, folder = 'cms-images') {
+  const bucket = process.env.AWS_S3_BUCKET_PRODUCT_IMAGES || 'selorg-product-images';
+  return uploadBase64ImageToS3(base64Data, bucket, folder);
+}
+
 module.exports = {
   uploadBase64ImageToS3,
   uploadBufferToS3,
   uploadPickerProfileImage,
   uploadRiderProfileImage,
   uploadProductImage,
+  uploadCustomerAvatarImage,
+  uploadCmsIllustrationImage,
   uploadVendorPaymentDocument,
   getFinanceDocumentsBucket,
   s3Client,

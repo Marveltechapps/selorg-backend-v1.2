@@ -17,41 +17,23 @@ const { idempotencyMiddleware } = require('../../../../middleware/idempotency');
 
 /**
  * POST /api/v1/customer/payments/process
- * Process payment for order (P0.2: idempotency required)
+ * DISABLED: this legacy stub fabricated a COMPLETED transaction without any
+ * gateway verification, letting cancelled/failed payments look successful.
+ * All customer payments must go through the verified Worldline flow:
+ * /api/v1/customer/payments/worldline/{session,complete,status,return}.
  */
 router.post(
   '/process',
   idempotencyMiddleware,
   authenticateJWT,
   requireRole('CUSTOMER'),
-  async (req, res, next) => {
-    try {
-      const { orderId, amount, paymentMethod } = req.body;
-
-      const validationErrors = [
-        !orderId && { field: 'orderId', message: 'Order ID is required' },
-        !amount && { field: 'amount', message: 'Amount is required' },
-        !paymentMethod && { field: 'paymentMethod', message: 'Payment method is required' },
-        amount && amount <= 0 && { field: 'amount', message: 'Amount must be greater than 0' }
-      ].filter(Boolean);
-
-      if (validationErrors.length > 0) {
-        return res.status(422).json(
-          ResponseFormatter.validationError(validationErrors, 'Payment validation failed')
-        );
-      }
-
-      const transaction = {
-        transactionId: 'txn_' + Date.now(),
-        orderId,
-        amount,
-        status: 'COMPLETED'
-      };
-
-      res.json(ResponseFormatter.success(transaction, 'Payment processed successfully'));
-    } catch (err) {
-      next(err);
-    }
+  async (req, res) => {
+    return res.status(410).json(
+      ResponseFormatter.error(
+        'This endpoint is disabled. Use the verified Worldline payment flow (/payments/worldline/*).',
+        410
+      )
+    );
   }
 );
 

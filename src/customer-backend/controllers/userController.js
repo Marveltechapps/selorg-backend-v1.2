@@ -43,7 +43,7 @@ async function updateProfile(req, res) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const allowed = ['name', 'email', 'phoneNumber'];
+    const allowed = ['name', 'email', 'phoneNumber', 'avatarUrl'];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -53,6 +53,13 @@ async function updateProfile(req, res) {
       updates.phoneNumber = req.body.mobileNumber;
     } else if (req.body.phone !== undefined && updates.phoneNumber === undefined) {
       updates.phoneNumber = req.body.phone;
+    }
+    if (req.body.profileImageUrl !== undefined && updates.avatarUrl === undefined) {
+      updates.avatarUrl = req.body.profileImageUrl;
+    }
+
+    if (updates.avatarUrl !== undefined) {
+      updates.avatarUrl = String(updates.avatarUrl || '').trim();
     }
 
     if (updates.phoneNumber !== undefined) {
@@ -70,7 +77,16 @@ async function updateProfile(req, res) {
     }
 
     if (updates.name !== undefined) {
-      updates.name = String(updates.name || '').trim();
+      const normalizedName = String(updates.name || '').trim();
+      if (normalizedName.length < 2) {
+        res.status(400).json({ success: false, message: 'Full name must be at least 2 characters' });
+        return;
+      }
+      if (normalizedName.length > 100) {
+        res.status(400).json({ success: false, message: 'Full name must be 100 characters or fewer' });
+        return;
+      }
+      updates.name = normalizedName;
     }
     if (req.body.savedCheckoutContact !== undefined) {
       const sc = req.body.savedCheckoutContact;
@@ -105,6 +121,10 @@ async function updateProfile(req, res) {
     res.status(200).json({ success: true, data: user });
   } catch (err) {
     console.error('updateProfile error:', err);
+    if (err?.code === 11000 && err?.keyPattern?.email) {
+      res.status(409).json({ success: false, message: 'That email address is already in use' });
+      return;
+    }
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 }
@@ -151,4 +171,37 @@ async function changePassword(req, res) {
   }
 }
 
-module.exports = { getProfile, updateProfile, changePassword };
+async function uploadAvatar(req, res) {
+  try {
+    noStore(res);
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+    const image = req.body?.image || req.body?.avatar || req.body?.file;
+    if (!image || typeof image !== 'string') {
+      res.status(400).json({ success: false, message: 'image (base64) is required' });
+      return;
+    }
+    const { uploadCustomerAvatarImage } = require('../../utils/s3Upload');
+    const avatarUrl = await uploadCustomerAvatarImage(String(req.user._id), image);
+    const user = await CustomerUser.findByIdAndUpdate(
+      req.user._id,
+      { $set: { avatarUrl } },
+      { new: true }
+    )
+      .select('-passwordHash')
+      .lean();
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+    await invalidateCustomerProfileCache();
+    res.status(200).json({ success: true, data: user });
+  } catch (err) {
+    console.error('uploadAvatar error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+  }
+}
+
+module.exports = { getProfile, updateProfile, changePassword, uploadAvatar };

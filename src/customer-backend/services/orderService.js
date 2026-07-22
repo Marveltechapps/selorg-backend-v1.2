@@ -491,6 +491,12 @@ async function releaseOrderFulfillment(orderId) {
   if (!order) return { error: 'Order not found' };
   // Only explicit false means "not yet released"; legacy docs without the field must not re-run release.
   if (order.fulfillmentReleased !== false) return { skipped: true };
+  // A cancelled order must never be released or earn "Order Placed" — this covers
+  // late gateway success callbacks/reconciles racing a customer/admin/system cancel.
+  if (order.status === 'cancelled') {
+    console.warn('[order-service] release skipped: order already cancelled', { orderId: String(orderId) });
+    return { skipped: true, reason: 'cancelled' };
+  }
   const methodType = order.paymentMethod?.methodType;
   if (methodType !== 'card' && methodType !== 'upi' && methodType !== 'digital') {
     return { error: 'Release only applies to online payment orders' };
@@ -548,20 +554,37 @@ async function releaseOrderFulfillment(orderId) {
 
   await runPostOrderIntegrations(userId, response, 'paid', methodType, order.totalBill);
 
-  await Order.updateOne({ _id: order._id, fulfillmentReleased: false }, { $set: { fulfillmentReleased: true } });
+  // Atomic claim also excludes cancelled orders: if a cancel landed between the
+  // status check above and this write, the claim fails and no notification is sent.
+  const claim = await Order.updateOne(
+    { _id: order._id, fulfillmentReleased: false, status: { $ne: 'cancelled' } },
+    { $set: { fulfillmentReleased: true } }
+  );
+
+  // Payment is verified and fulfillment released exactly once — this is the only
+  // point where an online-payment order earns the "Order Placed" notification.
+  if (claim.modifiedCount === 1) {
+    try {
+      const { sendPaymentOutcomeNotification } = require('./notificationService');
+      await sendPaymentOutcomeNotification(order, 'success');
+    } catch (e) {
+      console.warn('[order-service] order placed notification failed (non-blocking):', e?.message);
+    }
+  }
 
   return { ok: true };
 }
 
 /**
  * Failed/cancelled online payment before fulfillment: cancel order and restore cart from order lines.
+ * @param {'failed'|'cancelled'|'timeout'} [outcome] — verified gateway outcome; drives the customer notification.
  */
-async function voidUnpaidOnlineOrder(userId, orderId, reason = '') {
+async function voidUnpaidOnlineOrder(userId, orderId, reason = '', outcome = 'failed') {
   const { restoreCartFromOrder } = require('./cartService');
   const order = await Order.findOne({
     _id: orderId,
     userId: new mongoose.Types.ObjectId(userId),
-  });
+  }).lean();
   if (!order) return { error: 'Order not found' };
   const methodType = order.paymentMethod?.methodType;
   if (methodType !== 'card' && methodType !== 'upi' && methodType !== 'digital') {
@@ -571,23 +594,54 @@ async function voidUnpaidOnlineOrder(userId, orderId, reason = '') {
     return { skipped: true };
   }
 
-  if (order.status === 'cancelled') {
-    await restoreCartFromOrder(userId, order);
+  // Atomic exactly-once claim of the cancelled transition. A single payment
+  // cancel can reach this function from several concurrent paths within the
+  // same second (app `complete` call, gateway return URL, browser-return
+  // complete, order reconciliation) — a read-then-save check lets every racer
+  // through and each one used to emit its own "Payment Cancelled" notification.
+  // Only the winner of this update restores the cart and notifies.
+  const claimed = await Order.findOneAndUpdate(
+    {
+      _id: order._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: { $ne: 'cancelled' },
+      fulfillmentReleased: { $ne: true },
+      paymentStatus: { $ne: 'paid' },
+    },
+    {
+      $set: {
+        status: 'cancelled',
+        paymentStatus: 'failed',
+        cancellationReason: reason || 'Payment failed or cancelled',
+      },
+      $push: {
+        timeline: {
+          status: 'cancelled',
+          timestamp: new Date(),
+          note: reason || 'Payment failed or cancelled',
+          actor: 'system',
+        },
+      },
+    },
+    { new: true }
+  );
+
+  if (!claimed) {
+    // Another handler already cancelled this order (its notification was sent
+    // then), or the order got paid in the meantime — nothing more to do.
     return { ok: true, skipped: true };
   }
 
-  order.status = 'cancelled';
-  order.paymentStatus = 'failed';
-  order.cancellationReason = reason || 'Payment failed or cancelled';
-  order.timeline.push({
-    status: 'cancelled',
-    timestamp: new Date(),
-    note: reason || 'Payment failed or cancelled',
-    actor: 'system',
-  });
-  await order.save();
+  await restoreCartFromOrder(userId, claimed);
 
-  await restoreCartFromOrder(userId, order);
+  // Notify the verified payment outcome — never "Order Placed" here.
+  try {
+    const { sendPaymentOutcomeNotification } = require('./notificationService');
+    const validOutcome = ['failed', 'cancelled', 'timeout'].includes(outcome) ? outcome : 'failed';
+    await sendPaymentOutcomeNotification(claimed, validOutcome, { reason: reason || '' });
+  } catch (e) {
+    console.warn('[order-service] payment outcome notification failed (non-blocking):', e?.message);
+  }
 
   return { ok: true };
 }
@@ -609,7 +663,32 @@ async function reconcileOrderWithLatestWorldlinePayment(userId, orderLean) {
     .sort({ attemptNo: -1 })
     .lean();
 
-  if (!latest) return;
+  if (!latest) {
+    // Online order with no gateway attempt at all: the customer abandoned
+    // checkout before a payment session was even created. Without this guard
+    // the order stays "pending / awaiting payment" forever and keeps being
+    // returned as the active order.
+    const ttlMinutes = parseInt(process.env.PENDING_PAYMENT_TTL_MINUTES || '30', 10);
+    const ageMs = Date.now() - new Date(orderLean.createdAt || 0).getTime();
+    if (
+      orderLean.status === 'pending' &&
+      orderLean.paymentStatus !== 'paid' &&
+      orderLean.fulfillmentReleased === false &&
+      ageMs > ttlMinutes * 60 * 1000
+    ) {
+      try {
+        await voidUnpaidOnlineOrder(
+          userId,
+          orderId,
+          'Payment was not completed in time',
+          'timeout'
+        );
+      } catch (e) {
+        console.warn('[order-service] stale unpaid order void failed', { orderId, message: e?.message });
+      }
+    }
+    return;
+  }
 
   const order = await Order.findOne({
     _id: orderId,
@@ -622,6 +701,16 @@ async function reconcileOrderWithLatestWorldlinePayment(userId, orderLean) {
   const verified = latest.verificationError === 'none';
 
   if (latest.status === 'success' && verified) {
+    // Cancelled orders stay cancelled: never flip them to paid or release fulfillment
+    // (which would emit "Order Placed"). A captured payment on a cancelled order is
+    // an ops/refund concern, not a fulfillment trigger.
+    if (order.status === 'cancelled') {
+      console.warn('[order-service] verified payment success on cancelled order — refund attention needed', {
+        orderId,
+        txnId: latest.txnId,
+      });
+      return;
+    }
     if (order.paymentStatus !== 'paid') {
       order.paymentStatus = 'paid';
       await order.save();
@@ -637,10 +726,95 @@ async function reconcileOrderWithLatestWorldlinePayment(userId, orderLean) {
   if ((latest.status === 'failed' || latest.status === 'cancelled') && verified) {
     if (order.fulfillmentReleased !== true) {
       try {
-        await voidUnpaidOnlineOrder(userId, orderId, latest.statusMessage || 'Payment failed');
+        await voidUnpaidOnlineOrder(
+          userId,
+          orderId,
+          latest.statusMessage || 'Payment failed',
+          latest.status === 'cancelled' ? 'cancelled' : 'failed'
+        );
       } catch (e) {
         console.warn('[order-service] voidUnpaidOnlineOrder reconcile failed', { orderId, message: e?.message });
       }
+    }
+    return;
+  }
+
+  // Payment row already marked failed/cancelled but hash verification was never
+  // recorded (common for abandoned sessions / reconciliation). Still void the
+  // unpaid order so Track Order does not keep showing Payment Pending.
+  if (
+    (latest.status === 'failed' || latest.status === 'cancelled') &&
+    order.status === 'pending' &&
+    order.paymentStatus !== 'paid' &&
+    order.fulfillmentReleased === false
+  ) {
+    try {
+      await voidUnpaidOnlineOrder(
+        userId,
+        orderId,
+        latest.statusMessage || 'Payment failed',
+        latest.status === 'cancelled' ? 'cancelled' : 'failed'
+      );
+    } catch (e) {
+      console.warn('[order-service] unpaid order void after failed attempt failed', {
+        orderId,
+        message: e?.message,
+      });
+    }
+    return;
+  }
+
+  // Non-terminal attempt (created/initiated/pending/unknown).
+  if (!['success', 'failed', 'cancelled'].includes(latest.status)) {
+    const sessionExpired =
+      latest.sessionExpiresAt && new Date(latest.sessionExpiresAt).getTime() < Date.now();
+    const attemptAgeMs = Date.now() - new Date(latest.createdAt || latest.updatedAt || 0).getTime();
+    const ttlMinutes = parseInt(process.env.PENDING_PAYMENT_TTL_MINUTES || '30', 10);
+    // created/initiated = the customer never completed the gateway flow. Once
+    // the session expired the gateway can no longer finish it — fail + void so
+    // the order doesn't sit "awaiting payment" (and keep showing on Track
+    // Order) forever. Genuinely gateway-pending attempts (0396/0398) are only
+    // failed after 24h, same as the reconciliation cron.
+    const abandonedBeforeGateway =
+      (latest.status === 'created' || latest.status === 'initiated') &&
+      (sessionExpired || (!latest.sessionExpiresAt && attemptAgeMs > ttlMinutes * 60 * 1000));
+    const extremelyStale = attemptAgeMs > 24 * 60 * 60 * 1000;
+
+    if (
+      (abandonedBeforeGateway || extremelyStale) &&
+      order.status === 'pending' &&
+      order.paymentStatus !== 'paid' &&
+      order.fulfillmentReleased === false
+    ) {
+      try {
+        await WorldlinePayment.updateOne(
+          { _id: latest._id, status: latest.status },
+          {
+            $set: {
+              status: 'failed',
+              statusMessage: 'Payment session expired without completion',
+              verificationSource: 'reconciliation',
+            },
+          }
+        );
+        await voidUnpaidOnlineOrder(
+          userId,
+          orderId,
+          'Payment was not completed in time',
+          'timeout'
+        );
+      } catch (e) {
+        console.warn('[order-service] expired payment session void failed', { orderId, message: e?.message });
+      }
+      return;
+    }
+
+    // Session expired but not voidable yet → one-time timeout notification.
+    try {
+      const { maybeNotifyPaymentTimeout } = require('./worldlinePaymentsService');
+      await maybeNotifyPaymentTimeout(latest, order);
+    } catch (e) {
+      console.warn('[order-service] payment timeout reconcile check failed', { orderId, message: e?.message });
     }
   }
 }
@@ -982,7 +1156,11 @@ async function updateCustomerOrderStatus(orderId, newStatus, { actor, note, ride
   });
 
   if (riderId) order.riderId = riderId;
-  if (newStatus === 'delivered') order.deliveredAt = new Date();
+  if (newStatus === 'delivered') {
+    order.deliveredAt = new Date();
+    // COD is collected at handover — delivery completes the payment.
+    if (order.paymentStatus === 'cod_pending') order.paymentStatus = 'paid';
+  }
   if (newStatus === 'cancelled') {
     order.cancellationReason = note || 'Order cancelled';
   }
@@ -991,7 +1169,9 @@ async function updateCustomerOrderStatus(orderId, newStatus, { actor, note, ride
 
   try {
     const { sendOrderStatusNotification } = require('./notificationService');
-    await sendOrderStatusNotification(order, newStatus);
+    await sendOrderStatusNotification(order, newStatus, {
+      actor: actor || STATUS_ACTOR_MAP[newStatus] || 'system',
+    });
   } catch (e) { /* non-blocking */ }
 
   try {
@@ -1043,6 +1223,48 @@ async function getActiveOrder(userId) {
   order = await Order.findOne({ _id: order._id, userId: new mongoose.Types.ObjectId(userId) }).lean();
   if (!order) return null;
 
+  // A checkout the customer abandoned long ago (online order that was voided
+  // for an unpaid/expired payment) must not resurface on Track Order as a
+  // "recent" cancellation — for the customer, no order was ever placed.
+  // Fresh payment failures (order created within the last hour) still show
+  // the Payment Failed screen; order details/history keep the record either way.
+  if (
+    order.status === 'cancelled' &&
+    order.paymentStatus === 'failed' &&
+    isGatewayPrepayment(order.paymentMethod?.methodType) &&
+    Date.now() - new Date(order.createdAt || 0).getTime() > 60 * 60 * 1000
+  ) {
+    return null;
+  }
+
+  return buildTrackingPayload(order);
+}
+
+/**
+ * Real-time tracking payload for a specific order owned by the user.
+ * Same shape as the active-order payload: status, paymentStatus, items,
+ * timeline, delivery address, store/home coordinates, rider details and
+ * live location, plus the remaining ETA — all from the database.
+ */
+async function getOrderTracking(userId, orderId) {
+  if (!mongoose.isValidObjectId(orderId)) return null;
+  let order = await Order.findOne({
+    _id: orderId,
+    userId: new mongoose.Types.ObjectId(userId),
+  }).lean();
+  if (!order) return null;
+
+  await reconcileOrderWithLatestWorldlinePayment(userId, order);
+  order = await Order.findOne({
+    _id: order._id,
+    userId: new mongoose.Types.ObjectId(userId),
+  }).lean();
+  if (!order) return null;
+
+  return buildTrackingPayload(order);
+}
+
+async function buildTrackingPayload(order) {
   const formatted = formatOrderForApp({ ...order, _id: order._id });
 
   const [storeDetails, addressDetails] = await Promise.all([
@@ -1152,15 +1374,16 @@ async function reorderItems(userId, orderId) {
   if (!order.items || order.items.length === 0) return { error: 'No items to reorder' };
 
   const { Cart } = require('../models/Cart');
+  const { matchCartLine, dedupeCartLines, invalidateCartGetCache } = require('./cartService');
   let cart = await Cart.findOne({ userId });
   if (!cart) {
     cart = new Cart({ userId, items: [] });
   }
 
   for (const item of order.items) {
-    const existing = cart.items.find(
-      (ci) => String(ci.productId) === String(item.productId) && ci.variantId === (item.variantId || '')
-    );
+    // Normalized product+variant matching — raw string equality created duplicate
+    // lines when the stored variantId was '' on one side and the productId on the other.
+    const existing = cart.items.find((ci) => matchCartLine(ci, item.productId, item.variantId));
     if (existing) {
       existing.quantity += item.quantity;
     } else {
@@ -1179,6 +1402,8 @@ async function reorderItems(userId, orderId) {
   }
 
   await cart.save();
+  await dedupeCartLines(cart.userId);
+  await invalidateCartGetCache();
   return { success: true, itemsAdded: order.items.length };
 }
 
@@ -1188,6 +1413,7 @@ module.exports = {
   createOrder,
   cancelOrder,
   getActiveOrder,
+  getOrderTracking,
   updateCustomerOrderStatus,
   releaseOrderFulfillment,
   voidUnpaidOnlineOrder,

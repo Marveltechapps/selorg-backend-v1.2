@@ -11,10 +11,12 @@ const { LifestyleItem } = require('../models/LifestyleItem');
 const { PromoBlock } = require('../models/PromoBlock');
 const { getDefaultAddress } = require('./addressService');
 const { resolveCollectionProducts } = require('./merchandising/collectionService');
-const { resolveCuratedSectionProducts } = require('./merchandising/curatedHomeSections');
+const { resolveCuratedSectionProducts, RAIL_ALIASES } = require('./merchandising/curatedHomeSections');
 const { enrichHomePayloadLegacy } = require('../utils/customerMediaEnrichment');
 const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
+const { dedupeHomeSectionDefinitions } = require('../utils/dedupeHomeSectionDefinitions');
+const { collectionMergeKey, stripKeyNumericSuffix } = require('../utils/homeSectionKeys');
 
 async function resolveProducts(productIds = []) {
   if (!Array.isArray(productIds) || productIds.length === 0) return [];
@@ -65,6 +67,7 @@ async function getHomePayload(req = {}) {
     };
   }
   let definitionsFromCollection = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
+  definitionsFromCollection = dedupeHomeSectionDefinitions(definitionsFromCollection);
 
   // If no sections are defined in the database, provide a default layout to avoid an empty home page.
   if (definitionsFromCollection.length === 0) {
@@ -166,12 +169,6 @@ async function getHomePayload(req = {}) {
   const midBannerIds = [...new Set(bannerSubDefs.flatMap((d) => getBannerIdList(d)).map((id) => String(id)))];
   let heroBanners = [];
   let midBanners = [];
-  if (heroBannerIds.length > 0) {
-    const heroOid = heroBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
-    heroBanners = await Banner.find({ _id: { $in: heroOid }, isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
-    const orderMap = new Map(heroBannerIds.map((id, i) => [String(id), i]));
-    heroBanners.sort((a, b) => (orderMap.get(String(a._id)) ?? 99) - (orderMap.get(String(b._id)) ?? 99));
-  }
   if (midBannerIds.length > 0) {
     const midOid = midBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
     midBanners = await Banner.find({ _id: { $in: midOid }, isActive: true, ...scheduleQuery }).sort({ order: 1 }).lean();
@@ -189,6 +186,12 @@ async function getHomePayload(req = {}) {
     const heroOid = heroBannerIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
     const rows = await Banner.find({ _id: { $in: heroOid } }).sort({ order: 1 }).lean();
     mainBannerMap = new Map(rows.map((b) => [String(b._id), b]));
+    heroBanners = heroBannerIds
+      .map((id) => mainBannerMap.get(String(id)))
+      .filter(Boolean)
+      .filter((b) => Boolean(String(b.imageUrl || b.bannerImageUrl || b.thumbnailUrl || '').trim()));
+    const heroOrderMap = new Map(heroBannerIds.map((id, i) => [String(id), i]));
+    heroBanners.sort((a, b) => (heroOrderMap.get(String(a._id)) ?? 99) - (heroOrderMap.get(String(b._id)) ?? 99));
   }
   let subBannerMap = new Map();
   if (midBannerIds.length > 0) {
@@ -212,14 +215,23 @@ async function getHomePayload(req = {}) {
     }
   }
   const sectionsDocs = await HomeSection.find({ isActive: true }).sort({ order: 1 }).lean();
-  const sectionDefs = await HomeSectionDefinition.find({ collectionId: { $ne: null } }).lean();
+  const sectionDefs = definitionsFromCollection.filter((d) => d.collectionId);
+  const definitionKeys = new Set(definitionsFromCollection.map((d) => d.key));
+  const definitionLabels = new Set(
+    definitionsFromCollection
+      .filter((d) => d.type === 'collections' && d.label)
+      .map((d) => collectionMergeKey(d.label))
+  );
   const sections = {};
   for (const s of sectionsDocs) {
+    const baseKey = stripKeyNumericSuffix(s.sectionKey);
+    if (s.sectionKey !== baseKey && definitionKeys.has(baseKey)) continue;
+    if (s.title && definitionLabels.has(collectionMergeKey(s.title))) continue;
+    if (definitionKeys.has(s.sectionKey)) continue;
     const products = await resolveProducts(s.productIds || []);
     sections[s.sectionKey] = { title: s.title, products };
   }
   // HomeSectionDefinition with a collectionId is the source of truth for that key's products.
-  // Always merge from the collection (do not skip when HomeSection already created an empty stub).
   for (const d of sectionDefs) {
     if (d.collectionId && d.key) {
       const products = await resolveCollectionProducts(d.collectionId);
@@ -227,8 +239,34 @@ async function getHomePayload(req = {}) {
     }
   }
 
-  // Seed health / wellness product rails from mastersheet catalog when lifestyle CMS is empty.
+  // Alias Master Sheet collection sections into health / wellness rails when labels match.
+  // Prefer explicit Home Page Content collections over inventing product mixes.
+  const aliasRailFromSheetSections = (curatedKey) => {
+    const existing = sections[curatedKey];
+    if (Array.isArray(existing?.products) && existing.products.length > 0) return;
+    const aliases = RAIL_ALIASES[curatedKey]?.match || [];
+    for (const [key, section] of Object.entries(sections)) {
+      if (!Array.isArray(section?.products) || section.products.length === 0) continue;
+      const label = String(section?.title || key).toLowerCase();
+      const keyNorm = String(key).toLowerCase().replace(/_/g, '-');
+      const hit = aliases.some((a) => {
+        const token = String(a).toLowerCase();
+        return label.includes(token) || keyNorm.includes(token.replace(/\s+/g, '-'));
+      });
+      if (!hit) continue;
+      const slug = key.startsWith('collections_')
+        ? key.slice('collections_'.length).replace(/_/g, '-')
+        : null;
+      sections[curatedKey] = {
+        title: section.title || RAIL_ALIASES[curatedKey]?.defaultTitle || curatedKey,
+        products: section.products.slice(0, 12),
+        viewAllLink: slug ? `/collection/${encodeURIComponent(slug)}` : RAIL_ALIASES[curatedKey]?.defaultViewAll || '',
+      };
+      return;
+    }
+  };
   for (const curatedKey of ['health', 'wellness']) {
+    aliasRailFromSheetSections(curatedKey);
     const existing = sections[curatedKey];
     if (Array.isArray(existing?.products) && existing.products.length > 0) continue;
     try {
@@ -242,6 +280,19 @@ async function getHomePayload(req = {}) {
       }
     } catch (err) {
       console.warn(`curated home section ${curatedKey} failed:`, err.message);
+    }
+  }
+  // Legacy HomeSection rows may already populate virtual rails with products but no viewAllLink.
+  for (const curatedKey of ['health', 'wellness']) {
+    const rail = sections[curatedKey];
+    if (!Array.isArray(rail?.products) || rail.products.length === 0 || rail.viewAllLink) continue;
+    try {
+      const curated = await resolveCuratedSectionProducts(curatedKey, { limit: 1 });
+      if (curated?.viewAllLink) {
+        sections[curatedKey] = { ...rail, viewAllLink: curated.viewAllLink };
+      }
+    } catch (err) {
+      console.warn(`curated viewAllLink for ${curatedKey} failed:`, err.message);
     }
   }
 

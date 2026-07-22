@@ -6,12 +6,15 @@ const {
   updateCartItem,
   updateCartItemByProductVariant,
   removeCartItem,
+  mergeCart,
   clear,
 } = require('../controllers/cartController');
 
 const router = Router();
 router.get('/', auth, getCart);
 router.post('/items', auth, addCartItem);
+// Idempotent guest-cart merge on login (exactly once per mergeKey)
+router.post('/merge', auth, mergeCart);
 // Update by product + variant (no cart line id) — must be before /items/:itemId
 router.put('/items', auth, updateCartItemByProductVariant);
 router.put('/items/:itemId', auth, updateCartItem);

@@ -1,11 +1,13 @@
 const { PushToken } = require('../models/PushToken');
 
+// DEPRECATED: prefer notificationService.sendOrderStatusNotification (payment-state-aware).
+// Kept aligned with the canonical templates so any legacy caller shows correct copy.
 const ORDER_STATUS_MESSAGES = {
-  confirmed: { title: 'Order Confirmed! 🎉', body: 'Your order has been confirmed and will be ready shortly.' },
-  'getting-packed': { title: 'Packing Your Order 📦', body: 'Our pickers are now packing your order.' },
-  'on-the-way': { title: 'On the Way! 🚴', body: 'Your delivery partner is heading to you.' },
-  arrived: { title: 'Rider Arrived! 🏠', body: 'Your delivery partner has reached your location.' },
-  delivered: { title: 'Order Delivered ✅', body: 'Your order has been delivered. Enjoy!' },
+  confirmed: { title: 'Order Confirmed', body: 'Your order has been confirmed.' },
+  'getting-packed': { title: 'Order Packed', body: 'Your order has been packed.' },
+  'on-the-way': { title: 'Out for Delivery', body: 'Your order is out for delivery.' },
+  arrived: { title: 'Rider Arrived', body: 'Your delivery partner has reached your location.' },
+  delivered: { title: 'Order Delivered', body: 'Your order has been delivered.' },
   cancelled: { title: 'Order Cancelled', body: 'Your order has been cancelled.' },
 };
 

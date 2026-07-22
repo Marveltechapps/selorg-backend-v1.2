@@ -50,10 +50,12 @@ const worldlinePaymentSchema = new mongoose.Schema(
     statusCode: { type: String, default: '' },
     statusMessage: { type: String, default: '' },
 
-    verificationSource: { type: String, enum: ['app_complete', 'gateway_return', 'reconciliation', 'none'], default: 'none' },
+    verificationSource: { type: String, enum: ['app_complete', 'gateway_return', 'reconciliation', 'client_abort', 'none'], default: 'none' },
     verificationError: { type: String, enum: ['hash_mismatch', 'amount_mismatch', 'none'], default: 'none' },
 
     sessionExpiresAt: { type: Date },
+    /** Set once when the customer has been notified that this attempt's session expired. */
+    timeoutNotified: { type: Boolean, default: false },
     tpslTxnId: { type: String, default: '' },
     bankTxnId: { type: String, default: '' },
     tpslBankCd: { type: String, default: '' },

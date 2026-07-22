@@ -431,9 +431,11 @@ function applySkuImgUrlParams(rawUrl) {
       const url = new URL(u);
       url.searchParams.delete('q');
       url.searchParams.delete('w');
-      return url.toString();
+      const qs = url.searchParams.toString();
+      url.search = qs ? `?${qs}` : '';
+      return url.toString().replace(/\?$/, '');
     } catch {
-      return u.replace(/([?&])q=\d+(&|$)/gi, '$2').replace(/([?&])w=\d+(&|$)/gi, '$2').replace(/[?&]$/, '');
+      return u.replace(/([?&])q=\d*(&|$)/gi, '$2').replace(/([?&])w=\d*(&|$)/gi, '$2').replace(/[?&]$/, '');
     }
   }
   try {

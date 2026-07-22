@@ -25,6 +25,8 @@ const collectionSchema = new mongoose.Schema(
     collectionId: { type: String, default: '' },
     name: { type: String, required: true },
     slug: { type: String, required: true },
+    /** Cover / hero image for collection landing pages (Master Sheet or CMS). */
+    imageUrl: { type: String, default: '' },
     type: { type: String, enum: ['manual', 'rule-based'], default: 'manual' },
     productIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'CustomerProduct' }],
     filterTags: [{ type: String }],

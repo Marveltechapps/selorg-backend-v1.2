@@ -2,20 +2,25 @@ const { PricingCoupon: Coupon } = require('../../merch/models/PricingCoupon');
 const { Order } = require('../models/Order');
 const { CouponRedemption } = require('../models/CouponRedemption');
 const mongoose = require('mongoose');
-const DEFAULT_DELIVERY_FEE = Number(process.env.PRICING_DELIVERY_FEE || 40);
-const FREE_DELIVERY_THRESHOLD = Number(process.env.PRICING_FREE_DELIVERY_THRESHOLD || 499);
+const {
+  getDeliveryPricingConfig,
+  computeDeliveryFee,
+} = require('./deliveryPricingConfig');
 
 function toUpper(value, fallback = '') {
   const v = String(value ?? '').trim();
   return v ? v.toUpperCase() : fallback;
 }
 
-function deriveDeliveryFee(cartValue = 0) {
-  return Number(cartValue) >= FREE_DELIVERY_THRESHOLD ? 0 : DEFAULT_DELIVERY_FEE;
+/** Same single delivery-fee rule the pricing engine bills with. */
+async function deriveDeliveryFee(cartValue = 0) {
+  const config = await getDeliveryPricingConfig();
+  return computeDeliveryFee(Number(cartValue) || 0, config);
 }
 
 function mapCouponForCustomer(coupon) {
   const discountType = String(coupon.discountType || '').toUpperCase();
+  const bannerImageUrl = String(coupon.bannerImageUrl || '').trim();
   return {
     _id: coupon._id,
     code: coupon.code,
@@ -39,6 +44,7 @@ function mapCouponForCustomer(coupon) {
     paymentRestriction: coupon.paymentRestriction || 'ALL',
     showInSections: coupon.showInSections || ['COUPON_LIST'],
     priorityRank: coupon.priorityRank ?? 10,
+    bannerImageUrl: bannerImageUrl || null,
     termsAndConditions: coupon.termsAndConditions || '',
     status: coupon.status,
     isActive: coupon.isActive !== false && String(coupon.status || '').toLowerCase() === 'active',
@@ -238,7 +244,7 @@ async function listActiveCoupons(params = {}) {
   const normalizedUserId = userId && mongoose.Types.ObjectId.isValid(String(userId))
     ? String(userId)
     : null;
-  const deliveryFee = deriveDeliveryFee(cartValue);
+  const deliveryFee = await deriveDeliveryFee(cartValue);
   const annotatedCoupons = [];
 
   for (const coupon of coupons) {

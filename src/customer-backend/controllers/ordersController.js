@@ -4,6 +4,7 @@ const {
   createOrder,
   cancelOrder,
   getActiveOrder,
+  getOrderTracking,
   updateCustomerOrderStatus,
   reorderItems,
 } = require('../services/orderService');
@@ -175,6 +176,8 @@ async function verifyOtp(req, res) {
       order.otpVerified = true;
       order.status = 'delivered';
       order.deliveredAt = new Date();
+      // COD is collected at handover — delivery completes the payment.
+      if (order.paymentStatus === 'cod_pending') order.paymentStatus = 'paid';
       order.timeline.push({ status: 'delivered', timestamp: new Date(), note: 'OTP verified, order delivered', actor: 'rider' });
       await order.save();
 
@@ -229,6 +232,25 @@ async function active(req, res) {
   }
 }
 
+async function tracking(req, res) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+    const order = await getOrderTracking(userId, req.params.id);
+    if (!order) {
+      res.status(404).json({ success: false, message: 'Order not found' });
+      return;
+    }
+    res.status(200).json({ success: true, data: order });
+  } catch (err) {
+    console.error('orders tracking error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
 async function updateStatus(req, res) {
   try {
     const { status: newStatus, actor, note, riderId } = req.body;
@@ -262,4 +284,4 @@ async function reorder(req, res) {
   }
 }
 
-module.exports = { list, getDetail, create, cancel, status, rate, verifyOtp, canCancel, active, updateStatus, reorder };
+module.exports = { list, getDetail, create, cancel, status, rate, verifyOtp, canCancel, active, tracking, updateStatus, reorder };

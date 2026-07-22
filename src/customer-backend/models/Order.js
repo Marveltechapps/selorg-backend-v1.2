@@ -101,6 +101,13 @@ const orderSchema = new mongoose.Schema(
     ratingComment: { type: String, default: '' },
     /** When true, cart was cleared and darkstore/finance side-effects ran (or immediate checkout path). */
     fulfillmentReleased: { type: Boolean, default: false },
+    /**
+     * Set the first (and only) time this order's items are restored to the
+     * customer's cart after a failed/cancelled online payment. Guarantees the
+     * restore is exactly-once even when payment callbacks / reconciliation
+     * replay the void logic.
+     */
+    cartRestoredAt: { type: Date, default: null },
     /** Coupon code applied at checkout (for deferred redemption on card/UPI after payment). */
     checkoutCouponCode: { type: String, default: '' },
   },

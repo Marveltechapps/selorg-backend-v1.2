@@ -9,7 +9,7 @@ const mongoose = require('mongoose');
 const { ContentHubImportRun } = require('../../models/ContentHubImportRun');
 const { importSkuMaster } = require('../../services/import/skuMasterImport.service');
 const { importCmsPages } = require('../../services/import/cmsPagesImport.service');
-const { importContentHubMaster } = require('../../services/import/contentHubMasterImport.service');
+const { scheduleContentHubImportJob } = require('../../services/import/contentHubImportJob.service');
 const cacheService = require('../../../core/services/cache.service');
 
 /**
@@ -114,7 +114,7 @@ async function listCollections(req, res) {
 
 async function createCollection(req, res) {
   try {
-    const { name, slug, type, productIds, rules, sortBy } = req.body;
+    const { name, slug, type, productIds, rules, sortBy, imageUrl } = req.body;
     const existing = await Collection.findOne({ slug });
     if (existing) return res.status(400).json({ message: 'Collection slug already exists' });
     const collection = await Collection.create({
@@ -124,6 +124,7 @@ async function createCollection(req, res) {
       productIds: productIds || [],
       rules: rules || {},
       sortBy: sortBy || 'manual',
+      imageUrl: typeof imageUrl === 'string' ? imageUrl.trim() : '',
     });
     res.status(201).json(collection);
   } catch (err) {
@@ -513,64 +514,102 @@ module.exports = {
     }
     const overwriteRaw = req.body?.overwrite ?? req.query?.overwrite;
     const overwrite = overwriteRaw === undefined ? true : String(overwriteRaw) === 'true';
-    const startedAt = Date.now();
     const uploadedByRaw = req.user?.userId || req.user?._id || null;
     const uploadedBy = mongoose.Types.ObjectId.isValid(String(uploadedByRaw || ''))
       ? new mongoose.Types.ObjectId(String(uploadedByRaw))
       : null;
+
+    // Copy buffer so the HTTP request can finish while the job retains the bytes.
+    const buffer = Buffer.from(req.file.buffer);
+
+    let job;
     try {
-      const { counts, errors, warnings, success } = await importContentHubMaster(req.file.buffer, { overwrite });
-      if (success) await invalidateCustomerCachesSafely();
-      try {
-        await ContentHubImportRun.create({
-          source: 'content-hub',
-          uploadedBy,
-          file: {
-            originalName: req.file?.originalname || '',
-            mimeType: req.file?.mimetype || '',
-            sizeBytes: Number(req.file?.size || 0),
-          },
-          overwrite,
-          success: Boolean(success),
-          durationMs: Date.now() - startedAt,
-          counts: counts || {},
-          warnings: Array.isArray(warnings) ? warnings : [],
-          importErrors: Array.isArray(errors) ? errors : [],
-        });
-      } catch (e) {
-        console.error('ContentHubImportRun.create failed', e);
-      }
-      return res.status(200).json({
-        success,
-        counts,
-        warnings: warnings || [],
-        errors,
+      job = await ContentHubImportRun.create({
+        source: 'content-hub',
+        uploadedBy,
+        file: {
+          originalName: req.file?.originalname || '',
+          mimeType: req.file?.mimetype || '',
+          sizeBytes: Number(req.file?.size || 0),
+        },
+        overwrite,
+        status: 'queued',
+        progress: 0,
+        stage: 'queued',
+        stageMessage: 'Queued for background import',
+        success: false,
+        durationMs: 0,
+        counts: {},
+        warnings: [],
+        importErrors: [],
       });
-    } catch (err) {
-      try {
-        await ContentHubImportRun.create({
-          source: 'content-hub',
-          uploadedBy,
-          file: {
-            originalName: req.file?.originalname || '',
-            mimeType: req.file?.mimetype || '',
-            sizeBytes: Number(req.file?.size || 0),
-          },
-          overwrite,
-          success: false,
-          durationMs: Date.now() - startedAt,
-          counts: {},
-          warnings: [],
-          importErrors: [{ message: err.message }],
-        });
-      } catch (e) {
-        console.error('ContentHubImportRun.create failed', e);
-      }
-      return res.status(200).json({
+    } catch (e) {
+      console.error('ContentHubImportRun.create (queue) failed', e);
+      return res.status(500).json({
         success: false,
         counts: {},
-        errors: [{ message: err.message }],
+        errors: [{ message: 'Failed to queue import job' }],
       });
+    }
+
+    scheduleContentHubImportJob({
+      jobId: job._id,
+      buffer,
+      overwrite,
+    });
+
+    return res.status(202).json({
+      success: true,
+      async: true,
+      jobId: String(job._id),
+      status: 'queued',
+      progress: 0,
+      stage: 'queued',
+      message: 'Content Hub import accepted and running in the background',
+      counts: {},
+      warnings: [],
+      errors: [],
+    });
+  },
+  getContentHubImportJob: async (req, res) => {
+    try {
+      const { jobId } = req.params;
+      if (!jobId || !mongoose.Types.ObjectId.isValid(String(jobId))) {
+        return res.status(400).json({ success: false, message: 'Valid jobId is required' });
+      }
+      const item = await ContentHubImportRun.findOne({
+        _id: jobId,
+        source: 'content-hub',
+      }).lean();
+      if (!item) {
+        return res.status(404).json({ success: false, message: 'Import job not found' });
+      }
+      const terminal = item.status === 'completed' || item.status === 'failed';
+      return res.status(200).json({
+        success: true,
+        data: {
+          jobId: String(item._id),
+          status: item.status || (item.success ? 'completed' : 'failed'),
+          progress: typeof item.progress === 'number' ? item.progress : terminal ? 100 : 0,
+          stage: item.stage || '',
+          stageMessage: item.stageMessage || '',
+          stageTimings: item.stageTimings || {},
+          overwrite: item.overwrite,
+          file: item.file || {},
+          importSuccess: Boolean(item.success),
+          durationMs: item.durationMs || 0,
+          counts: item.counts || {},
+          warnings: item.warnings || [],
+          errors: item.importErrors || [],
+          startedAt: item.startedAt || null,
+          finishedAt: item.finishedAt || null,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+        },
+      });
+    } catch (err) {
+      console.error('getContentHubImportJob error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error' });
     }
   },
   listContentHubImportRuns: async (req, res) => {
@@ -584,6 +623,9 @@ module.exports = {
       const data = items.map((item) => ({
         ...item,
         errors: item.importErrors || [],
+        jobId: String(item._id),
+        status: item.status || (item.success ? 'completed' : 'failed'),
+        progress: typeof item.progress === 'number' ? item.progress : item.success != null ? 100 : 0,
       }));
       return res.status(200).json({ success: true, data });
     } catch (err) {

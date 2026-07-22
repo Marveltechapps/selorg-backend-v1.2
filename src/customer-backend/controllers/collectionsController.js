@@ -21,6 +21,13 @@ async function getCollectionBySlug(req, res) {
         id: String(collection._id),
         name: collection.name,
         slug: collection.slug,
+        imageUrl: collection.imageUrl || '',
+        tagline:
+          collection.tagline ||
+          collection.description ||
+          collection.additionalImportedFields?.Tagline ||
+          collection.additionalImportedFields?.tagline ||
+          '',
         products,
         pagination: {
           page,

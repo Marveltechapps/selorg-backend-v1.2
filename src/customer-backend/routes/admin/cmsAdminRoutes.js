@@ -27,6 +27,7 @@ router.post(
   uploadExcel({ maxFileSizeMB: 20 }),
   cmsAdminController.uploadContentHubMaster
 );
+router.get('/import-jobs/content-hub/:jobId', catalogRead, cmsAdminController.getContentHubImportJob);
 router.get('/import-history/content-hub', catalogRead, cmsAdminController.listContentHubImportRuns);
 
 router.get('/pages', catalogRead, cmsAdminController.listPages);

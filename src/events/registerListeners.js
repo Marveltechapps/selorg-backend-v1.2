@@ -19,10 +19,13 @@ function registerEventListeners() {
         const orderId = payload?.orderId;
         if (!orderId) return;
         const { Order } = require('../customer-backend/models/Order');
-        const { sendOrderStatusNotification } = require('../customer-backend/services/notificationService');
+        const { sendOrderPlacementNotification } = require('../customer-backend/services/notificationService');
         const order = await Order.findById(orderId);
         if (!order) return;
-        await sendOrderStatusNotification(order, 'pending');
+        // Placement wording is derived from the order's real payment method/status:
+        // COD → "Cash on Delivery order placed", wallet → "Order placed successfully",
+        // unpaid online → "awaiting payment" (never "Order Placed" before payment).
+        await sendOrderPlacementNotification(order);
       } catch (err) {
         logger.warn('[domain-event] order.created notification skipped', { error: err?.message });
       }

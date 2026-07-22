@@ -10,6 +10,7 @@ const {
   verifyOtp,
   canCancel,
   active,
+  tracking,
   updateStatus,
   reorder,
 } = require('../controllers/ordersController');
@@ -25,6 +26,7 @@ router.post('/', auth, create);
 router.post('/:id/cancel', auth, cancel);
 router.get('/:id/can-cancel', auth, canCancel);
 router.get('/:id/status', auth, status);
+router.get('/:id/tracking', auth, tracking);
 router.post('/:id/rate', auth, rate);
 router.post('/:id/verify-otp', auth, verifyOtp);
 router.put('/:id/update-status', authenticateToken, updateStatus);

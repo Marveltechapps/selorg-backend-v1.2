@@ -1,6 +1,7 @@
 const {
   createSession,
   completePayment,
+  abortPayment,
   getStatus,
   processGatewayReturn,
   resolvePaymentContextFromGatewayResponse,
@@ -26,20 +27,46 @@ function resolveWorldlineResponseStatus(status) {
   const key = String(status || '').trim().toLowerCase();
   if (key === 'success') return 'success';
   if (key === 'cancelled' || key === 'cancel' || key === '0392' || key === '0002') return 'cancelled';
+  // Unverified/ambiguous outcomes stay "pending" so the app re-verifies with the
+  // backend instead of announcing a failure (or worse, a success) it cannot prove.
+  if (key === 'pending' || key === '0398' || key === '0396' || key === 'unknown') return 'pending';
   return 'failed';
 }
 
+/**
+ * Presentation for the browser redirect after the gateway return.
+ * The redirect status is a UI hint only — the web app re-verifies against
+ * GET /payments/worldline/status before showing success. Success is therefore
+ * ONLY derived from the server-verified result (`resultStatus`), never from the
+ * raw gateway query string, which is attacker-controllable.
+ */
 function inferWorldlineReturnPresentation(response, resultStatus, errorMessage) {
   const merged = response && typeof response === 'object' ? response : {};
+  const err = String(errorMessage || '').trim();
+
+  // Server processed and verified the return — trust that result.
+  if (resultStatus) {
+    const resolved = resolveWorldlineResponseStatus(resultStatus);
+    if (resolved === 'success') return { status: 'success', message: '' };
+    if (resolved === 'cancelled') {
+      return {
+        status: 'cancelled',
+        message: 'You cancelled the payment. No amount has been charged.',
+      };
+    }
+    if (resolved === 'pending') {
+      return { status: 'pending', message: 'Your payment is being verified.' };
+    }
+    return { status: 'failed', message: err };
+  }
+
+  // Processing failed (no verified result). Classify conservatively — never success.
   const txnStatus = String(
     merged.txn_status || merged.statusCode || merged.TXN_STATUS || merged.status || ''
   )
     .trim()
     .toLowerCase();
 
-  if (txnStatus === '0300' || txnStatus === 'success') {
-    return { status: 'success', message: '' };
-  }
   if (txnStatus === '0392' || txnStatus === '0002' || txnStatus === 'cancelled' || txnStatus === 'cancel') {
     return {
       status: 'cancelled',
@@ -47,7 +74,6 @@ function inferWorldlineReturnPresentation(response, resultStatus, errorMessage) 
     };
   }
 
-  const err = String(errorMessage || '').trim();
   const errLower = err.toLowerCase();
   if (
     errLower.includes('cancel') ||
@@ -62,8 +88,10 @@ function inferWorldlineReturnPresentation(response, resultStatus, errorMessage) 
     };
   }
 
-  if (resultStatus) {
-    return { status: resolveWorldlineResponseStatus(resultStatus), message: err };
+  if (txnStatus === '0300' || txnStatus === 'success' || txnStatus === '0398' || txnStatus === '0396') {
+    // Gateway claims success/pending but the server could not verify it —
+    // present as pending so the app polls the verified status.
+    return { status: 'pending', message: 'Your payment is being verified.' };
   }
 
   return { status: 'failed', message: err };
@@ -79,7 +107,10 @@ function resolveWebAppBaseUrl() {
     const trimmed = String(candidate ?? '').trim();
     if (trimmed) return trimmed.replace(/\/$/, '');
   }
-  return 'http://localhost:5173';
+  // Only ever fall back to localhost during local development; a production
+  // process must never redirect customers to a dev machine.
+  if (process.env.NODE_ENV !== 'production') return 'http://localhost:5173';
+  return 'https://www.selorg.com';
 }
 
 function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount, purpose }) {
@@ -254,6 +285,34 @@ async function completeWorldlinePayment(req, res) {
     console.error('Error:', err.message);
     console.error('Stack:', err.stack);
     console.error('========================================\n');
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
+/**
+ * Customer aborted checkout without a gateway payload (window closed / browser
+ * back). Marks the attempt cancelled and voids the unpaid order so the single
+ * "Payment Cancelled" notification is sent immediately.
+ */
+async function abortWorldlinePayment(req, res) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    const { orderId, txnId, reason } = req.body || {};
+    if (!orderId || !txnId) {
+      return res.status(400).json({ success: false, message: 'orderId and txnId are required' });
+    }
+
+    const result = await abortPayment(userId, {
+      orderId: String(orderId).trim(),
+      txnId: String(txnId).trim(),
+      reason,
+    });
+    if (result.error) return res.status(400).json({ success: false, message: result.error });
+    return res.status(200).json({ success: true, data: result.data });
+  } catch (err) {
+    logger.error('worldline abort error', { error: err?.message });
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 }
@@ -509,6 +568,7 @@ async function getTransactionStatusPostTxn(req, res) {
 module.exports = {
   createWorldlineSession,
   completeWorldlinePayment,
+  abortWorldlinePayment,
   getWorldlineStatus,
   worldlineReturn,
   getTransactionStatusPostTxn,

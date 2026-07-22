@@ -157,7 +157,10 @@ function resolveWebAppBaseUrl() {
     const trimmed = String(candidate ?? '').trim();
     if (trimmed) return trimmed.replace(/\/$/, '');
   }
-  return 'http://localhost:5173';
+  // Only ever fall back to localhost during local development; a production
+  // process must never send customers back to a dev machine.
+  if (process.env.NODE_ENV !== 'production') return 'http://localhost:5173';
+  return 'https://www.selorg.com';
 }
 
 /**
@@ -440,11 +443,17 @@ const WORLDLINE_ERROR_INCOMPLETE_NORMALIZE =
 const WORLDLINE_ERROR_HASH_MISMATCH_EMPTY_TPSL =
   'hash_mismatch: tpsl_txn_id missing, likely msg was not parsed correctly';
 
+/**
+ * Official Paynimo txn_status semantics:
+ * 0300 = Success, 0398 = Initiated, 0399 = Failure, 0396 = Awaited, 0392 = Aborted.
+ * "Awaited" (0396) means the bank/UPI confirmation is still pending — it must map to
+ * `pending`, never `failed`, or genuine payments get voided while still in flight.
+ */
 function mapStatus(statusCodeOrTxnStatus) {
   const code = String(statusCodeOrTxnStatus || '').trim();
   if (code === '0300') return 'success';
   if (code === '0392') return 'cancelled';
-  if (code === '0396') return 'failed';
+  if (code === '0396') return 'pending';
   if (code === '0398') return 'pending';
   if (code === '0399') return 'failed';
   if (code === '0002') return 'cancelled';
@@ -457,7 +466,7 @@ function mapStatusLabel(statusCode) {
   const statusLabelMap = {
     '0300': 'Captured',
     '0392': 'Cancelled by User',
-    '0396': 'Declined by Bank',
+    '0396': 'Awaited (Pending Confirmation)',
     '0398': 'Pending',
     '0399': 'Failed',
     '0002': 'Cancelled',
@@ -475,6 +484,91 @@ function formatTimeElapsed(secondsInput) {
 
 function isTerminal(status) {
   return status === 'success' || status === 'failed' || status === 'cancelled';
+}
+
+/** Payment-session notifications only ever apply to gateway prepayment orders. */
+function isGatewayPrepaymentOrder(order) {
+  const methodType = order?.paymentMethod?.methodType;
+  return methodType === 'card' || methodType === 'upi' || methodType === 'digital';
+}
+
+/** Only notify a session timeout the customer just experienced — never resurface old history. */
+const TIMEOUT_NOTIFY_WINDOW_MS = 60 * 60 * 1000; // 1 hour after session expiry
+
+/**
+ * Notify "Payment session expired" exactly once per payment attempt.
+ * Claims the attempt atomically so polling/list reconciliation never double-sends.
+ * Never notifies for:
+ * - non-gateway orders (COD/wallet have no payment session — nothing can expire),
+ * - cancelled or already-paid orders (the order outcome supersedes the session),
+ * - sessions that expired long ago (lazy reconciliation of old attempts must not
+ *   fire misattributed notifications whenever the customer next opens their orders).
+ * Stale/ineligible attempts are still claimed silently so they can never fire later.
+ */
+async function maybeNotifyPaymentTimeout(payment, order) {
+  if (!payment || !order) return;
+  if (isTerminal(payment.status)) return;
+  const expiresAtMs = payment.sessionExpiresAt ? new Date(payment.sessionExpiresAt).getTime() : null;
+  const expired = expiresAtMs != null && Date.now() > expiresAtMs;
+  if (!expired) return;
+
+  const claimed = await WorldlinePayment.findOneAndUpdate(
+    {
+      _id: payment._id,
+      timeoutNotified: { $ne: true },
+      status: { $nin: ['success', 'failed', 'cancelled'] },
+    },
+    { $set: { timeoutNotified: true } },
+    { new: true }
+  ).lean();
+  if (!claimed) return;
+
+  if (!isGatewayPrepaymentOrder(order)) {
+    logger.warn('payment timeout notification suppressed: non-gateway order has a payment session', {
+      paymentId: String(payment._id),
+      orderId: String(order._id),
+      methodType: order?.paymentMethod?.methodType,
+    });
+    return;
+  }
+  if (order.status === 'cancelled' || order.paymentStatus === 'paid') {
+    logger.info('payment timeout notification suppressed: order already resolved', {
+      paymentId: String(payment._id),
+      orderId: String(order._id),
+      orderStatus: order.status,
+      paymentStatus: order.paymentStatus,
+    });
+    return;
+  }
+  if (Date.now() - expiresAtMs > TIMEOUT_NOTIFY_WINDOW_MS) {
+    logger.info('payment timeout notification suppressed: session expired too long ago', {
+      paymentId: String(payment._id),
+      orderId: String(order._id),
+      expiredAt: new Date(expiresAtMs).toISOString(),
+    });
+    return;
+  }
+
+  try {
+    const { sendPaymentOutcomeNotification } = require('./notificationService');
+    await sendPaymentOutcomeNotification(order, 'timeout');
+  } catch (e) {
+    logger.warn('payment timeout notification failed', { paymentId: String(payment._id), error: e?.message });
+  }
+}
+
+/** Wallet top-up payment failed/cancelled after verification — money was not added. */
+async function notifyWalletTopUpFailure(payment) {
+  if (!payment || String(payment.purpose || '') !== 'wallet_topup') return;
+  try {
+    const { sendPushNotification } = require('./notificationService');
+    await sendPushNotification(payment.userId, 'WALLET_PAYMENT_FAILED', {
+      amount: payment.amountInr,
+      reason: payment.statusMessage || '',
+    });
+  } catch (e) {
+    logger.warn('wallet top-up failure notification failed', { paymentId: String(payment._id), error: e?.message });
+  }
 }
 
 /**
@@ -671,6 +765,29 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
 
   const order = await Order.findOne({ _id: orderId, userId: new mongoose.Types.ObjectId(userId) }).lean();
   if (!order) return { error: 'Order not found' };
+
+  // COD/wallet orders have no online payment session — creating one would attach
+  // gateway state (and later "session expired" notifications) to an order that
+  // must only ever receive order-lifecycle notifications.
+  if (!isGatewayPrepaymentOrder(order)) {
+    return {
+      error:
+        'This order does not use online payment — no payment session is required.',
+    };
+  }
+
+  // Money-safety: a cancelled order is never resurrected on payment success,
+  // so charging it would take money without delivering. A paid order must not
+  // be charged twice.
+  if (order.status === 'cancelled') {
+    return {
+      error:
+        'This order was cancelled. Please place a new order — your items were restored to the cart.',
+    };
+  }
+  if (order.paymentStatus === 'paid') {
+    return { error: 'This order is already paid.' };
+  }
 
   const amount = Number(order.totalBill || 0);
   const amountStr = formatWorldlineTxnAmount(amount);
@@ -1468,11 +1585,22 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
   };
 
   if (!hashOk || !amountOk) {
-    update.status = 'unknown';
-    if (!hashOk) {
-      update.statusMessage = tpslEmpty ? WORLDLINE_ERROR_HASH_MISMATCH_EMPTY_TPSL : 'Hash verification failed';
+    // SUCCESS is only ever trusted with a verified hash + matching amount.
+    // Cancel/failure codes are honored even when the hash cannot be verified:
+    // aborted (0392/0002) and failed (0399) payloads frequently carry no valid
+    // hash because no transaction completed, and honoring them can only void
+    // an UNPAID order — it can never mark money as collected.
+    if (mapped === 'cancelled' || mapped === 'failed') {
+      update.status = mapped;
+      update.statusMessage =
+        statusMessage || (mapped === 'cancelled' ? 'Payment cancelled by user' : 'Payment failed');
     } else {
-      update.statusMessage = 'Amount mismatch';
+      update.status = 'unknown';
+      if (!hashOk) {
+        update.statusMessage = tpslEmpty ? WORLDLINE_ERROR_HASH_MISMATCH_EMPTY_TPSL : 'Hash verification failed';
+      } else {
+        update.statusMessage = 'Amount mismatch';
+      }
     }
   } else if (tpslEmpty) {
     logger.warn('Worldline verify ok but tpsl_txn_id empty (unusual)', {
@@ -1493,12 +1621,21 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
 
   if (effectivePayment.status === 'success' && effectivePayment.verificationError === 'none') {
     if (order) {
-      order.paymentStatus = 'paid';
-      await order.save();
-      try {
-        await releaseOrderFulfillment(String(orderId));
-      } catch (e) {
-        logger.warn('releaseOrderFulfillment failed', { orderId: String(orderId), error: e?.message });
+      // Never resurrect a cancelled order: skip paid flip + release (no "Order Placed").
+      // A captured payment on a cancelled order needs ops/refund attention instead.
+      if (order.status === 'cancelled') {
+        logger.warn('Worldline success on cancelled order — refund attention needed', {
+          orderId: String(orderId),
+          txnId: String(txnId),
+        });
+      } else {
+        order.paymentStatus = 'paid';
+        await order.save();
+        try {
+          await releaseOrderFulfillment(String(orderId));
+        } catch (e) {
+          logger.warn('releaseOrderFulfillment failed', { orderId: String(orderId), error: e?.message });
+        }
       }
     }
     try {
@@ -1510,16 +1647,37 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
       });
     }
   } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
-    // Only move to failed if verified, or if we decide to trust cancelled even if unverified (risky)
-    if (effectivePayment.verificationError === 'none') {
-      if (order) {
-        order.paymentStatus = 'failed';
-        await order.save();
-        try {
-          await voidUnpaidOnlineOrder(userId, orderId, effectivePayment.statusMessage || 'Payment failed');
-        } catch (e) {
-          logger.warn('voidUnpaidOnlineOrder failed', { orderId: String(orderId), error: e?.message });
-        }
+    // Terminal failed/cancelled always voids the unpaid order — even with a hash
+    // mismatch. The status only reaches failed/cancelled via explicit gateway
+    // codes, and voiding an unpaid order is a safe (money-free) operation.
+    // Never downgrade an order that was already paid (e.g. duplicate/stale
+    // callback for an older attempt after a successful retry).
+    if (order && order.paymentStatus !== 'paid' && order.fulfillmentReleased !== true) {
+      order.paymentStatus = 'failed';
+      await order.save();
+      try {
+        await voidUnpaidOnlineOrder(
+          userId,
+          orderId,
+          effectivePayment.statusMessage || 'Payment failed',
+          effectivePayment.status === 'cancelled' ? 'cancelled' : 'failed'
+        );
+      } catch (e) {
+        logger.warn('voidUnpaidOnlineOrder failed', { orderId: String(orderId), error: e?.message });
+      }
+    }
+    // finalPayment set ⇒ this call performed the terminal transition (send once).
+    if (finalPayment) {
+      await notifyWalletTopUpFailure(effectivePayment);
+    }
+  } else if (effectivePayment.status === 'pending') {
+    // Gateway reported 0398 — verification in progress (e.g. UPI approval pending).
+    if (order && finalPayment && payment.status !== 'pending') {
+      try {
+        const { sendPaymentOutcomeNotification } = require('./notificationService');
+        await sendPaymentOutcomeNotification(order, 'pending');
+      } catch (e) {
+        logger.warn('payment pending notification failed', { orderId: String(orderId), error: e?.message });
       }
     }
   }
@@ -1679,11 +1837,20 @@ async function processGatewayReturn({ response, allowedUserId }) {
   };
 
   if (!hashOk || !amountOk) {
-    update.status = 'unknown';
-    if (!hashOk) {
-      update.statusMessage = tpslEmpty ? WORLDLINE_ERROR_HASH_MISMATCH_EMPTY_TPSL : 'Hash verification failed';
+    // Same rule as completePayment: success requires hash + amount verification;
+    // explicit cancel/failure codes are honored even unverified (only voids an
+    // unpaid order, never marks money as collected).
+    if (mapped === 'cancelled' || mapped === 'failed') {
+      update.status = mapped;
+      update.statusMessage =
+        statusMessage || (mapped === 'cancelled' ? 'Payment cancelled by user' : 'Payment failed');
     } else {
-      update.statusMessage = 'Amount mismatch';
+      update.status = 'unknown';
+      if (!hashOk) {
+        update.statusMessage = tpslEmpty ? WORLDLINE_ERROR_HASH_MISMATCH_EMPTY_TPSL : 'Hash verification failed';
+      } else {
+        update.statusMessage = 'Amount mismatch';
+      }
     }
   }
 
@@ -1697,12 +1864,20 @@ async function processGatewayReturn({ response, allowedUserId }) {
 
   if (effectivePayment.status === 'success' && effectivePayment.verificationError === 'none') {
     if (order) {
-      order.paymentStatus = 'paid';
-      await order.save();
-      try {
-        await releaseOrderFulfillment(String(order._id));
-      } catch (e) {
-        logger.warn('releaseOrderFulfillment gateway return failed', { orderId: String(order._id), error: e?.message });
+      // Never resurrect a cancelled order: skip paid flip + release (no "Order Placed").
+      if (order.status === 'cancelled') {
+        logger.warn('Worldline gateway return success on cancelled order — refund attention needed', {
+          orderId: String(order._id),
+          txnId,
+        });
+      } else {
+        order.paymentStatus = 'paid';
+        await order.save();
+        try {
+          await releaseOrderFulfillment(String(order._id));
+        } catch (e) {
+          logger.warn('releaseOrderFulfillment gateway return failed', { orderId: String(order._id), error: e?.message });
+        }
       }
     }
     try {
@@ -1714,15 +1889,33 @@ async function processGatewayReturn({ response, allowedUserId }) {
       });
     }
   } else if (effectivePayment.status === 'failed' || effectivePayment.status === 'cancelled') {
-    if (effectivePayment.verificationError === 'none') {
-      if (order) {
-        order.paymentStatus = 'failed';
-        await order.save();
-        try {
-          await voidUnpaidOnlineOrder(String(order.userId), String(order._id), effectivePayment.statusMessage || 'Payment failed');
-        } catch (e) {
-          logger.warn('voidUnpaidOnlineOrder gateway return failed', { orderId: String(order._id), error: e?.message });
-        }
+    // Terminal failed/cancelled always voids the unpaid order — even with a hash
+    // mismatch. The status only reaches failed/cancelled via explicit gateway codes.
+    // Never downgrade an order that was already paid by another attempt.
+    if (order && order.paymentStatus !== 'paid' && order.fulfillmentReleased !== true) {
+      order.paymentStatus = 'failed';
+      await order.save();
+      try {
+        await voidUnpaidOnlineOrder(
+          String(order.userId),
+          String(order._id),
+          effectivePayment.statusMessage || 'Payment failed',
+          effectivePayment.status === 'cancelled' ? 'cancelled' : 'failed'
+        );
+      } catch (e) {
+        logger.warn('voidUnpaidOnlineOrder gateway return failed', { orderId: String(order._id), error: e?.message });
+      }
+    }
+    if (finalPayment) {
+      await notifyWalletTopUpFailure(effectivePayment);
+    }
+  } else if (effectivePayment.status === 'pending') {
+    if (order && finalPayment && payment.status !== 'pending') {
+      try {
+        const { sendPaymentOutcomeNotification } = require('./notificationService');
+        await sendPaymentOutcomeNotification(order, 'pending');
+      } catch (e) {
+        logger.warn('payment pending notification failed', { orderId: String(order._id), error: e?.message });
       }
     }
   }
@@ -1768,6 +1961,88 @@ async function processGatewayReturn({ response, allowedUserId }) {
   }
 
   return { data: baseData };
+}
+
+/**
+ * Customer aborted checkout without the gateway producing any response payload
+ * (closed the Paynimo window, pressed browser back, cancel without codes).
+ * Marks the attempt cancelled and voids the unpaid order immediately, so the
+ * "Payment Cancelled" notification is sent right away instead of the
+ * reconciliation cron settling it as a session timeout 15+ minutes later.
+ *
+ * Money-safe: only claims non-terminal attempts (atomic guard) and can only
+ * void an UNPAID order belonging to the authenticated user. A verified gateway
+ * success that races this abort keeps its "never resurrect a cancelled order"
+ * handling (ops/refund attention), identical to the unverified-cancel policy
+ * already honored in completePayment/processGatewayReturn.
+ */
+async function abortPayment(userId, { orderId, txnId, reason }) {
+  if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
+  if (!mongoose.Types.ObjectId.isValid(String(orderId))) return { error: 'Invalid orderId' };
+
+  const payment = await WorldlinePayment.findOne({
+    orderId: new mongoose.Types.ObjectId(orderId),
+    txnId: String(txnId),
+  });
+  if (!payment) return { error: 'Payment session not found for order/txnId' };
+  if (String(payment.userId) !== String(userId)) return { error: 'Unauthorized' };
+
+  const statusMessage = String(reason || '').trim() || 'Payment cancelled by user';
+
+  // Atomic terminal claim — a real gateway result that already landed wins.
+  const claimed = await WorldlinePayment.findOneAndUpdate(
+    { _id: payment._id, status: { $nin: ['success', 'failed', 'cancelled'] } },
+    {
+      $set: {
+        status: 'cancelled',
+        statusMessage,
+        verificationSource: 'client_abort',
+      },
+    },
+    { new: true }
+  ).lean();
+
+  const effectivePayment = claimed || (await WorldlinePayment.findById(payment._id).lean());
+
+  if (
+    !payment.standaloneCheckout &&
+    (effectivePayment.status === 'cancelled' || effectivePayment.status === 'failed')
+  ) {
+    const order = await Order.findOne({ _id: payment.orderId, userId: new mongoose.Types.ObjectId(userId) }).lean();
+    if (order && order.paymentStatus !== 'paid' && order.fulfillmentReleased !== true) {
+      try {
+        await voidUnpaidOnlineOrder(
+          userId,
+          String(order._id),
+          effectivePayment.statusMessage || statusMessage,
+          effectivePayment.status === 'cancelled' ? 'cancelled' : 'failed'
+        );
+      } catch (e) {
+        logger.warn('voidUnpaidOnlineOrder abort failed', { orderId: String(orderId), error: e?.message });
+      }
+    }
+  }
+
+  if (claimed) {
+    await notifyWalletTopUpFailure(effectivePayment);
+  }
+
+  logger.info('Worldline payment aborted by client', {
+    orderId: String(orderId),
+    txnId: String(txnId),
+    claimed: !!claimed,
+    status: effectivePayment.status,
+  });
+
+  return {
+    data: {
+      orderId: String(orderId),
+      txnId: String(txnId),
+      status: effectivePayment.status,
+      statusMessage: effectivePayment.statusMessage,
+      purpose: payment.purpose || 'order',
+    },
+  };
 }
 
 async function getStatus(userId, { orderId }) {
@@ -1886,6 +2161,15 @@ async function getStatus(userId, { orderId }) {
     }
   }
 
+  // Lazy timeout detection: notify once if the active attempt's session expired unpaid.
+  if (payment) {
+    try {
+      await maybeNotifyPaymentTimeout(payment, order);
+    } catch (e) {
+      logger.warn('payment timeout check failed', { orderId: String(orderId), error: e?.message });
+    }
+  }
+
   // Log status checks for debugging
   logger.info('Payment status check', {
     orderId: String(orderId),
@@ -1948,6 +2232,7 @@ module.exports = {
   createSession,
   createWalletTopUpSession,
   completePayment,
+  abortPayment,
   resolvePaymentContextFromGatewayResponse,
   processGatewayReturn,
   getStatus,
@@ -1958,6 +2243,7 @@ module.exports = {
   formatTimeElapsed,
   standaloneInitiateEnabled,
   maybeCreditWalletForSuccessfulPayment,
+  maybeNotifyPaymentTimeout,
   // exported for tests
   _internals: {
     computeToken,

@@ -63,6 +63,34 @@ async function getPaymentRetryStatus(orderId, userId) {
     const order = await Order.findOne({ _id: orderId, userId });
     if (!order) return { error: 'Order not found' };
 
+    // COD/wallet orders never have an online payment to retry.
+    const methodType = String(order.paymentMethod?.methodType || '').toLowerCase();
+    if (methodType !== 'card' && methodType !== 'upi' && methodType !== 'digital') {
+      return {
+        error: 'This order does not use online payment — there is nothing to retry.',
+        canRetry: false,
+        status: 'not_applicable',
+      };
+    }
+
+    // A cancelled order is never resurrected by a later payment success —
+    // retrying it would charge the customer for nothing.
+    if (order.status === 'cancelled') {
+      return {
+        error:
+          'This order was cancelled after the payment attempt. Please place a new order — your items were restored to the cart.',
+        canRetry: false,
+        status: 'cancelled',
+      };
+    }
+    if (order.paymentStatus === 'paid') {
+      return {
+        error: 'Payment already successful',
+        canRetry: false,
+        status: 'success',
+      };
+    }
+
     // Find latest payment attempt
     const payment = await WorldlinePayment.findOne(
       { orderId },

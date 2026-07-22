@@ -6,6 +6,7 @@ const { PromotionRule } = require('../models/PromotionRule');
 const { getDefaultAddress } = require('./addressService');
 const { HomeConfig } = require('../models/HomeConfig');
 const { AppConfig, DEFAULT_APP_CONFIG } = require('../models/AppConfig');
+const { applyEffectiveCheckoutPricing } = require('./deliveryPricingConfig');
 
 const now = new Date();
 
@@ -74,7 +75,8 @@ async function getBootstrapPayload(req = {}) {
     const created = await AppConfig.create(DEFAULT_APP_CONFIG);
     appConfigDoc = created ? created.toObject() : DEFAULT_APP_CONFIG;
   }
-  const appConfig = appConfigDoc || DEFAULT_APP_CONFIG;
+  // Serve the delivery pricing the engine actually bills with (guest parity).
+  const appConfig = applyEffectiveCheckoutPricing({ ...(appConfigDoc || DEFAULT_APP_CONFIG) });
 
   const legacy = await getHomePayload(req);
   const homeFromLegacy = buildHomePageFromLegacy(legacy);

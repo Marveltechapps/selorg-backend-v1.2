@@ -2,7 +2,7 @@ const RefundRequest = require('../../finance/models/RefundRequest');
 const { CancellationPolicy } = require('../models/CancellationPolicy');
 const { Order } = require('../models/Order');
 const { CustomerUser } = require('../models/CustomerUser');
-const { sendOrderStatusNotification } = require('./notificationService');
+const { sendOrderStatusNotification, sendRefundNotification } = require('./notificationService');
 const { creditWallet } = require('./autoRefundService');
 const { restoreCartFromOrder } = require('./cartService');
 
@@ -145,6 +145,7 @@ async function executeCancellation(userId, orderId, reason = '') {
 
   let refundAmount = 0;
   let refundMethod = check.policy.refundMethod || 'original_payment';
+  let refundNotificationType = null;
 
   if (
     check.policy.autoRefundOnCancel &&
@@ -155,10 +156,12 @@ async function executeCancellation(userId, orderId, reason = '') {
     if (refundAmount > 0) {
       order.refundAmount = refundAmount;
       order.refundStatus = 'pending';
+      refundNotificationType = 'REFUND_INITIATED';
 
       if (refundMethod === 'wallet') {
         await creditWallet(userId, refundAmount, String(order._id), String(order._id));
         order.refundStatus = 'processed';
+        refundNotificationType = 'REFUND_COMPLETED';
       } else if (refundMethod === 'manual') {
         order.refundStatus = 'pending';
       } else {
@@ -189,7 +192,20 @@ async function executeCancellation(userId, orderId, reason = '') {
     }
   }
 
-  await sendOrderStatusNotification(order, 'cancelled');
+  await sendOrderStatusNotification(order, 'cancelled', { actor: 'customer' });
+
+  if (refundNotificationType) {
+    try {
+      await sendRefundNotification(String(order.userId), refundNotificationType, {
+        amount: refundAmount,
+        orderNumber: order.orderNumber,
+        orderId: String(order._id),
+        method: refundMethod === 'wallet' ? 'wallet' : 'original payment method',
+      });
+    } catch (e) {
+      console.warn('refund notification failed (non-blocking):', e?.message);
+    }
+  }
 
   return order;
 }

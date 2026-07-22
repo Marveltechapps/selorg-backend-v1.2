@@ -14,21 +14,38 @@ var _customerOrderService = require("../../../../customer-backend/services/order
 
 var RIDER_TO_CUSTOMER_STATUS = {
   picked: 'on-the-way',
-  out_for_delivery: 'arrived',
+  out_for_delivery: 'on-the-way',
   arrived_at_customer: 'arrived',
+  delivered: 'delivered',
 };
+
+// Mirrors VALID_TRANSITIONS in customer-backend orderService: each status may
+// only advance to the next one, so propagation walks the chain step by step.
+var CUSTOMER_STATUS_CHAIN = ['pending', 'confirmed', 'getting-packed', 'on-the-way', 'arrived', 'delivered'];
 
 function propagateRiderStatusToCustomer(riderOrder, riderStatus) {
   var customerStatus = RIDER_TO_CUSTOMER_STATUS[riderStatus];
   if (!customerStatus) return;
   var orderNum = riderOrder && riderOrder.orderNumber;
   if (!orderNum) return;
-  _customerOrderModel.Order.findOne({ orderNumber: orderNum }).lean().then(function (co) {
-    if (co) {
-      _customerOrderService.updateCustomerOrderStatus(co._id, customerStatus, {
+  var riderId = riderOrder.riderAssignment && riderOrder.riderAssignment.riderId;
+  _customerOrderModel.Order.findOne({ orderNumber: orderNum }).lean().then(async function (co) {
+    if (!co) return;
+    if (co.status === 'cancelled' || co.status === 'delivered') return;
+    var currentIdx = CUSTOMER_STATUS_CHAIN.indexOf(co.status);
+    var targetIdx = CUSTOMER_STATUS_CHAIN.indexOf(customerStatus);
+    if (currentIdx === -1 || targetIdx === -1 || targetIdx <= currentIdx) return;
+    // Advance through every intermediate status so each transition stays valid
+    // and the customer timeline never skips a stage.
+    for (var i = currentIdx + 1; i <= targetIdx; i++) {
+      var result = await _customerOrderService.updateCustomerOrderStatus(co._id, CUSTOMER_STATUS_CHAIN[i], {
         actor: 'rider',
-        riderId: riderOrder.riderAssignment && riderOrder.riderAssignment.riderId,
+        riderId: riderId,
       });
+      if (result && result.error) {
+        console.warn('Rider->Customer status propagation stopped:', result.error);
+        return;
+      }
     }
   }).catch(function (err) {
     console.warn('Rider->Customer status propagation failed (non-blocking):', err.message);
@@ -379,6 +396,7 @@ var markOrderDelivered = exports.markOrderDelivered = /*#__PURE__*/function () {
           return order.save();
         case 7:
           _riderCacheHelper.invalidateOrdersForRider().catch(function () {});
+          propagateRiderStatusToCustomer(order, "delivered");
           return _context5.a(2, order);
       }
     }, _callee5);

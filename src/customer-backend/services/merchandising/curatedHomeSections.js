@@ -1,37 +1,70 @@
-const { Category } = require('../../models/Category');
 const { Product } = require('../../models/Product');
 const { Collection } = require('../../models/Collection');
 const { HomeSection } = require('../../models/HomeSection');
+const { HomeSectionDefinition } = require('../../models/HomeSectionDefinition');
 const { enrichProductsWithVariants, pickImageFields } = require('../../utils/productVariantsPayload');
 const { enrichProduct } = require('../../utils/customerMediaEnrichment');
 const { attachLiveSellableStock } = require('../../utils/productStock');
 
-/** Virtual home rails when mastersheet lifestyle tiles / HomeSection rows are absent. */
-const CURATED_SECTION_CATALOG = {
+/**
+ * Virtual home rails (health / wellness) resolve ONLY from Master Sheet–backed
+ * HomeSection / HomeSectionDefinition / Collection documents — never from
+ * hardcoded category slug lists or keyword search inventing product mixes.
+ *
+ * Matching is by collection/section label or slug aliases published via
+ * Content Hub "Home Page Content" → Collections rows.
+ */
+const RAIL_ALIASES = {
   health: {
-    title: 'Your Health Matters',
-    viewAllLink: '/categories',
-    categorySlugs: ['vegetables', 'millets-mandi', 'dry-powder-mix', 'dry-fruits-seeds'],
-    collectionSlugs: ['high-nutrition-products'],
-    searchTerms: ['immunity', 'protein', 'organic', 'brahmi', 'moringa'],
+    defaultTitle: 'Your Health Matters',
+    defaultViewAll: '/categories',
+    match: [
+      'health',
+      'your-health-matters',
+      'your health matters',
+      'health-matters',
+      'health matters',
+    ],
   },
   wellness: {
-    title: 'Explore Wellness',
-    viewAllLink: '/collection/high-nutrition-products',
-    categorySlugs: ['tea-breakfast', 'dry-fruits-seeds', 'millets-mandi', 'dry-powder-mix'],
-    collectionSlugs: ['high-nutrition-products'],
-    searchTerms: ['honey', 'seed', 'millet', 'tea', 'herbal'],
+    defaultTitle: 'Explore Wellness',
+    defaultViewAll: '/categories',
+    // High Nutrition is its own Master Sheet collection carousel — do not alias
+    // it into the wellness rail (that hid the High Nutrition deals section while
+    // wellness showed a completely different product set).
+    match: ['wellness', 'explore-wellness', 'explore wellness'],
   },
-  'your-health-matters': null, // alias → health
-  'explore-wellness': null, // alias → wellness
 };
 
 function resolveCuratedKey(key) {
   const raw = String(key || '').trim().toLowerCase().replace(/_/g, '-');
   if (raw === 'your-health-matters') return 'health';
   if (raw === 'explore-wellness') return 'wellness';
-  if (CURATED_SECTION_CATALOG[raw] && CURATED_SECTION_CATALOG[raw] !== null) return raw;
+  if (RAIL_ALIASES[raw]) return raw;
   return null;
+}
+
+function normalizeMatchToken(s) {
+  return String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, ' and ')
+    .replace(/[_]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/-+/g, '-');
+}
+
+function matchesRailAlias(railKey, labelOrSlug) {
+  const def = RAIL_ALIASES[railKey];
+  if (!def) return false;
+  const token = normalizeMatchToken(labelOrSlug);
+  if (!token) return false;
+  const compact = token.replace(/[\s-]+/g, '');
+  return def.match.some((alias) => {
+    const a = normalizeMatchToken(alias);
+    const aCompact = a.replace(/[\s-]+/g, '');
+    return token === a || compact === aCompact || token.includes(a) || a.includes(token);
+  });
 }
 
 function serializeProduct(p) {
@@ -62,147 +95,96 @@ function serializeProduct(p) {
   };
 }
 
-async function productsFromCategorySlugs(slugs, limit) {
-  const out = [];
-  const seen = new Set();
-  const perCat = Math.max(3, Math.ceil(limit / Math.max(1, slugs.length)));
-
-  for (const slug of slugs) {
-    const cat = await Category.findOne({ slug, isActive: true, level: 1 }).select('_id').lean();
-    if (!cat) continue;
-    const products = await Product.find({
-      classification: 'Style',
-      isActive: true,
-      isSaleable: true,
-      categoryId: cat._id,
-    })
-      .sort({ sortOrder: 1, createdAt: -1 })
-      .limit(perCat)
-      .select({ baseCost: 0 })
-      .lean();
-    for (const p of products) {
-      const id = String(p._id);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push(p);
-      if (out.length >= limit) return out;
-    }
-  }
-  return out;
-}
-
-async function productsFromCollectionSlugs(slugs, limit) {
-  const out = [];
-  for (const slug of slugs) {
-    const col = await Collection.findOne({ slug, isActive: true }).lean();
-    if (!col) continue;
-    const ids = Array.isArray(col.productIds) ? col.productIds : [];
-    if (!ids.length) continue;
-    const products = await Product.find({
-      _id: { $in: ids },
-      classification: 'Style',
-      isActive: true,
-      isSaleable: true,
-    })
-      .select({ baseCost: 0 })
-      .lean();
-    const order = new Map(ids.map((id, i) => [String(id), i]));
-    products.sort((a, b) => (order.get(String(a._id)) ?? 9999) - (order.get(String(b._id)) ?? 9999));
-    out.push(...products);
-    if (out.length >= limit) break;
-  }
-  return out.slice(0, limit);
-}
-
-async function productsFromSearchTerms(terms, limit) {
-  const out = [];
-  const seen = new Set();
-  for (const term of terms) {
-    const regex = new RegExp(String(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const products = await Product.find({
-      classification: 'Style',
-      isActive: true,
-      isSaleable: true,
-      $or: [{ name: regex }, { tag: regex }, { brand: regex }],
-    })
-      .sort({ sortOrder: 1, createdAt: -1 })
-      .limit(limit)
-      .select({ baseCost: 0 })
-      .lean();
-    for (const p of products) {
-      const id = String(p._id);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push(p);
-      if (out.length >= limit) return out;
-    }
-  }
-  return out;
+async function loadProductsByIds(ids, limit) {
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const products = await Product.find({
+    _id: { $in: ids },
+    classification: 'Style',
+    isActive: true,
+    isSaleable: true,
+  })
+    .select({ baseCost: 0 })
+    .lean();
+  const order = new Map(ids.map((id, i) => [String(id), i]));
+  products.sort((a, b) => (order.get(String(a._id)) ?? 9999) - (order.get(String(b._id)) ?? 9999));
+  return products.slice(0, limit);
 }
 
 /**
- * Build a curated product list for virtual health/wellness home rails.
- * Prefer collection SKUs from mastersheet, then category Style products, then search.
+ * Prefer explicit HomeSection SKUs, then Master Sheet HomeSectionDefinition
+ * collections whose label/key matches the rail, then Collection docs by slug/name.
  */
 async function resolveCuratedSectionProducts(key, { limit = 20 } = {}) {
   const curatedKey = resolveCuratedKey(key);
   if (!curatedKey) return null;
-  const def = CURATED_SECTION_CATALOG[curatedKey];
-  if (!def) return null;
+  const rail = RAIL_ALIASES[curatedKey];
+  if (!rail) return null;
 
-  const seen = new Set();
-  const merged = [];
+  let productIds = [];
+  let title = rail.defaultTitle;
+  let viewAllLink = rail.defaultViewAll;
+  let collectionSlug = null;
 
-  const pushAll = (list) => {
-    for (const p of list) {
-      const id = String(p._id);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      merged.push(p);
-      if (merged.length >= limit) return true;
-    }
-    return false;
-  };
-
-  // Explicit HomeSection row wins when CMS has curated SKUs for this key.
   const section = await HomeSection.findOne({
     sectionKey: { $in: [curatedKey, key, `collections_${curatedKey}`] },
     isActive: true,
   }).lean();
   if (section?.productIds?.length) {
-    const products = await Product.find({
-      _id: { $in: section.productIds },
-      classification: 'Style',
-      isActive: true,
-      isSaleable: true,
+    productIds = section.productIds;
+    if (section.title) title = section.title;
+    if (section.viewAllLink) viewAllLink = section.viewAllLink;
+  }
+
+  if (productIds.length === 0) {
+    const defs = await HomeSectionDefinition.find({
+      type: 'collections',
+      collectionId: { $ne: null },
     })
-      .select({ baseCost: 0 })
+      .sort({ order: 1 })
       .lean();
-    const order = new Map(section.productIds.map((id, i) => [String(id), i]));
-    products.sort((a, b) => (order.get(String(a._id)) ?? 9999) - (order.get(String(b._id)) ?? 9999));
-    pushAll(products);
+    const matchedDef = defs.find(
+      (d) => matchesRailAlias(curatedKey, d.label) || matchesRailAlias(curatedKey, d.key)
+    );
+    if (matchedDef?.collectionId) {
+      const col = await Collection.findById(matchedDef.collectionId).lean();
+      if (col?.productIds?.length) {
+        productIds = col.productIds;
+        title = matchedDef.label || col.name || title;
+        collectionSlug = col.slug || null;
+      }
+    }
   }
 
-  // Prefer mastersheet category Style products, then keyword hits, then shared collections.
-  if (merged.length < limit) {
-    pushAll(await productsFromCategorySlugs(def.categorySlugs, limit));
-  }
-  if (merged.length < limit) {
-    pushAll(await productsFromSearchTerms(def.searchTerms, limit));
-  }
-  if (merged.length < limit) {
-    pushAll(await productsFromCollectionSlugs(def.collectionSlugs, limit));
+  if (productIds.length === 0) {
+    const collections = await Collection.find({ isActive: true }).sort({ updatedAt: -1 }).lean();
+    const matched = collections.find(
+      (c) => matchesRailAlias(curatedKey, c.name) || matchesRailAlias(curatedKey, c.slug)
+    );
+    if (matched?.productIds?.length) {
+      productIds = matched.productIds;
+      title = matched.name || title;
+      collectionSlug = matched.slug || null;
+    }
   }
 
-  const enriched = await enrichProductsWithVariants(merged.slice(0, limit), {
+  if (productIds.length === 0) return null;
+
+  if (collectionSlug) {
+    viewAllLink = `/collection/${encodeURIComponent(collectionSlug)}`;
+  }
+
+  const merged = await loadProductsByIds(productIds, limit);
+  if (merged.length === 0) return null;
+
+  const enriched = await enrichProductsWithVariants(merged, {
     dedupeProductLines: false,
   });
   const withStock = await attachLiveSellableStock(enriched);
 
   return {
     key: curatedKey,
-    title: def.title,
-    viewAllLink: def.viewAllLink,
+    title,
+    viewAllLink,
     products: withStock.map(serializeProduct),
   };
 }
@@ -210,5 +192,5 @@ async function resolveCuratedSectionProducts(key, { limit = 20 } = {}) {
 module.exports = {
   resolveCuratedKey,
   resolveCuratedSectionProducts,
-  CURATED_SECTION_CATALOG,
+  RAIL_ALIASES,
 };

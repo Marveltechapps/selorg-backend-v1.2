@@ -7,6 +7,7 @@ const {
 } = require('../../models/HomeConfig');
 const { HomeSection } = require('../../models/HomeSection');
 const { HomeSectionDefinition, validateKey } = require('../../models/HomeSectionDefinition');
+const { dedupeHomeSectionDefinitions } = require('../../utils/dedupeHomeSectionDefinitions');
 const { LifestyleItem } = require('../../models/LifestyleItem');
 const { PromoBlock } = require('../../models/PromoBlock');
 const { Product } = require('../../models/Product');
@@ -405,12 +406,12 @@ exports.deleteHomeConfig = async (req, res) => {
 
 // Section definitions (list of section keys + labels, full CRUD)
 async function getSectionDefinitionsForConfig() {
-  const items = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
+  const items = dedupeHomeSectionDefinitions(await HomeSectionDefinition.find().sort({ order: 1 }).lean());
   return items.map((d) => ({ key: d.key, label: d.label || d.key }));
 }
 
 exports.listSectionDefinitions = async (req, res) => {
-  const items = await HomeSectionDefinition.find().sort({ order: 1 }).lean();
+  const items = dedupeHomeSectionDefinitions(await HomeSectionDefinition.find().sort({ order: 1 }).lean());
   res.json({ success: true, data: items });
 };
 exports.createSectionDefinition = async (req, res) => {

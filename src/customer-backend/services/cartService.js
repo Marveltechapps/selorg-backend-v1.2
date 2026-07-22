@@ -5,6 +5,7 @@ const { calculatePricing, compareWithLegacy } = require('./pricingEngineService'
 const { pickFirstNonStubString } = require('../utils/mediaUrl');
 const {
   resolveAvailableStock,
+  resolveAvailableStockForProduct,
   isProductPurchasable,
   assertStockAllowsAsync,
   attachLiveSellableStock,
@@ -428,8 +429,11 @@ async function addItem(userId, body) {
   }
 
   await cart.save();
+  // Concurrent addItem races can create duplicate lines — collapse before responding.
+  await dedupeCartLines(userId);
   await invalidateCartGetCache();
-  return formatCartResponse(cart.toObject(), { userId });
+  const fresh = await Cart.findOne({ userId });
+  return formatCartResponse((fresh || cart).toObject?.() ?? fresh ?? cart, { userId });
 }
 
 /**
@@ -554,6 +558,134 @@ async function clearCart(userId, session) {
   return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
 }
 
+/** Cap of remembered merge idempotency keys per cart (oldest dropped first). */
+const MAX_APPLIED_MERGE_KEYS = 20;
+
+/**
+ * Merge a guest cart into the authenticated user's server cart — exactly once.
+ *
+ * Business rule: quantities of the same product+variant are summed
+ * (guest qty added on top of server qty); new products become new lines.
+ *
+ * Idempotency: `mergeKey` is a client-generated key persisted on the cart.
+ * Replaying the same key (page refresh, retry, second tab) is a no-op that
+ * returns the current cart, so a guest cart can never be applied twice.
+ */
+async function mergeGuestItems(userId, guestItems, mergeKey) {
+  const uid = normalizeUserId(userId);
+  const key = String(mergeKey || '').trim();
+  if (!key) return { error: 'mergeKey required' };
+
+  const list = (Array.isArray(guestItems) ? guestItems : [])
+    .map((raw) => ({
+      productId: String(raw?.productId || '').trim(),
+      variantId: raw?.variantId != null ? String(raw.variantId).trim() : '',
+      quantity: Math.floor(Number(raw?.quantity) || 0),
+    }))
+    .filter((it) => it.productId && it.quantity > 0);
+
+  await dedupeCartLines(uid);
+
+  // Ensure the cart document exists, then claim the merge key atomically.
+  // Only ONE request can claim a given key — concurrent replays (second tab,
+  // client retry) lose the claim and simply get the current cart back.
+  await Cart.findOneAndUpdate(
+    { userId: uid },
+    { $setOnInsert: { items: [] } },
+    { upsert: true, new: true },
+  );
+  const cart = await Cart.findOneAndUpdate(
+    { userId: uid, appliedMergeKeys: { $ne: key } },
+    { $push: { appliedMergeKeys: { $each: [key], $slice: -MAX_APPLIED_MERGE_KEYS } } },
+    { new: true },
+  );
+  if (!cart) {
+    // Key already applied — exactly-once replay: return the cart as-is.
+    const current = await Cart.findOne({ userId: uid }).lean();
+    return formatCartResponse(
+      current || { items: [] },
+      { userId: uid },
+    );
+  }
+
+  const skipped = [];
+  for (const guestLine of list) {
+    const snapshot = await resolveLineSnapshot(guestLine.productId, guestLine.variantId);
+    if (snapshot.error) {
+      // Unknown/retired product in the guest cart must not fail the whole merge.
+      skipped.push({ productId: guestLine.productId, reason: snapshot.error });
+      continue;
+    }
+
+    const {
+      lineProductId,
+      lineVariantId,
+      variantSize,
+      quantityPrice,
+      originalPrice,
+      productName,
+      image,
+      gstRate,
+      catalogProduct,
+    } = snapshot;
+
+    const existing = cart.items.find((it) => matchCartLine(it, lineProductId, lineVariantId));
+    const existingQty = Number(existing?.quantity) || 0;
+
+    // Cap merged quantity at live sellable stock instead of dropping the line.
+    const available = await resolveAvailableStockForProductSafe(catalogProduct);
+    if (!isProductPurchasable(catalogProduct, available) || available <= 0) {
+      skipped.push({ productId: guestLine.productId, reason: 'Out of stock' });
+      continue;
+    }
+    const target = Math.min(existingQty + guestLine.quantity, available);
+    if (target <= existingQty) {
+      if (target < existingQty + guestLine.quantity) {
+        skipped.push({ productId: guestLine.productId, reason: 'Stock limit reached' });
+      }
+      continue;
+    }
+
+    if (existing) {
+      existing.quantity = target;
+      if (!pickFirstString(existing.image) && pickFirstString(image)) {
+        existing.image = image;
+      }
+    } else {
+      cart.items.push({
+        productId: new mongoose.Types.ObjectId(lineProductId),
+        variantId: lineVariantId,
+        variantSize,
+        quantity: target,
+        price: quantityPrice,
+        originalPrice,
+        gstRate: gstRate || 0,
+        productName,
+        image,
+      });
+    }
+  }
+
+  // mergeKey was already claimed atomically above — only persist the items.
+  await cart.save();
+  await dedupeCartLines(uid);
+  await invalidateCartGetCache();
+
+  const fresh = await Cart.findOne({ userId: uid }).lean();
+  const response = await formatCartResponse(fresh || cart.toObject(), { userId: uid });
+  if (skipped.length > 0) response.skippedItems = skipped;
+  return response;
+}
+
+/** Live stock lookup that degrades to catalog stock if StoreInventory query fails. */
+async function resolveAvailableStockForProductSafe(product) {
+  try {
+    return await resolveAvailableStockForProduct(product);
+  } catch {
+    return resolveAvailableStock(product);
+  }
+}
+
 /**
  * Replace server cart with line items from a customer order (e.g. after failed online payment).
  */
@@ -573,12 +705,36 @@ function mapOrderItemsToCartItems(orderItems) {
 
 async function restoreCartFromOrder(userId, order) {
   const uid = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
-  const items = mapOrderItemsToCartItems(order.items || []);
-  await Cart.findOneAndUpdate(
-    { userId: uid },
-    { $set: { items } },
-    { upsert: true, new: true }
+
+  // Exactly-once: claim the restore on the order document. Failed-payment
+  // handling can be replayed (gateway return + webhook + reconciliation job +
+  // order-list reconcile); without this claim every replay would re-insert
+  // the old order's items into the customer's current cart.
+  const { Order } = require('../models/Order');
+  const claim = await Order.updateOne(
+    { _id: order._id, cartRestoredAt: null },
+    { $set: { cartRestoredAt: new Date() } },
   );
+  if (claim.modifiedCount !== 1) {
+    return { ok: true, skipped: true };
+  }
+
+  // Merge into the live cart instead of replacing it: the restore can run
+  // minutes after checkout (webhook / reconciliation job), and the customer
+  // may have added new items since. Existing lines win; only order lines the
+  // cart does not already contain are added back.
+  const restoredItems = mapOrderItemsToCartItems(order.items || []);
+  const cart = await Cart.findOneAndUpdate(
+    { userId: uid },
+    { $setOnInsert: { items: [] } },
+    { upsert: true, new: true },
+  );
+  for (const line of restoredItems) {
+    const exists = cart.items.some((it) => matchCartLine(it, line.productId, line.variantId));
+    if (!exists) cart.items.push(line);
+  }
+  await cart.save();
+  await dedupeCartLines(uid);
   await invalidateCartGetCache();
   return { ok: true };
 }
@@ -589,6 +745,9 @@ module.exports = {
   updateItem,
   removeItem,
   clearCart,
+  mergeGuestItems,
   restoreCartFromOrder,
   invalidateCartGetCache,
+  matchCartLine,
+  dedupeCartLines,
 };

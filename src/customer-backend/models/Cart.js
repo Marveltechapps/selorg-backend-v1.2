@@ -19,6 +19,12 @@ const cartSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerUser', required: true, unique: true },
     items: [cartItemSchema],
+    /**
+     * Client-generated idempotency keys of guest-cart merges already applied.
+     * Guarantees a guest cart is merged exactly once even when the client
+     * retries (page refresh, StrictMode remount, multiple tabs, network retry).
+     */
+    appliedMergeKeys: { type: [String], default: [] },
   },
   { timestamps: true }
 );

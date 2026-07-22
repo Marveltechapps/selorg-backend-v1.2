@@ -4,6 +4,7 @@ const {
   updateItem,
   removeItem,
   clearCart,
+  mergeGuestItems,
 } = require('../services/cartService');
 
 async function getCart(req, res) {
@@ -115,6 +116,38 @@ async function removeCartItem(req, res) {
   }
 }
 
+/**
+ * POST /cart/merge — merge a guest cart into the user's server cart exactly once.
+ * Body: { mergeKey: string, items: [{ productId, variantId?, quantity }] }
+ */
+async function mergeCart(req, res) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+    const { mergeKey, items } = req.body || {};
+    if (!mergeKey || typeof mergeKey !== 'string') {
+      res.status(400).json({ success: false, message: 'mergeKey required' });
+      return;
+    }
+    if (items != null && !Array.isArray(items)) {
+      res.status(400).json({ success: false, message: 'items must be an array' });
+      return;
+    }
+    const result = await mergeGuestItems(userId, items || [], mergeKey);
+    if (result.error) {
+      res.status(400).json({ success: false, message: result.error });
+      return;
+    }
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    console.error('cart mergeCart error:', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
 async function clear(req, res) {
   try {
     const userId = req.user?._id;
@@ -136,5 +169,6 @@ module.exports = {
   updateCartItem,
   updateCartItemByProductVariant,
   removeCartItem,
+  mergeCart,
   clear,
 };
