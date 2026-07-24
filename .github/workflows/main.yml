@@ -54,6 +54,25 @@ jobs:
             echo "🏷 Tag as latest"
             sudo docker tag $NEW_IMAGE $LATEST_IMAGE
     
+            echo "🛠 Force production Worldline redirect env on EC2"
+            mkdir -p "$(dirname "$ENV_FILE")"
+            touch "$ENV_FILE"
+            upsert_env() {
+              local key="$1"
+              local val="$2"
+              if grep -qE "^${key}=" "$ENV_FILE"; then
+                sed -i -E "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+              else
+                printf '%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+              fi
+            }
+            upsert_env NODE_ENV production
+            upsert_env WORLDLINE_WEB_APP_URL https://www.selorg.com
+            upsert_env CUSTOMER_WEB_URL https://www.selorg.com
+            upsert_env FRONTEND_URL https://www.selorg.com
+            echo "Env redirect targets:"
+            grep -E '^(NODE_ENV|WORLDLINE_WEB_APP_URL|CUSTOMER_WEB_URL|FRONTEND_URL)=' "$ENV_FILE" || true
+
             echo "🛑 Stop & remove old container"
             sudo docker stop $CONTAINER_NAME || true
             sudo docker rm $CONTAINER_NAME || true
@@ -65,6 +84,10 @@ jobs:
               --network selorg-net \
               -p 127.0.0.1:5000:5000 \
               --env-file $ENV_FILE \
+              -e NODE_ENV=production \
+              -e WORLDLINE_WEB_APP_URL=https://www.selorg.com \
+              -e CUSTOMER_WEB_URL=https://www.selorg.com \
+              -e FRONTEND_URL=https://www.selorg.com \
               $LATEST_IMAGE
     
             echo "⏳ Waiting for backend boot..."
@@ -73,6 +96,13 @@ jobs:
             echo "🔍 Health check"
             if curl -f http://127.0.0.1:5000/health >/dev/null 2>&1; then
               echo "✅ Deployment successful"
+              echo "🔍 Worldline cancel redirect check"
+              LOCATION=$(curl -sI https://api.selorg.com/api/v1/customer/payments/worldline/return | tr -d '\r' | awk -F': ' 'tolower($1)=="location"{print $2}')
+              echo "Location: $LOCATION"
+              if echo "$LOCATION" | grep -qi 'localhost'; then
+                echo "❌ Cancel redirect still points at localhost"
+                exit 1
+              fi
             else
               echo "❌ Deployment failed → rollback"
     
@@ -88,6 +118,10 @@ jobs:
                   --network selorg-net \
                   -p 127.0.0.1:5000:5000 \
                   --env-file $ENV_FILE \
+                  -e NODE_ENV=production \
+                  -e WORLDLINE_WEB_APP_URL=https://www.selorg.com \
+                  -e CUSTOMER_WEB_URL=https://www.selorg.com \
+                  -e FRONTEND_URL=https://www.selorg.com \
                   $LATEST_IMAGE
                 echo "✅ Rollback successful"
               else
