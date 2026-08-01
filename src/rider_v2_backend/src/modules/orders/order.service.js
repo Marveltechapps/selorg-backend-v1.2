@@ -4,7 +4,7 @@ function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.rejectOrder = exports.markOrderArrivedAtCustomer = exports.markOrderArrivedAtDarkstore = exports.markOrderPicked = exports.markOrderOutForDelivery = exports.markOrderDelivered = exports.listOrders = exports.getOrderById = exports.acceptOrder = void 0;
+exports.rejectOrder = exports.markOrderArrivedAtCustomer = exports.markOrderArrivedAtDarkstore = exports.markOrderPicked = exports.markOrderOutForDelivery = exports.markOrderDelivered = exports.listOrders = exports.getOrderById = exports.acceptOrder = exports.clearOpenOrdersForRider = void 0;
 var _Order = require("../../models/Order.js");
 var _Rider = require("../../models/Rider.js");
 var _riderCacheHelper = require("../../utils/riderCacheHelper.js");
@@ -80,6 +80,9 @@ var listOrders = exports.listOrders = /*#__PURE__*/function () {
       while (1) switch (_context2.n) {
         case 0:
           riderId = (filters === null || filters === void 0 ? void 0 : filters.riderId) || "";
+          if (!riderId) {
+            throw new Error("riderId is required to list rider orders");
+          }
           queryHash = [filters === null || filters === void 0 ? void 0 : filters.status, filters === null || filters === void 0 ? void 0 : filters.darkstoreCode, (filters === null || filters === void 0 ? void 0 : filters.limit) || 50].join(":");
           key = "rider:orders:".concat(riderId, ":").concat(queryHash);
           compute = /*#__PURE__*/function () {
@@ -88,11 +91,18 @@ var listOrders = exports.listOrders = /*#__PURE__*/function () {
               return _regenerator().w(function (_context2in) {
                 while (1) switch (_context2in.n) {
                   case 0:
-                    query = {};
+                    query = {
+                      "riderAssignment.riderId": String(riderId)
+                    };
                     if (filters !== null && filters !== void 0 && filters.status) query.status = filters.status;
                     if (filters !== null && filters !== void 0 && filters.darkstoreCode) query.darkstoreCode = filters.darkstoreCode;
-                    if (filters !== null && filters !== void 0 && filters.riderId) query["riderAssignment.riderId"] = filters.riderId;
                     if (filters !== null && filters !== void 0 && filters.customerPhoneNumber) query.customerPhoneNumber = filters.customerPhoneNumber;
+                    // Never surface terminal statuses in the default live list unless explicitly requested
+                    if (!(filters !== null && filters !== void 0 && filters.status)) {
+                      query.status = {
+                        $nin: ["delivered", "cancelled", "returned"]
+                      };
+                    }
                     limit = (filters === null || filters === void 0 ? void 0 : filters.limit) || 50;
                     return _context2in.a(2, _Order.Order.find(query).sort({ createdAt: -1 }).limit(limit).lean());
                 }
@@ -106,6 +116,56 @@ var listOrders = exports.listOrders = /*#__PURE__*/function () {
   }));
   return function listOrders(_x2) {
     return _ref2.apply(this, arguments);
+  };
+}();
+
+/** Cancel all non-terminal orders currently assigned to a rider (clears stuck/test active orders). */
+var clearOpenOrdersForRider = exports.clearOpenOrdersForRider = /*#__PURE__*/function () {
+  var _refClear = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeClear(riderId) {
+    var result;
+    return _regenerator().w(function (_contextClear) {
+      while (1) switch (_contextClear.n) {
+        case 0:
+          if (riderId) {
+            _contextClear.n = 1;
+            break;
+          }
+          throw new Error("riderId is required");
+        case 1:
+          _contextClear.n = 2;
+          return _Order.Order.updateMany({
+            "riderAssignment.riderId": String(riderId),
+            status: {
+              $nin: ["delivered", "cancelled", "returned"]
+            }
+          }, {
+            $set: {
+              status: "cancelled",
+              updatedAt: new Date(),
+              "metadata.cancelReason": "cleared_open_orders"
+            },
+            $unset: {
+              riderAssignment: 1
+            },
+            $push: {
+              timeline: {
+                status: "cancelled",
+                timestamp: new Date(),
+                note: "Open order cleared (test/stuck assignment)"
+              }
+            }
+          });
+        case 2:
+          result = _contextClear.v;
+          _riderCacheHelper.invalidateOrdersForRider(riderId).catch(function () {});
+          return _contextClear.a(2, {
+            cleared: result.modifiedCount || 0
+          });
+      }
+    }, _calleeClear);
+  }));
+  return function clearOpenOrdersForRider(_xClear) {
+    return _refClear.apply(this, arguments);
   };
 }();
 var markOrderArrivedAtDarkstore = exports.markOrderArrivedAtDarkstore = /*#__PURE__*/function () {

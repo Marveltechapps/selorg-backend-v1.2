@@ -13,18 +13,22 @@ const appConfig = require('../../config/app');
  * Respects DISABLE_CACHE env; skips caching for health/metrics.
  *
  * @param {number} ttlSeconds - Time to live in seconds (default: 3600)
- * @param {{ skipPaths?: string[], cacheKeyExtra?: (req: object) => string }} [options] - Optional. skipPaths; cacheKeyExtra appends to cache key (e.g. vendor hub).
+ * @param {{ skipPaths?: string[], cacheKeyExtra?: (req: object) => string, ttlResolver?: (req: object) => number }} [options]
  * @returns {Function} Express middleware function
  */
 const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
-  const { skipPaths = [], cacheKeyExtra } = typeof options === 'object' ? options : {};
+  const { skipPaths = [], cacheKeyExtra, ttlResolver } =
+    typeof options === 'object' ? options : {};
   return async (req, res, next) => {
     // Only cache GET requests
     if (req.method !== 'GET') {
       return next();
     }
 
-    if (!ttlSeconds || ttlSeconds <= 0) {
+    const resolvedTtl =
+      typeof ttlResolver === 'function' ? Number(ttlResolver(req)) || 0 : ttlSeconds;
+
+    if (!resolvedTtl || resolvedTtl <= 0) {
       return next();
     }
 
@@ -54,6 +58,10 @@ const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
         logger.debug('Cache HIT', { key: cacheKey, path: req.path });
         res.setHeader('X-Cache', 'HIT');
         res.setHeader('X-Cache-Key', cacheKey);
+        res.setHeader(
+          'Cache-Control',
+          `public, max-age=${Math.min(resolvedTtl, 120)}, stale-while-revalidate=60`
+        );
         return res.json(cached);
       }
 
@@ -63,7 +71,7 @@ const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
       const originalJson = res.json.bind(res);
       res.json = function (data) {
         // Cache the response asynchronously (don't block response)
-        cacheService.set(cacheKey, data, ttlSeconds).catch((err) => {
+        cacheService.set(cacheKey, data, resolvedTtl).catch((err) => {
           logger.warn('Cache set failed in middleware', {
             key: cacheKey,
             error: err.message,
@@ -71,6 +79,10 @@ const cacheMiddleware = (ttlSeconds = 3600, options = {}) => {
         });
         res.setHeader('X-Cache', 'MISS');
         res.setHeader('X-Cache-Key', cacheKey);
+        res.setHeader(
+          'Cache-Control',
+          `public, max-age=${Math.min(resolvedTtl, 120)}, stale-while-revalidate=60`
+        );
         return originalJson(data);
       };
 

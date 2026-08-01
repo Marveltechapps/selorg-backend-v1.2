@@ -9,6 +9,11 @@ const { HomeSection } = require('../../models/HomeSection');
 const { Button } = require('../../models/Button');
 const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
 const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassification');
+const {
+  deactivateLegacySeedProducts,
+  consolidateDuplicateSubcategories,
+} = require('../../utils/categoryTaxonomyCleanup');
+const { applySearchKeywordsWithCategories } = require('../search/productSearchKeywords');
 
 const SKIP_VALUES = new Set(['SKU Code', 'Mandatory', 'Not Null, Unique', 'Not Null', 'varchar(20)', 'varchar(100)']);
 
@@ -21,6 +26,8 @@ async function ensureUniqueCategorySlug(baseSlug, excludeId = null, session = nu
   const base = baseSlug || 'category';
   let candidate = base;
   let n = 0;
+  // Intentional: keep generating a unique slug until we find a non-colliding one.
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     const q = { slug: candidate };
     if (excludeId) q._id = { $ne: excludeId };
@@ -142,6 +149,7 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
 
         let productRows = 0;
         let productErrors = 0;
+        const categoryNameCache = new Map();
 
         for (let r = firstDataRow; r <= skuWs.rowCount; r += 1) {
           const row = skuWs.getRow(r);
@@ -197,6 +205,23 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
           doc.name = name;
           if (!doc.classification || (doc.classification !== 'Style' && doc.classification !== 'Variant')) {
             doc.classification = 'Style';
+          }
+
+          // SKU Master “Priority” (optional) lands in `Product.sortOrder`.
+          // Category listing pages sort by `Product.order`, so copy it across.
+          const sortOrderNum = Number(doc.sortOrder);
+          if (Number.isFinite(sortOrderNum)) {
+            doc.sortOrder = sortOrderNum;
+            const orderNum = Number(doc.order);
+            if (!Number.isFinite(orderNum)) {
+              doc.order = sortOrderNum;
+            }
+          } else {
+            const orderNum = Number(doc.order);
+            if (Number.isFinite(orderNum)) {
+              doc.order = orderNum;
+              doc.sortOrder = orderNum;
+            }
           }
 
           // Enhanced price validation - convert errors to warnings and fix data
@@ -357,6 +382,9 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
             doc.categoryId = existing.categoryId;
             doc.subcategoryId = existing.subcategoryId ?? null;
           }
+          // Regenerate multilingual search keywords with resolved category names
+          // eslint-disable-next-line no-await-in-loop
+          await applySearchKeywordsWithCategories(doc, Category, { session, categoryNameCache });
           let productId = existing?._id || null;
           if (existing) {
             if (!overwrite) {
@@ -661,6 +689,24 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
         }
       }
       counts.buttons.upserted = upserted;
+    }
+
+    // Catalog hygiene — deactivate seed SKUs and collapse duplicate L2s
+    try {
+      const seedDeactivated = await deactivateLegacySeedProducts({ session });
+      if (seedDeactivated > 0) {
+        counts.products.seedDeactivated = seedDeactivated;
+        warnings.push({
+          sheet: 'SKU Master',
+          message: `Deactivated ${seedDeactivated} legacy seed/demo SKU(s) (PROD-*)`,
+        });
+      }
+      const consolidated = await consolidateDuplicateSubcategories({ session, warnings });
+      counts.categories.duplicateGroups = consolidated.groups;
+      counts.categories.duplicatesDeactivated = consolidated.deactivated;
+      counts.categories.productsRemapped = consolidated.remapped;
+    } catch (e) {
+      warnings.push({ sheet: 'Categories', message: `Taxonomy cleanup failed: ${e.message}` });
     }
   };
 

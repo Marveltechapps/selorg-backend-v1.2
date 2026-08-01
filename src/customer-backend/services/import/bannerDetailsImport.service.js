@@ -13,6 +13,8 @@
  *      Each row is a banner asset identified by Banner.bannerId (e.g. Ban-051). Section 1..8
  *      are inline content references that are out of scope for now. Upsert by bannerId; slot
  *      defaults to 'mid' (Home Page Content tab governs placement).
+ *      Video: when Banner URL is .mp4/.webm/.mov (or Banner Type contains "video"), stores
+ *      Banner.videoUrl (and keeps imageUrl empty / prior poster). Image URLs stay on imageUrl.
  */
 
 const mongoose = require('mongoose');
@@ -46,6 +48,14 @@ function isUsableMediaUrl(url) {
   const u = String(url || '').trim();
   if (!u) return false;
   return /^https?:\/\//i.test(u) || u.startsWith('//');
+}
+
+function isVideoMediaUrl(url) {
+  return /\.(mp4|webm|mov)(\?|$)/i.test(String(url || '').trim());
+}
+
+function isVideoBannerType(bannerType) {
+  return /video/i.test(String(bannerType || '').trim());
 }
 
 function parseBoolean(raw, fallback = false) {
@@ -171,12 +181,15 @@ async function applyLegacyBanners(ws, headerMap, ctx) {
     const order = Number.parseInt(getCellText(row, orderCol), 10) || (r - 1);
     const key = `${slot}|${order}`;
     if (!bannerGroups.has(key)) {
+      const mediaUrl = normalizeMediaUrl(imageUrl);
+      const asVideo = isVideoMediaUrl(mediaUrl);
       bannerGroups.set(key, {
         slot,
         presentationMode: (getCellText(row, presModeCol) || 'single') === 'carousel' ? 'carousel' : 'single',
         isNavigable: parseBoolean(getCellText(row, isNavigableCol), true),
         title: getCellText(row, titleCol),
-        imageUrl,
+        imageUrl: asVideo ? '' : mediaUrl,
+        videoUrl: asVideo ? mediaUrl : '',
         redirectType: normalizeRedirectType(getCellText(row, redirectTypeCol)),
         redirectValue: getCellText(row, redirectValueCol) || undefined,
         isActive: parseBoolean(getCellText(row, isActiveCol), true),
@@ -234,6 +247,8 @@ async function applyLegacyBanners(ws, headerMap, ctx) {
         isNavigable: group.isNavigable,
         title: group.title,
         imageUrl: group.imageUrl,
+        videoUrl: group.videoUrl || '',
+        bannerImageUrl: group.imageUrl,
         redirectType: normalizeRedirectType(group.redirectType),
         redirectValue: group.redirectValue || undefined,
         categoryId: categoryId || null,
@@ -273,6 +288,8 @@ async function applyNewBanners(ws, headerMap, headerRow, ctx) {
   const bannerNameCol = findCol(headerMap, ['Banner Name', 'Title', 'title']);
   const bannerSizeCol = findCol(headerMap, ['Banner Size', 'Size']);
   const nameCol = findCol(headerMap, ['Name']);
+  const redirectTypeCol = findCol(headerMap, ['Redirect Type', 'redirectType']);
+  const redirectValueCol = findCol(headerMap, ['Redirect Value', 'redirectValue']);
 
   if (!bannerIdCol || !bannerUrlCol) {
     errors.push({
@@ -295,27 +312,57 @@ async function applyNewBanners(ws, headerMap, headerRow, ctx) {
     const fallbackName = nameCol ? getCellText(row, nameCol) : '';
     const bannerSize = bannerSizeCol ? getCellText(row, bannerSizeCol) : '';
     const isNavigable = /click/i.test(bannerType);
+    const sheetRedirectType = redirectTypeCol
+      ? normalizeRedirectType(getCellText(row, redirectTypeCol))
+      : null;
+    const sheetRedirectValue = redirectValueCol ? getCellText(row, redirectValueCol) : '';
 
     try {
       const existing = await Banner.findOne({ bannerId }).session(session || null).lean();
-      let imageUrl = normalizeMediaUrl(rawBannerUrl);
-      if (!isUsableMediaUrl(imageUrl)) {
-        const fromDb = normalizeMediaUrl(existing?.imageUrl || existing?.bannerImageUrl || '');
-        imageUrl = isUsableMediaUrl(fromDb) ? fromDb : '';
+      let mediaUrl = normalizeMediaUrl(rawBannerUrl);
+      if (!isUsableMediaUrl(mediaUrl)) {
+        const fromDb = normalizeMediaUrl(
+          existing?.videoUrl || existing?.imageUrl || existing?.bannerImageUrl || ''
+        );
+        mediaUrl = isUsableMediaUrl(fromDb) ? fromDb : '';
       }
-      const hasImage = isUsableMediaUrl(imageUrl);
+
+      const treatAsVideo = Boolean(
+        mediaUrl && (isVideoMediaUrl(mediaUrl) || isVideoBannerType(bannerType))
+      );
+      let imageUrl = '';
+      let videoUrl = '';
+      if (treatAsVideo) {
+        videoUrl = mediaUrl;
+        // Keep prior still image as poster when re-importing a video row.
+        const priorImage = normalizeMediaUrl(existing?.imageUrl || existing?.bannerImageUrl || '');
+        if (priorImage && !isVideoMediaUrl(priorImage)) imageUrl = priorImage;
+      } else {
+        imageUrl = mediaUrl;
+        // Clear stale video when the sheet now points at a still image.
+        videoUrl = '';
+      }
+
+      const hasMedia = isUsableMediaUrl(imageUrl) || isUsableMediaUrl(videoUrl);
 
       const $set = {
         bannerId,
         imageUrl,
+        videoUrl,
         title: bannerName || fallbackName || bannerId,
         bannerType: bannerType || '',
         bannerImageUrl: imageUrl,
         isNavigable,
-        isActive: hasImage,
-        redirectType: 'none',
+        isActive: hasMedia,
         ...(bannerSize ? { sectionCode: bannerSize } : {}),
       };
+      // Optional redirect columns (same Master Sheet; ignored when absent).
+      if (sheetRedirectType != null) {
+        $set.redirectType = sheetRedirectType;
+        $set.redirectValue = sheetRedirectValue || undefined;
+      } else if (!existing) {
+        $set.redirectType = 'none';
+      }
       // Preserve slot/order on existing rows; set slot only when inserting.
       if (!existing) {
         $set.slot = 'mid';

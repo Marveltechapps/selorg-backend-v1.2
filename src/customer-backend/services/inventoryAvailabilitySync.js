@@ -38,6 +38,7 @@ async function resolveDefaultDarkStoreId() {
 async function invalidateCustomerCatalogCaches() {
   try {
     await cacheService.delPattern('cache:*');
+    await cacheService.del('home:payload:shared:v1');
   } catch (err) {
     console.error('[inventoryAvailabilitySync] cache invalidation failed', err?.message || err);
   }

@@ -6,7 +6,7 @@ const { Category } = require('../models/Category');
 const { Banner } = require('../models/Banner');
 const { HomeSection } = require('../models/HomeSection');
 const { Product } = require('../models/Product');
-const { enrichProductsWithVariants } = require('../utils/productVariantsPayload');
+const { enrichProductsWithVariants, mapProductIdsToStyleIds } = require('../utils/productVariantsPayload');
 const { LifestyleItem } = require('../models/LifestyleItem');
 const { PromoBlock } = require('../models/PromoBlock');
 const { getDefaultAddress } = require('./addressService');
@@ -17,11 +17,17 @@ const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
 const { dedupeHomeSectionDefinitions } = require('../utils/dedupeHomeSectionDefinitions');
 const { collectionMergeKey, stripKeyNumericSuffix } = require('../utils/homeSectionKeys');
+const cacheService = require('../../core/services/cache.service');
+const appConfig = require('../../config/app');
+
+const HOME_PAYLOAD_CACHE_KEY = 'home:payload:shared:v1';
 
 async function resolveProducts(productIds = []) {
   if (!Array.isArray(productIds) || productIds.length === 0) return [];
+  const styleIds = await mapProductIdsToStyleIds(productIds);
+  if (styleIds.length === 0) return [];
   const products = await Product.find({
-    _id: { $in: productIds },
+    _id: { $in: styleIds },
     isActive: true,
     isSaleable: true,
     classification: 'Style',
@@ -51,12 +57,42 @@ async function resolveProducts(productIds = []) {
       variants: 1,
     });
   const map = new Map(products.map((p) => [String(p._id), p]));
-  const ordered = productIds.map((id) => map.get(String(id))).filter(Boolean);
+  const ordered = styleIds.map((id) => map.get(String(id))).filter(Boolean);
   const withVariants = await enrichProductsWithVariants(ordered);
   return attachLiveSellableStock(withVariants);
 }
 
 async function getHomePayload(req = {}) {
+  const ttl = appConfig.cache?.customer?.home || 60;
+  let shared = null;
+  if (ttl > 0 && !appConfig.disableCache) {
+    try {
+      shared = await cacheService.get(HOME_PAYLOAD_CACHE_KEY);
+    } catch {
+      shared = null;
+    }
+  }
+
+  if (!shared) {
+    shared = await buildSharedHomePayload();
+    if (ttl > 0 && !appConfig.disableCache) {
+      cacheService.set(HOME_PAYLOAD_CACHE_KEY, shared, ttl).catch(() => {});
+    }
+  }
+
+  let defaultAddress = null;
+  const userId = req?.user?._id;
+  if (userId) {
+    defaultAddress = await getDefaultAddress(userId);
+  }
+
+  return {
+    ...shared,
+    defaultAddress: defaultAddress || null,
+  };
+}
+
+async function buildSharedHomePayload() {
   let config = await HomeConfig.findOne({ key: 'main' }).lean();
   if (!config) {
     config = {
@@ -86,6 +122,12 @@ async function getHomePayload(req = {}) {
     }
   }
 
+  // Continue with the rest of the original getHomePayload body via inline reassignment trick:
+  // We keep the existing function body by renaming — see below.
+  return buildSharedHomePayloadFromDefs(config, definitionsFromCollection);
+}
+
+async function buildSharedHomePayloadFromDefs(config, definitionsFromCollection) {
   const sectionDefinitions = definitionsFromCollection.map((d) => ({ key: d.key, label: d.label || d.key }));
   const sectionOrder = sectionDefinitions.map((d) => d.key);
 
@@ -189,7 +231,11 @@ async function getHomePayload(req = {}) {
     heroBanners = heroBannerIds
       .map((id) => mainBannerMap.get(String(id)))
       .filter(Boolean)
-      .filter((b) => Boolean(String(b.imageUrl || b.bannerImageUrl || b.thumbnailUrl || '').trim()));
+      .filter((b) =>
+        Boolean(
+          String(b.imageUrl || b.bannerImageUrl || b.thumbnailUrl || b.videoUrl || '').trim()
+        )
+      );
     const heroOrderMap = new Map(heroBannerIds.map((id, i) => [String(id), i]));
     heroBanners.sort((a, b) => (heroOrderMap.get(String(a._id)) ?? 99) - (heroOrderMap.get(String(b._id)) ?? 99));
   }
@@ -216,6 +262,7 @@ async function getHomePayload(req = {}) {
   }
   const sectionsDocs = await HomeSection.find({ isActive: true }).sort({ order: 1 }).lean();
   const sectionDefs = definitionsFromCollection.filter((d) => d.collectionId);
+  const defsByKey = new Map(definitionsFromCollection.map((d) => [d.key, d]));
   const definitionKeys = new Set(definitionsFromCollection.map((d) => d.key));
   const definitionLabels = new Set(
     definitionsFromCollection
@@ -223,21 +270,34 @@ async function getHomePayload(req = {}) {
       .map((d) => collectionMergeKey(d.label))
   );
   const sections = {};
+  const homeSectionJobs = [];
   for (const s of sectionsDocs) {
     const baseKey = stripKeyNumericSuffix(s.sectionKey);
     if (s.sectionKey !== baseKey && definitionKeys.has(baseKey)) continue;
     if (s.title && definitionLabels.has(collectionMergeKey(s.title))) continue;
-    if (definitionKeys.has(s.sectionKey)) continue;
-    const products = await resolveProducts(s.productIds || []);
-    sections[s.sectionKey] = { title: s.title, products };
+    // Skip HomeSection only when a definition for this key supplies products via collectionId.
+    // Otherwise Sections-tab product picks (or defs without a collection) would never appear.
+    const matchingDef = defsByKey.get(s.sectionKey);
+    if (matchingDef?.collectionId) continue;
+    homeSectionJobs.push(
+      resolveProducts(s.productIds || []).then((products) => {
+        sections[s.sectionKey] = { title: s.title, products };
+      })
+    );
   }
+  await Promise.all(homeSectionJobs);
   // HomeSectionDefinition with a collectionId is the source of truth for that key's products.
-  for (const d of sectionDefs) {
-    if (d.collectionId && d.key) {
-      const products = await resolveCollectionProducts(d.collectionId);
-      sections[d.key] = { title: d.label || d.key, products };
-    }
-  }
+  await Promise.all(
+    sectionDefs.map(async (d) => {
+      if (d.collectionId && d.key) {
+        const products = await resolveCollectionProducts(d.collectionId, {
+          homeRail: true,
+          limit: 50,
+        });
+        sections[d.key] = { title: d.label || d.key, products };
+      }
+    })
+  );
 
   // Alias Master Sheet collection sections into health / wellness rails when labels match.
   // Prefer explicit Home Page Content collections over inventing product mixes.
@@ -296,8 +356,10 @@ async function getHomePayload(req = {}) {
     }
   }
 
-  const lifestyle = await LifestyleItem.find({ isActive: true }).sort({ order: 1 }).lean();
-  const promoBlocksList = await PromoBlock.find({ isActive: true }).lean();
+  const [lifestyle, promoBlocksList] = await Promise.all([
+    LifestyleItem.find({ isActive: true }).sort({ order: 1 }).lean(),
+    PromoBlock.find({ isActive: true }).lean(),
+  ]);
   const promoBlocks = {};
   for (const p of promoBlocksList) {
     promoBlocks[p.blockKey] = {
@@ -311,11 +373,7 @@ async function getHomePayload(req = {}) {
     };
   }
 
-  let defaultAddress = null;
-  const userId = req?.user?._id;
-  if (userId) {
-    defaultAddress = await getDefaultAddress(userId);
-  }
+  // defaultAddress is request-scoped and attached in getHomePayload — never cache it here.
 
   const taglineDefs = definitionsFromCollection.filter((d) => d.type === 'tagline');
   const taglineByKey = {};
@@ -376,7 +434,7 @@ async function getHomePayload(req = {}) {
     sections,
     lifestyle,
     promoBlocks,
-    defaultAddress: defaultAddress || null,
+    defaultAddress: null,
   });
 }
 

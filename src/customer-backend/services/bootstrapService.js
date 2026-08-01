@@ -3,14 +3,11 @@ const { buildHomePageFromLegacy } = require('./cms/pageService');
 const { FeatureFlag } = require('../models/FeatureFlag');
 const { FlowConfig } = require('../models/FlowConfig');
 const { PromotionRule } = require('../models/PromotionRule');
-const { getDefaultAddress } = require('./addressService');
 const { HomeConfig } = require('../models/HomeConfig');
 const { AppConfig, DEFAULT_APP_CONFIG } = require('../models/AppConfig');
 const { applyEffectiveCheckoutPricing } = require('./deliveryPricingConfig');
 
-const now = new Date();
-
-function isPromotionActive(rule) {
+function isPromotionActive(rule, now = new Date()) {
   if (!rule || !rule.isActive) return false;
   if (rule.schedule) {
     if (rule.schedule.startDate && rule.schedule.startDate > now) return false;
@@ -24,22 +21,38 @@ function isPromotionActive(rule) {
  * Get v2 bootstrap payload.
  * Section list (HomeSectionDefinition) is the single source of truth for home content.
  * No fallback to CMS page or hardcoded defaults. Empty section list = empty home.
+ * Independent lookups run in parallel; home payload uses its own TTL cache.
  */
 async function getBootstrapPayload(req = {}) {
-  const featureFlagsList = await FeatureFlag.find({ isActive: true }).lean();
+  const now = new Date();
+
+  const [
+    featureFlagsList,
+    flowConfigList,
+    promoRules,
+    homeConfigDoc,
+    appConfigDoc,
+    legacy,
+  ] = await Promise.all([
+    FeatureFlag.find({ isActive: true }).lean(),
+    FlowConfig.find().lean(),
+    PromotionRule.find({ isActive: true }).lean(),
+    HomeConfig.findOne({ key: 'main' }).lean(),
+    AppConfig.findOne({ key: 'default' }).lean(),
+    getHomePayload(req),
+  ]);
+
   const featureFlags = {};
   for (const f of featureFlagsList) {
     featureFlags[f.key] = f.value;
   }
 
-  const flowConfigList = await FlowConfig.find().lean();
   const flowConfig = {};
   for (const f of flowConfigList) {
     flowConfig[f.key] = f.value;
   }
 
-  const promoRules = await PromotionRule.find({ isActive: true }).lean();
-  const activePromotions = promoRules.filter(isPromotionActive).map((r) => ({
+  const activePromotions = promoRules.filter((r) => isPromotionActive(r, now)).map((r) => ({
     id: String(r._id),
     name: r.name,
     type: r.type,
@@ -52,13 +65,6 @@ async function getBootstrapPayload(req = {}) {
     couponCode: r.couponCode,
   }));
 
-  let defaultAddress = null;
-  const userId = req?.user?._id;
-  if (userId) {
-    defaultAddress = await getDefaultAddress(userId);
-  }
-
-  const homeConfigDoc = await HomeConfig.findOne({ key: 'main' }).lean();
   const homeConfig = homeConfigDoc
     ? {
         searchPlaceholder: homeConfigDoc.searchPlaceholder,
@@ -70,15 +76,14 @@ async function getBootstrapPayload(req = {}) {
       }
     : null;
 
-  let appConfigDoc = await AppConfig.findOne({ key: 'default' }).lean();
-  if (!appConfigDoc) {
+  let resolvedAppConfig = appConfigDoc;
+  if (!resolvedAppConfig) {
     const created = await AppConfig.create(DEFAULT_APP_CONFIG);
-    appConfigDoc = created ? created.toObject() : DEFAULT_APP_CONFIG;
+    resolvedAppConfig = created ? created.toObject() : DEFAULT_APP_CONFIG;
   }
   // Serve the delivery pricing the engine actually bills with (guest parity).
-  const appConfig = applyEffectiveCheckoutPricing({ ...(appConfigDoc || DEFAULT_APP_CONFIG) });
+  const appConfig = applyEffectiveCheckoutPricing({ ...(resolvedAppConfig || DEFAULT_APP_CONFIG) });
 
-  const legacy = await getHomePayload(req);
   const homeFromLegacy = buildHomePageFromLegacy(legacy);
   return {
     pages: {
@@ -90,7 +95,7 @@ async function getBootstrapPayload(req = {}) {
     featureFlags,
     flowConfig,
     activePromotions,
-    defaultAddress,
+    defaultAddress: legacy?.defaultAddress || null,
   };
 }
 

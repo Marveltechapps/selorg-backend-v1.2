@@ -9,6 +9,7 @@ const {
   mapStatusLabel,
   formatTimeElapsed,
 } = require('../services/worldlinePaymentsService');
+const { resolveWebAppBaseUrl } = require('../utils/paymentRedirectUrls');
 const logger = require('../../core/utils/logger');
 
 function isValidIso8601(value) {
@@ -26,10 +27,23 @@ function formatAmount(value) {
 function resolveWorldlineResponseStatus(status) {
   const key = String(status || '').trim().toLowerCase();
   if (key === 'success') return 'success';
-  if (key === 'cancelled' || key === 'cancel' || key === '0392' || key === '0002') return 'cancelled';
+  if (
+    key === 'cancelled' ||
+    key === 'canceled' ||
+    key === 'cancel' ||
+    key === 'user_cancelled' ||
+    key === 'user_canceled' ||
+    key === 'aborted' ||
+    key === 'abort' ||
+    key === '0392' ||
+    key === '0002'
+  ) {
+    return 'cancelled';
+  }
   // Unverified/ambiguous outcomes stay "pending" so the app re-verifies with the
   // backend instead of announcing a failure (or worse, a success) it cannot prove.
   if (key === 'pending' || key === '0398' || key === '0396' || key === 'unknown') return 'pending';
+  if (key === 'timeout' || key === 'error') return 'failed';
   return 'failed';
 }
 
@@ -97,27 +111,11 @@ function inferWorldlineReturnPresentation(response, resultStatus, errorMessage) 
   return { status: 'failed', message: err };
 }
 
-function resolveWebAppBaseUrl() {
-  const candidates = [
-    process.env.WORLDLINE_WEB_APP_URL,
-    process.env.CUSTOMER_WEB_URL,
-    process.env.FRONTEND_URL,
-  ];
-  for (const candidate of candidates) {
-    const trimmed = String(candidate ?? '').trim();
-    if (trimmed) return trimmed.replace(/\/$/, '');
-  }
-  // Only ever fall back to localhost during local development; a production
-  // process must never redirect customers to a dev machine.
-  if (process.env.NODE_ENV !== 'production') return 'http://localhost:5173';
-  return 'https://www.selorg.com';
-}
-
 function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount, purpose }) {
-  const base = resolveWebAppBaseUrl();
+  const base = resolveWebAppBaseUrl(logger);
   // Wallet top-ups return to the wallet tab; grocery checkout stays on /payment.
   const path = purpose === 'wallet_topup' ? '/account/wallet' : '/payment';
-  const url = new URL(path, base);
+  const url = new URL(path, base.endsWith('/') ? base : `${base}/`);
   url.searchParams.set('paynimo_bridge', '1');
   const resolvedStatus = resolveWorldlineResponseStatus(status);
   url.searchParams.set('status', resolvedStatus);
@@ -133,7 +131,7 @@ function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount
 
 function redirectToPaymentResultPage(res, payload) {
   const redirectUrl = buildPaymentResultRedirectUrl(payload);
-  const webAppBase = resolveWebAppBaseUrl();
+  const webAppBase = resolveWebAppBaseUrl(logger);
 
   logger.info('WORLDLINE_RETURN_REDIRECT', {
     event: 'worldline_return_redirect',

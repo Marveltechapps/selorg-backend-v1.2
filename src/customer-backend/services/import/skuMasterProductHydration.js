@@ -4,6 +4,7 @@
  */
 
 const { isStubImageUrl } = require('../../utils/mediaUrl');
+const { applySearchKeywordsToDoc } = require('../search/productSearchKeywords');
 
 function normalizeHeaderKey(raw) {
   return String(raw || '')
@@ -13,7 +14,38 @@ function normalizeHeaderKey(raw) {
     .replace(/[()]/g, '');
 }
 
-/** @typedef {{ path: string, kind: 'string'|'price'|'number'|'bool'|'classification'|'hsn' }} Mapping */
+/** Display-friendly pack size: "500g" → "500 g", "1kg" → "1 kg", "2L" → "2 L". */
+function normalizePackSize(raw) {
+  const s0 = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!s0) return '';
+  const units = 'kg|g|ml|l|ltr|litre|liter|pack|packs|pcs|pc|nos|no';
+  const multipack = s0.match(
+    new RegExp(`^(\\d+)\\s*[x×]\\s*(\\d+(?:\\.\\d+)?)\\s*(${units})\\b(.*)$`, 'i')
+  );
+  if (multipack) {
+    const unit = normalizePackUnit(multipack[3]);
+    const rest = (multipack[4] || '').trim();
+    return `${multipack[1]} × ${multipack[2]} ${unit}${rest ? ` ${rest}` : ''}`.trim();
+  }
+  const m = s0.match(new RegExp(`^(\\d+(?:\\.\\d+)?)\\s*(${units})\\b(.*)$`, 'i'));
+  if (!m) return s0;
+  const unit = normalizePackUnit(m[2]);
+  const rest = (m[3] || '').trim();
+  return `${m[1]} ${unit}${rest ? ` ${rest}` : ''}`.trim();
+}
+
+function normalizePackUnit(unit) {
+  const u = String(unit || '').toLowerCase();
+  if (u === 'l' || u === 'ltr' || u === 'litre' || u === 'liter') return 'L';
+  if (u === 'ml') return 'ml';
+  if (u === 'pc' || u === 'pcs' || u === 'nos' || u === 'no') return 'pcs';
+  if (u === 'pack' || u === 'packs') return u;
+  if (u === 'kg') return 'kg';
+  if (u === 'g') return 'g';
+  return unit;
+}
+
+/** @typedef {{ path: string, kind: 'string'|'price'|'number'|'numberOptional'|'bool'|'classification'|'hsn' }} Mapping */
 
 function buildHeaderPathMap() {
   /** @type {Array<{ aliases: string[], path: string, kind: Mapping['kind'] }>} */
@@ -34,6 +66,9 @@ function buildHeaderPathMap() {
     { aliases: ['primary upc/ean', 'primary upc ean'], path: 'upcEan', kind: 'string' },
     { aliases: ['country of origin'], path: 'countryOfOrigin', kind: 'string' },
     { aliases: ['hierarchy code', 'category hierarchy code'], path: 'hierarchyCode', kind: 'string' },
+    // SKU Master “Priority” drives merchandising order for category listings and home rails.
+    // We store it in `Product.sortOrder`; `skuMasterImport` copies it into `Product.order` too.
+    { aliases: ['priority', 'priorty', 'product priority', 'display order', 'displayorder', 'sort order'], path: 'sortOrder', kind: 'numberOptional' },
     { aliases: ['mfg sku code', 'mfg skucode'], path: 'mfgSkuCode', kind: 'string' },
     { aliases: ['primary vendor', 'vendor code'], path: 'vendorCode', kind: 'string' },
     { aliases: ['brand code'], path: 'brandCode', kind: 'string' },
@@ -79,9 +114,10 @@ function buildHeaderPathMap() {
     { aliases: ['stackable'], path: 'stackable', kind: 'bool' },
     { aliases: ['hazardous'], path: 'hazardous', kind: 'bool' },
     { aliases: ['poisonous'], path: 'poisonous', kind: 'bool' },
-    { aliases: ['is purchasable'], path: 'isPurchasable', kind: 'bool' },
-    { aliases: ['is saleable'], path: 'isSaleable', kind: 'bool' },
-    { aliases: ['is stocked'], path: 'isStocked', kind: 'bool' },
+    // Empty cells must default to true — false would hide the product from every customer API.
+    { aliases: ['is purchasable'], path: 'isPurchasable', kind: 'boolDefaultTrue' },
+    { aliases: ['is saleable'], path: 'isSaleable', kind: 'boolDefaultTrue' },
+    { aliases: ['is stocked'], path: 'isStocked', kind: 'boolDefaultTrue' },
     { aliases: ['lottable validation'], path: 'lottableValidation', kind: 'string' },
     { aliases: ['sku rotation'], path: 'skuRotation', kind: 'string' },
     { aliases: ['rotate by'], path: 'rotateBy', kind: 'string' },
@@ -166,8 +202,16 @@ function coerceValue(raw, kind) {
     }
     case 'number':
       return parseNumberCell(raw, 0);
+    case 'numberOptional': {
+      const str = String(raw ?? '').trim();
+      if (!str) return undefined;
+      const n = Number.parseFloat(String(raw).replace(/,/g, '').replace(/[^\d.-]/g, ''));
+      return Number.isFinite(n) ? n : undefined;
+    }
     case 'bool':
       return parseBoolean(raw, false);
+    case 'boolDefaultTrue':
+      return parseBoolean(raw, true);
     case 'classification': {
       const c = normalizeClassification(String(raw ?? '').trim());
       return c === 'Style' || c === 'Variant' ? c : 'Style';
@@ -335,7 +379,9 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
     }
 
     const coerced = coerceValue(raw, mapping.kind);
-    setDeep(doc, mapping.path, coerced);
+    // For optional numeric columns (e.g. “Priority”), skip empty/invalid cells so
+    // re-imports don't overwrite an existing order with `undefined` / zero.
+    if (coerced !== undefined) setDeep(doc, mapping.path, coerced);
   }
 
   if (productDetailsRaw) {
@@ -347,6 +393,9 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
     if (parts.raw && !d.raw) d.raw = parts.raw;
   }
 
+  if (doc.size != null && String(doc.size).trim() !== '') {
+    doc.size = normalizePackSize(String(doc.size));
+  }
   doc.quantity = doc.size != null ? String(doc.size) : doc.quantity;
 
   const tb = doc.taxBreakup;
@@ -390,6 +439,11 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
 
   if (!doc.countryOfOrigin) doc.countryOfOrigin = 'India';
 
+  // Search / text index use `brand`; sheet only supplies Brand Code.
+  if (doc.brandCode && !String(doc.brand || '').trim()) {
+    doc.brand = String(doc.brandCode).trim();
+  }
+
   doc.originalPrice = doc.mrp;
   const bc = Number(doc.baseCost);
   doc.costPrice = Number.isFinite(bc) ? bc : 0;
@@ -404,6 +458,9 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
     extra[header] = String(raw).trim();
   }
   doc.additionalImportedFields = extra;
+
+  // Auto-generate multilingual search keywords from product name, brand, tag, meta, etc.
+  applySearchKeywordsToDoc(doc);
 }
 
 /** Split SKUimgURL / manual entry: comma, semicolon, or newline; trim; preserve order; dedupe later in merge. */

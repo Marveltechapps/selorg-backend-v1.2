@@ -123,14 +123,14 @@ orderRouter.get("/:orderId", _authenticate.authenticate, /*#__PURE__*/function (
   };
 }());
 
-// List all orders (admin endpoint - filtered by riderId)
+// List orders for the authenticated rider only (never returns unassigned/other riders' orders)
 orderRouter.get("/admin/orders", _authenticate.authenticate, /*#__PURE__*/function () {
   var _ref2 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee2(req, res) {
     var filters, limit, orders, _t2;
     return _regenerator().w(function (_context2) {
       while (1) switch (_context2.p = _context2.n) {
         case 0:
-          if (req.user) {
+          if (req.user && req.user.id) {
             _context2.n = 1;
             break;
           }
@@ -141,7 +141,7 @@ orderRouter.get("/admin/orders", _authenticate.authenticate, /*#__PURE__*/functi
         case 1:
           _context2.p = 1;
           filters = {
-            riderId: req.user.id // Only get orders for this rider
+            riderId: String(req.user.id)
           };
           if (req.query.status) {
             filters.status = req.query.status;
@@ -166,7 +166,8 @@ orderRouter.get("/admin/orders", _authenticate.authenticate, /*#__PURE__*/functi
           _context2.p = 3;
           _t2 = _context2.v;
           res.status(500).json({
-            error: "Failed to fetch orders"
+            error: "Failed to fetch orders",
+            message: _t2 && _t2.message ? _t2.message : undefined
           });
         case 4:
           return _context2.a(2);
@@ -175,6 +176,51 @@ orderRouter.get("/admin/orders", _authenticate.authenticate, /*#__PURE__*/functi
   }));
   return function (_x3, _x4) {
     return _ref2.apply(this, arguments);
+  };
+}());
+
+// Clear stuck/test open assignments for the authenticated rider
+orderRouter.post("/admin/orders/clear-open", _authenticate.authenticate, /*#__PURE__*/function () {
+  var _refClear = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _calleeClear(req, res) {
+    var result, _tClear;
+    return _regenerator().w(function (_contextClear) {
+      while (1) switch (_contextClear.p = _contextClear.n) {
+        case 0:
+          if (req.user && req.user.id) {
+            _contextClear.n = 1;
+            break;
+          }
+          res.status(401).json({ error: "Unauthorized" });
+          return _contextClear.a(2);
+        case 1:
+          _contextClear.p = 1;
+          _contextClear.n = 2;
+          return orderService.clearOpenOrdersForRider(String(req.user.id));
+        case 2:
+          result = _contextClear.v;
+          res.json({
+            success: true,
+            cleared: result.cleared,
+            message: result.cleared
+              ? "Cleared ".concat(result.cleared, " open order(s)")
+              : "No open orders to clear"
+          });
+          _contextClear.n = 4;
+          break;
+        case 3:
+          _contextClear.p = 3;
+          _tClear = _contextClear.v;
+          res.status(500).json({
+            error: "Failed to clear open orders",
+            message: _tClear && _tClear.message ? _tClear.message : undefined
+          });
+        case 4:
+          return _contextClear.a(2);
+      }
+    }, _calleeClear, null, [[1, 3]]);
+  }));
+  return function (_xClear1, _xClear2) {
+    return _refClear.apply(this, arguments);
   };
 }());
 

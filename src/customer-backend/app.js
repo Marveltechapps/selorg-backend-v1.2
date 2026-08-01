@@ -49,10 +49,38 @@ app.use(express.json());
 
 const { cacheMiddleware } = require('../core/middleware');
 const appConfig = require('../config/app');
+const customerCache = appConfig.cache.customer || {};
+
+/**
+ * Route-aware TTL for public GETs (no Redis). Longer for relatively static catalogs.
+ */
+function customerCacheTtl(req) {
+  const p = req.path || '';
+  if (p.startsWith('/faq') || p.startsWith('/legal') || p.startsWith('/app-config')) {
+    return customerCache.legal || 300;
+  }
+  if (p.startsWith('/categories')) {
+    return customerCache.categories || 120;
+  }
+  if (p.startsWith('/home') || p.startsWith('/sections') || p.startsWith('/banners')) {
+    return customerCache.home || 60;
+  }
+  if (p.startsWith('/products') && !p.includes('/search')) {
+    return customerCache.products || 60;
+  }
+  // Search must stay fresh for stock/relevance — skip via 0 when configured
+  if (p.includes('/search')) {
+    return typeof customerCache.search === 'number' ? customerCache.search : 0;
+  }
+  return customerCache.default || 60;
+}
+
 // Cart and addresses are per-user and change often — never cache those GETs.
+// Bootstrap is cached inside bootstrapService (shared home graph + per-request address).
 app.use(
-  cacheMiddleware(appConfig.cache.customer.default, {
+  cacheMiddleware(customerCache.default || 60, {
     skipPaths: ['/bootstrap', '/cart', '/addresses', '/user', '/wallet', '/notifications', '/orders'],
+    ttlResolver: customerCacheTtl,
   }),
 );
 

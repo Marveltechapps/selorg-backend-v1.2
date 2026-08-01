@@ -98,7 +98,9 @@ describe('idempotent notification creation (dedupeKey)', () => {
 
     const docs = await Notification.find({ userId, 'data.type': 'PAYMENT_CANCELLED' }).lean();
     expect(docs).toHaveLength(1);
-    expect(docs[0].body).toContain('Payment was cancelled');
+    expect(docs[0].body).toContain('Your payment was cancelled');
+    expect(docs[0].body).toContain('No amount has been deducted');
+    expect(docs[0].title).toBe('Payment Cancelled');
   });
 });
 

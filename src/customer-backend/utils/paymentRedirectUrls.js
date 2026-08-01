@@ -3,6 +3,9 @@
  * Production / hosted API deployments must never redirect customers to
  * localhost / private IPs even if NODE_ENV is mis-set to development or a
  * .env still contains local developer values.
+ *
+ * Localhost redirects are opt-in only via ALLOW_LOCAL_PAYNIMO_REDIRECT=true.
+ * Default fallback is always https://www.selorg.com.
  */
 
 const PRODUCTION_WEB_APP_URL = 'https://www.selorg.com';
@@ -54,11 +57,19 @@ function isHostedWorldlineDeployment() {
 }
 
 /**
- * Local Paynimo redirects are only for a fully local stack.
+ * Local Paynimo redirects are opt-in only.
  * NODE_ENV!=production alone is NOT enough — AWS often runs with
  * NODE_ENV=development while WORLDLINE_RETURN_URL points at api.selorg.com.
+ * Set ALLOW_LOCAL_PAYNIMO_REDIRECT=true only on a fully local stack.
  */
 function allowsLocalRedirectUrls() {
+  const optedIn =
+    String(process.env.ALLOW_LOCAL_PAYNIMO_REDIRECT || '')
+      .trim()
+      .toLowerCase() === 'true';
+  if (!optedIn) {
+    return false;
+  }
   if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {
     return false;
   }
@@ -70,6 +81,9 @@ function allowsLocalRedirectUrls() {
 
 /**
  * Customer web app origin used for gateway cancel/success/fail redirects.
+ * Ignores localhost/private WORLDLINE_WEB_APP_URL, CUSTOMER_WEB_URL, and
+ * FRONTEND_URL unless local redirects are explicitly opted in.
+ * Always falls back to https://www.selorg.com (never localhost by default).
  */
 function resolveWebAppBaseUrl(logger) {
   const allowLocal = allowsLocalRedirectUrls();
@@ -83,20 +97,23 @@ function resolveWebAppBaseUrl(logger) {
     const trimmed = trimEnv(candidate);
     if (!trimmed) continue;
     const base = trimmed.replace(/\/$/, '');
-    if (!allowLocal && isLocalOrPrivateHost(base)) {
-      if (logger && typeof logger.warn === 'function') {
-        logger.warn('Ignoring local customer web URL in hosted/production deployment', {
-          candidate: base,
-          fallback: PRODUCTION_WEB_APP_URL,
-          nodeEnv: process.env.NODE_ENV || null,
-        });
+    if (isLocalOrPrivateHost(base)) {
+      if (!allowLocal) {
+        if (logger && typeof logger.warn === 'function') {
+          logger.warn('Ignoring local customer web URL for Paynimo redirect', {
+            candidate: base,
+            fallback: PRODUCTION_WEB_APP_URL,
+            nodeEnv: process.env.NODE_ENV || null,
+            hint: 'Set ALLOW_LOCAL_PAYNIMO_REDIRECT=true only for local Paynimo testing',
+          });
+        }
+        continue;
       }
-      continue;
     }
     return base;
   }
 
-  if (allowLocal) return 'http://localhost:5173';
+  // Never default to localhost — production cancel must land on the live site.
   return PRODUCTION_WEB_APP_URL;
 }
 
@@ -116,17 +133,18 @@ function resolveWorldlineApiReturnUrl(logger) {
     if (logger && typeof logger.warn === 'function') {
       logger.warn('Ignoring local WORLDLINE_RETURN_URL in hosted/production deployment', {
         candidate: cleaned,
+        fallback: PRODUCTION_API_RETURN_URL,
       });
     }
-  }
-
-  if (allowLocal) {
-    return fromEnv ? fromEnv.replace(/\/$/, '') : null;
   }
 
   const apiBase = trimEnv(process.env.API_BASE_URL);
   if (apiBase && !isLocalOrPrivateHost(apiBase)) {
     return `${apiBase.replace(/\/$/, '')}/api/v1/customer/payments/worldline/return`;
+  }
+
+  if (allowLocal && fromEnv) {
+    return fromEnv.replace(/\/$/, '');
   }
 
   return PRODUCTION_API_RETURN_URL;

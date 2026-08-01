@@ -269,6 +269,68 @@ async function enrichProductsWithVariants(products, options = {}) {
   return enriched;
 }
 
+/**
+ * Customer list/home APIs only render `classification: 'Style'` cards.
+ * Home Page Content / collections often list Variant SKUs — map each id to the
+ * Style sibling for the same hierarchy + product line (preserving sheet order).
+ *
+ * @param {Array<string|import('mongoose').Types.ObjectId>} productIds
+ * @returns {Promise<string[]>} Style product ObjectId strings (deduped, ordered)
+ */
+async function mapProductIdsToStyleIds(productIds = []) {
+  if (!Array.isArray(productIds) || productIds.length === 0) return [];
+  const uniqueIds = [...new Set(productIds.map((id) => String(id)).filter(Boolean))];
+  const docs = await Product.find({ _id: { $in: uniqueIds } })
+    .select('_id classification hierarchyCode name')
+    .lean();
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+  const variantsNeedingStyle = [];
+  for (const id of uniqueIds) {
+    const d = byId.get(id);
+    if (!d) continue;
+    if (d.classification === 'Style') continue;
+    if (d.hierarchyCode && String(d.hierarchyCode).trim()) variantsNeedingStyle.push(d);
+  }
+
+  const styleByLine = new Map();
+  const codes = [
+    ...new Set(variantsNeedingStyle.map((d) => String(d.hierarchyCode).trim()).filter(Boolean)),
+  ];
+  if (codes.length > 0) {
+    const styles = await Product.find({
+      hierarchyCode: { $in: codes },
+      classification: 'Style',
+      isActive: true,
+      isSaleable: true,
+    })
+      .select('_id hierarchyCode name')
+      .lean();
+    for (const s of styles) {
+      const key = `${String(s.hierarchyCode).trim()}::${productBaseName(s.name)}`;
+      if (!styleByLine.has(key)) styleByLine.set(key, String(s._id));
+    }
+  }
+
+  const out = [];
+  const seen = new Set();
+  for (const id of productIds.map((x) => String(x))) {
+    const d = byId.get(id);
+    if (!d) continue;
+    let styleId = String(d._id);
+    if (d.classification !== 'Style') {
+      const key = `${String(d.hierarchyCode || '').trim()}::${productBaseName(d.name)}`;
+      const mapped = styleByLine.get(key);
+      if (!mapped) continue;
+      styleId = mapped;
+    }
+    if (seen.has(styleId)) continue;
+    seen.add(styleId);
+    out.push(styleId);
+  }
+  return out;
+}
+
 module.exports = {
   mapEmbeddedVariants,
   enrichProductsWithVariants,
@@ -279,4 +341,5 @@ module.exports = {
   productLineDedupeKey,
   filterHierarchySiblingsForProductLine,
   dedupeProductsByBaseName,
+  mapProductIdsToStyleIds,
 };

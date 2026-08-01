@@ -10,7 +10,7 @@
     "seed:permissions": "node src/admin/scripts/seedPermissions.js",
     "seed:super-admin": "node scripts/seed-super-admin.js",
     "seed:dashboard-users": "node scripts/seed-dashboard-users.js",
-    "seed:hhd": "node scripts/seed-hhd-orders.js",
+    "clear:hhd-pending": "node scripts/clear-hhd-pending-orders.js",
     "seed:customer-home": "node scripts/seedCustomerHome.js",
     "seed:customer-cms": "node src/customer-backend/scripts/seed-cms-defaults.js",
     "seed:customer-faq": "node src/customer-backend/scripts/seed-faq.js",
@@ -43,7 +43,8 @@
     "load-test": "node scripts/load-test.js",
     "security-audit": "npm audit && npm audit fix",
     "db:wipe": "node scripts/wipe-mongo-database.js",
-    "db:wipe:dry-run": "node scripts/wipe-mongo-database.js --dry-run"
+    "db:wipe:dry-run": "node scripts/wipe-mongo-database.js --dry-run",
+    "backfill:search-keywords": "node scripts/backfill-product-search-keywords.js"
   },
   "keywords": [
     "admin",

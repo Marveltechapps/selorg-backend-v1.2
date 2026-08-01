@@ -243,13 +243,25 @@ function run() {
           cleanedSupport.workingHours == null ||
           cleanedSupport.responseTime == null ||
           cleanedSupport.supportEmail == null ||
-          cleanedSupport.liveChatEnabled == null;
+          cleanedSupport.liveChatEnabled == null ||
+          !cleanedSupport.contactPhone ||
+          !cleanedSupport.supportPhone;
         if (needsSupportPatch || changed) {
           existing.support = {
             ...defaults,
             ...cleanedSupport,
-            contactPhone: cleanedSupport.contactPhone || '',
-            supportPhone: cleanedSupport.supportPhone || cleanedSupport.contactPhone || '',
+            contactPhone:
+              cleanedSupport.contactPhone ||
+              cleanedSupport.supportPhone ||
+              defaults.contactPhone ||
+              '',
+            supportPhone:
+              cleanedSupport.supportPhone ||
+              cleanedSupport.contactPhone ||
+              defaults.supportPhone ||
+              '',
+            whatsappNumber:
+              cleanedSupport.whatsappNumber || defaults.whatsappNumber || '',
             supportEmail:
               cleanedSupport.supportEmail ||
               cleanedSupport.contactEmail ||

@@ -263,6 +263,10 @@ const productSchema = new mongoose.Schema(
      */
     additionalImportedFields: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     tags: [{ type: String }],
+    /** Multilingual search keywords (English, Tamil, Tanglish, Hindi) — auto-generated on import. */
+    searchKeywords: [{ type: String }],
+    /** Space-separated normalized keywords for fast prefix/partial matching. */
+    searchKeywordsNormalized: { type: String, default: '' },
     isActive: { type: Boolean, default: true },
     order: { type: Number },
     deletedAt: { type: Date, default: null },
@@ -279,14 +283,21 @@ productSchema.index({ hierarchyCode: 1, classification: 1, isActive: 1, isSaleab
 productSchema.index(
   {
     name: 'text',
+    searchKeywords: 'text',
+    brand: 'text',
+    sku: 'text',
     'description.about': 'text',
     'description.nutrition': 'text',
     'description.healthBenefits': 'text',
     tag: 'text',
   },
   {
+    name: 'product_text_search',
     weights: {
       name: 10,
+      searchKeywords: 8,
+      brand: 6,
+      sku: 5,
       tag: 5,
       'description.about': 2,
       'description.nutrition': 1,
@@ -294,5 +305,15 @@ productSchema.index(
     },
   }
 );
+productSchema.index({ searchKeywordsNormalized: 1 });
+// Hot path: category/collection listing sorted by merchandising order
+productSchema.index({
+  classification: 1,
+  isActive: 1,
+  isSaleable: 1,
+  sortOrder: 1,
+  order: 1,
+});
+productSchema.index({ subcategoryId: 1, classification: 1, isActive: 1, isSaleable: 1 });
 const Product = mongoose.models.CustomerProduct || mongoose.model('CustomerProduct', productSchema, 'customer_products');
 module.exports = { Product };

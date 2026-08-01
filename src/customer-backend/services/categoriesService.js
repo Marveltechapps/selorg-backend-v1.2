@@ -40,6 +40,49 @@ async function collectHierarchyCodesForSubcategory(subCategoryId) {
   return [...set];
 }
 
+/**
+ * Batch hierarchy-code collection for many subcategories (2 queries total instead of 2N).
+ * @param {Array<string|import('mongoose').Types.ObjectId>} subCategoryIds
+ * @returns {Promise<Map<string, string[]>>}
+ */
+async function collectHierarchyCodesForSubcategories(subCategoryIds = []) {
+  const map = new Map();
+  const oids = [];
+  for (const id of subCategoryIds) {
+    if (id == null || id === '') continue;
+    if (!mongoose.Types.ObjectId.isValid(String(id))) continue;
+    oids.push(new mongoose.Types.ObjectId(String(id)));
+    map.set(String(id), []);
+  }
+  if (oids.length === 0) return map;
+
+  const [subs, leaves] = await Promise.all([
+    Category.find({ _id: { $in: oids }, isActive: true }).select('_id hierarchyCodes').lean(),
+    Category.find({ parentId: { $in: oids }, level: 3, isActive: true })
+      .select('parentId hierarchyCodes')
+      .lean(),
+  ]);
+
+  for (const sub of subs) {
+    const set = new Set(map.get(String(sub._id)) || []);
+    for (const c of sub.hierarchyCodes || []) {
+      const t = String(c || '').trim();
+      if (t) set.add(t);
+    }
+    map.set(String(sub._id), [...set]);
+  }
+  for (const leaf of leaves) {
+    const parentKey = String(leaf.parentId);
+    const set = new Set(map.get(parentKey) || []);
+    for (const c of leaf.hierarchyCodes || []) {
+      const t = String(c || '').trim();
+      if (t) set.add(t);
+    }
+    map.set(parentKey, [...set]);
+  }
+  return map;
+}
+
 /** Matches products whose stored taxonomy is missing (never set during import). */
 const MISSING_SUBCATEGORY = {
   $or: [{ subcategoryId: null }, { subcategoryId: { $exists: false } }],
@@ -168,10 +211,21 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
     if (!mongoose.Types.ObjectId.isValid(String(subCategoryId))) {
       productFilter = { ...productQueryBase, _id: { $in: [] } };
     } else {
-      const hierarchyCodes = await collectHierarchyCodesForSubcategory(subCategoryId);
+      const {
+        findSameNamedSubcategoryTwins,
+      } = require('../utils/categoryTaxonomyCleanup');
+      const selected =
+        subcategories.find((s) => String(s._id) === String(subCategoryId)) ||
+        (await Category.findById(subCategoryId).select('_id name slug').lean());
+      const twins = findSameNamedSubcategoryTwins(selected, subcategories);
+      const taxonomyOr = [];
+      for (const twin of twins.length ? twins : [{ _id: subCategoryId }]) {
+        const hierarchyCodes = await collectHierarchyCodesForSubcategory(twin._id);
+        taxonomyOr.push(...productTaxonomyOrForSubcategory(twin._id, hierarchyCodes));
+      }
       productFilter = {
         ...productQueryBase,
-        $or: productTaxonomyOrForSubcategory(subCategoryId, hierarchyCodes),
+        $or: taxonomyOr,
       };
     }
   } else {
@@ -185,7 +239,7 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
   // NOTE: no fallback to the whole category when a subcategory is empty —
   // that used to leak unrelated products into subcategory views.
   const rawProducts = await Product.find(productFilter)
-    .sort({ order: 1 })
+    .sort({ sortOrder: 1, order: 1, createdAt: -1 })
     .limit(DEFAULT_PRODUCT_LIMIT)
     .lean();
 
@@ -235,8 +289,12 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
         price: p.price,
         originalPrice: p.originalPrice,
         discount: p.discount,
+        size: p.size || p.quantity ||
+          (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : '') ||
+          '',
         quantity:
           p.quantity ||
+          p.size ||
           (Array.isArray(p.variants) && p.variants[0] ? p.variants[0].size : ''),
         variants: Array.isArray(p.variants) ? p.variants : [],
         stock: p.stock,
@@ -255,6 +313,7 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
 module.exports = {
   getCategoryPayload,
   collectHierarchyCodesForSubcategory,
+  collectHierarchyCodesForSubcategories,
   collectHierarchyCodesForMainCategory,
   productTaxonomyOrForSubcategory,
   productTaxonomyOrForMainCategory,

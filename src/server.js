@@ -156,7 +156,9 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 app.use((req, res, next) => {
-  console.log(`[GLOBAL LOG] ${req.method} ${req.path}`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[GLOBAL LOG] ${req.method} ${req.path}`);
+  }
   next();
 });
 
@@ -195,14 +197,32 @@ app.use(hpp());
 // Prevent XSS attacks
 app.use(xss());
 
-// Response compression
+// Response compression (skip tiny payloads)
 const compression = require('compression');
-app.use(compression());
+app.use(
+  compression({
+    threshold: 1024,
+    level: 6,
+  })
+);
 
 // Local uploads (picker/HHD docs / support attachments when not on S3)
 const uploadsDir = process.env.UPLOAD_PATH || path.join(rootDir, 'uploads');
 fs.mkdirSync(path.join(uploadsDir, 'support'), { recursive: true });
-app.use('/uploads', express.static(path.resolve(uploadsDir)));
+app.use(
+  '/uploads',
+  express.static(path.resolve(uploadsDir), {
+    maxAge: '7d',
+    etag: true,
+    lastModified: true,
+    setHeaders(res, filePath) {
+      // Images & docs under /uploads are versioned by filename/path from CMS uploads
+      if (/\.(?:png|jpe?g|gif|webp|avif|svg|ico|pdf)$/i.test(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+      }
+    },
+  })
+);
 
 // Body parser with size limits
 app.use(

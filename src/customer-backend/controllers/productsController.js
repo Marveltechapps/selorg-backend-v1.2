@@ -10,6 +10,10 @@ const {
 } = require('../utils/productVariantsPayload');
 const { normalizeDescriptionForClient } = require('../utils/productDescriptionNormalize');
 const { attachLiveSellableStock } = require('../utils/productStock');
+const {
+  runMultilingualProductSearch,
+  runMultilingualSearchSuggestions,
+} = require('../services/search/productSearchService');
 
 async function getProductDetail(req, res) {
   try {
@@ -164,48 +168,8 @@ async function getProductDetail(req, res) {
   }
 }
 
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function isTextIndexUnavailableError(err) {
-  const msg = String(err?.message || '').toLowerCase();
-  return err?.code === 27 || msg.includes('text index') || msg.includes('no text index');
-}
-
 async function runProductSearch(query, searchFilter, skip, limit) {
-  const baseFilter = { ...searchFilter };
-  try {
-    const textFilter = { ...baseFilter, $text: { $search: query } };
-    const [rawProducts, total] = await Promise.all([
-      Product.find(textFilter, { score: { $meta: 'textScore' } })
-        .sort({ score: { $meta: 'textScore' }, sortOrder: 1, order: 1 })
-        .skip(skip)
-        .limit(limit)
-        .select({ baseCost: 0 })
-        .lean(),
-      Product.countDocuments(textFilter),
-    ]);
-    return { rawProducts, total };
-  } catch (err) {
-    if (!isTextIndexUnavailableError(err)) throw err;
-  }
-
-  const regex = new RegExp(escapeRegex(query), 'i');
-  const regexFilter = {
-    ...baseFilter,
-    $or: [{ name: regex }, { tag: regex }, { 'description.about': regex }],
-  };
-  const [rawProducts, total] = await Promise.all([
-    Product.find(regexFilter)
-      .sort({ sortOrder: 1, order: 1, name: 1 })
-      .skip(skip)
-      .limit(limit)
-      .select({ baseCost: 0 })
-      .lean(),
-    Product.countDocuments(regexFilter),
-  ]);
-  return { rawProducts, total };
+  return runMultilingualProductSearch(Product, query, searchFilter, skip, limit);
 }
 
 async function searchProducts(req, res) {
@@ -256,17 +220,7 @@ async function searchSuggestions(req, res) {
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 1) return res.json({ success: true, data: [] });
-    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    const products = await Product.find({
-      name: regex,
-      isActive: true,
-      isSaleable: true,
-      classification: 'Style',
-    })
-      .select({ name: 1, imageUrl: 1, sku: 1, size: 1 })
-      .limit(5)
-      .maxTimeMS(100)
-      .lean();
+    const products = await runMultilingualSearchSuggestions(Product, q, 5);
     return res.json({ success: true, data: products });
   } catch (err) {
     if (String(err?.message || '').toLowerCase().includes('time limit')) {

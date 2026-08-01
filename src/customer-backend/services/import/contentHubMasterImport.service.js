@@ -4,10 +4,15 @@ const mongoose = require('mongoose');
 const { Category } = require('../../models/Category');
 const { Product } = require('../../models/Product');
 const { applySkuRowToProductDoc, rebuildSkuMediaFromRow } = require('./skuMasterProductHydration');
+const { applySearchKeywordsWithCategories } = require('../search/productSearchKeywords');
 const { applyBannerDetails } = require('./bannerDetailsImport.service');
 const { applyHomePageContent } = require('./homePageContentImport.service');
 const { applyCollectionsSheet } = require('./cmsPagesImport.service');
 const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassification');
+const {
+  deactivateLegacySeedProducts,
+  consolidateDuplicateSubcategories,
+} = require('../../utils/categoryTaxonomyCleanup');
 
 const PRODUCT_BULK_CHUNK = 250;
 
@@ -591,7 +596,14 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
               if (categoryByParentLevelName.has(cacheKey)) {
                 existing = categoryByParentLevelName.get(cacheKey);
               } else {
-                existing = await Category.findOne({ parentId, level, name }).session(txnSession).lean();
+                const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                existing = await Category.findOne({
+                  parentId,
+                  level,
+                  name: { $regex: `^${escaped}$`, $options: 'i' },
+                })
+                  .session(txnSession)
+                  .lean();
                 if (existing) cacheCategory(existing);
               }
             }
@@ -839,6 +851,21 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
                 if (!doc.classification || (doc.classification !== 'Style' && doc.classification !== 'Variant')) {
                   doc.classification = 'Style';
                 }
+
+                // SKU Master “Priority” → sortOrder; category listings sort by `order`.
+                const sortOrderNum = Number(doc.sortOrder);
+                if (Number.isFinite(sortOrderNum)) {
+                  doc.sortOrder = sortOrderNum;
+                  const orderNum = Number(doc.order);
+                  if (!Number.isFinite(orderNum)) doc.order = sortOrderNum;
+                } else {
+                  const orderNum = Number(doc.order);
+                  if (Number.isFinite(orderNum)) {
+                    doc.order = orderNum;
+                    doc.sortOrder = orderNum;
+                  }
+                }
+
                 doc.price = doc.price == null || Number.isNaN(Number(doc.price)) ? 0 : Number(doc.price);
                 doc.mrp = doc.mrp == null || Number.isNaN(Number(doc.mrp)) ? 0 : Number(doc.mrp);
                 doc.baseCost = doc.baseCost == null || Number.isNaN(Number(doc.baseCost)) ? 0 : Number(doc.baseCost);
@@ -947,6 +974,7 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
 
               const bulkOps = [];
               let processed = 0;
+              const categoryNameCache = new Map();
 
               for (const prepared of preparedRows) {
                 const { rowNum: r, sku, name, doc } = prepared;
@@ -1075,6 +1103,10 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
                   doc.categoryId = matched.categoryId;
                   doc.subcategoryId = matched.subcategoryId;
                 }
+
+                // Regenerate multilingual search keywords with resolved category names
+                // eslint-disable-next-line no-await-in-loop
+                await applySearchKeywordsWithCategories(doc, Category, { session: txnSession, categoryNameCache });
 
                 let productId = existing?._id || null;
                 if (existing) {
@@ -1575,6 +1607,35 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
         await applyHomePageContent(wb, { session: txnSession, counts, warnings, errors });
       } catch (e) {
         errors.push({ sheet: 'Home Page Content', message: `Home layout regeneration failed: ${e.message}` });
+      }
+
+      // -------------------------
+      // 7) Catalog hygiene — drop seed SKUs + collapse re-import L2 duplicates
+      // -------------------------
+      await timer.begin('taxonomy_cleanup', 97, 'Consolidating categories & seed SKUs');
+      try {
+        const seedDeactivated = await deactivateLegacySeedProducts({ session: txnSession });
+        if (seedDeactivated > 0) {
+          counts.products = counts.products || {};
+          counts.products.seedDeactivated = seedDeactivated;
+          warnings.push({
+            sheet: 'SKU Master',
+            message: `Deactivated ${seedDeactivated} legacy seed/demo SKU(s) (PROD-*)`,
+          });
+        }
+        const consolidated = await consolidateDuplicateSubcategories({
+          session: txnSession,
+          warnings,
+        });
+        counts.categories = counts.categories || {};
+        counts.categories.duplicateGroups = consolidated.groups;
+        counts.categories.duplicatesDeactivated = consolidated.deactivated;
+        counts.categories.productsRemapped = consolidated.remapped;
+      } catch (e) {
+        warnings.push({
+          sheet: 'Categories',
+          message: `Taxonomy cleanup failed: ${e.message}`,
+        });
       }
   };
 

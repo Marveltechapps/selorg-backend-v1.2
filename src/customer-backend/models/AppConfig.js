@@ -109,12 +109,12 @@ const appConfigSchema = new mongoose.Schema(
     supportCategories: [supportCategorySchema],
 
     support: {
-      contactPhone: { type: String, default: '' },
+      contactPhone: { type: String, default: '+919444183378' },
       contactEmail: { type: String, default: 'support@selorg.com' },
-      /** Aliases exposed to mobile/web apps — leave blank until CMS sets real values */
-      supportPhone: { type: String, default: '' },
+      /** Aliases exposed to mobile/web apps */
+      supportPhone: { type: String, default: '+919444183378' },
       supportEmail: { type: String, default: 'support@selorg.com' },
-      whatsappNumber: { type: String, default: '' },
+      whatsappNumber: { type: String, default: '+919444183378' },
       workingHours: { type: String, default: 'Mon–Sat, 9:00 AM – 8:00 PM IST' },
       responseTime: { type: String, default: 'Typically within 2–4 hours on business days' },
       liveChatEnabled: { type: Boolean, default: true },
@@ -271,11 +271,11 @@ const DEFAULT_APP_CONFIG = {
     estimatedEndTime: null,
   },
   support: {
-    contactPhone: '',
+    contactPhone: '+919444183378',
     contactEmail: 'support@selorg.com',
-    supportPhone: '',
+    supportPhone: '+919444183378',
     supportEmail: 'support@selorg.com',
-    whatsappNumber: '',
+    whatsappNumber: '+919444183378',
     workingHours: 'Mon–Sat, 9:00 AM – 8:00 PM IST',
     responseTime: 'Typically within 2–4 hours on business days',
     liveChatEnabled: true,

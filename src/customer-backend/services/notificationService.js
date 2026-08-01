@@ -13,7 +13,11 @@ const NOTIFICATION_TYPES = {
   WALLET_ORDER_PLACED: { title: 'Order Placed', template: 'Order placed successfully.' },
   // Payment outcomes — sent only after the gateway result is verified server-side.
   PAYMENT_FAILED: { title: 'Payment Failed', template: 'Payment failed. Your order #{orderNumber} was not confirmed.' },
-  PAYMENT_CANCELLED: { title: 'Payment Cancelled', template: 'Payment was cancelled. Your order #{orderNumber} was not confirmed.' },
+  PAYMENT_CANCELLED: {
+    title: 'Payment Cancelled',
+    template:
+      'Your payment was cancelled. No amount has been deducted. You can try again anytime.',
+  },
   PAYMENT_TIMEOUT: { title: 'Payment Session Expired', template: 'Payment session expired for order #{orderNumber}. Please retry payment.' },
   PAYMENT_PENDING: { title: 'Payment Pending', template: 'Your payment for order #{orderNumber} is being verified.' },
   PAYMENT_RETRY_AVAILABLE: { title: 'Retry Payment?', template: 'Your payment for order #{orderNumber} can be retried now.' },
@@ -132,10 +136,9 @@ async function sendPushNotification(customerId, type, data = {}, options = {}) {
     const { CustomerUser } = require('../models/CustomerUser');
     const { isPushEnabled } = require('./notificationPreferencesService');
     const user = await CustomerUser.findById(customerId).select('notificationPreferences').lean();
-    if (!isPushEnabled(user?.notificationPreferences)) {
-      logger.info('Push skipped by user preferences', { customerId, type });
-      return { success: true, skipped: true, reason: 'preferences' };
-    }
+    // Push preference only gates Expo delivery — the in-app Notification Center
+    // must always receive payment/order outcomes (especially Payment Cancelled).
+    const pushAllowed = isPushEnabled(user?.notificationPreferences);
 
     const title = config.title;
     const body = fillTemplate(config.template, data);
@@ -193,7 +196,16 @@ async function sendPushNotification(customerId, type, data = {}, options = {}) {
       body,
       status: 'sent',
       sentAt: new Date(),
+      ...(pushAllowed ? {} : { failureReason: 'push_preferences_disabled' }),
     }).catch(err => logger.warn('NotificationHistory save failed', { err: err.message }));
+
+    if (!pushAllowed) {
+      logger.info('Expo push skipped by user preferences (in-app notification saved)', {
+        customerId,
+        type,
+      });
+      return { success: true, title, body, pushSkipped: true, reason: 'preferences' };
+    }
 
     // Deliver real push via Expo
     const tokenDocs = await PushToken.find({ userId: customerId, active: true }).lean();

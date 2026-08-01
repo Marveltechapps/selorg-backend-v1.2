@@ -26,6 +26,7 @@ const { Category } = require('../../models/Category');
 const { Banner } = require('../../models/Banner');
 const { Product } = require('../../models/Product');
 const { Collection } = require('../../models/Collection');
+const { mapProductIdsToStyleIds } = require('../../utils/productVariantsPayload');
 const {
   slugify,
   collectionMergeKey,
@@ -79,7 +80,11 @@ async function applyHeroSectionMedia(spec, bannerIds, session) {
     if (spec?.kind === 'banner_main') {
       updates.slot = 'hero';
     }
-    if (heroMediaUrl && !isVideo && !String(existing.imageUrl || existing.bannerImageUrl || '').trim()) {
+    if (heroMediaUrl && isVideo) {
+      // Persist hero video on the banner doc so APIs that return banners (not only HomeConfig) work.
+      updates.videoUrl = heroMediaUrl;
+      updates.isActive = true;
+    } else if (heroMediaUrl && !isVideo && !String(existing.imageUrl || existing.bannerImageUrl || '').trim()) {
       updates.imageUrl = heroMediaUrl;
       updates.bannerImageUrl = heroMediaUrl;
       updates.isActive = true;
@@ -537,12 +542,51 @@ async function resolveCategoryIds(names, txnSession) {
 
 async function resolveProductIdsBySku(skuList, txnSession) {
   if (!Array.isArray(skuList) || skuList.length === 0) return [];
-  const rows = await (Product.find({ sku: { $in: skuList }, isActive: true })
-    .select('_id sku')
+  const idxBySku = new Map(skuList.map((s, i) => [String(s), i]));
+  const rows = await Product.find({ sku: { $in: skuList }, isActive: true })
+    .select('_id sku sortOrder order')
     .session(txnSession || null)
-    .lean());
-  const bySku = new Map(rows.map((p) => [String(p.sku), String(p._id)]));
-  return skuList.map((s) => bySku.get(s)).filter(Boolean);
+    .lean();
+
+  const bySku = new Map(
+    rows.map((p) => [
+      String(p.sku),
+      {
+        id: String(p._id),
+        sortOrder: p.sortOrder,
+        order: p.order,
+      },
+    ])
+  );
+
+  // Home rails “Collections” store `productIds` in order. Prefer the SKU Master
+  // Priority field (via Product.sortOrder) for automatic ordering.
+  const productsInSheetOrder = skuList
+    .map((s) => {
+      const info = bySku.get(String(s));
+      if (!info) return null;
+      return { sku: String(s), ...info };
+    })
+    .filter(Boolean);
+
+  const toRank = (v) => (Number.isFinite(Number(v)) ? Number(v) : Number.POSITIVE_INFINITY);
+
+  productsInSheetOrder.sort((a, b) => {
+    const aSort = toRank(a.sortOrder);
+    const bSort = toRank(b.sortOrder);
+    if (aSort !== bSort) return aSort - bSort;
+
+    const aOrder = toRank(a.order);
+    const bOrder = toRank(b.order);
+    if (aOrder !== bOrder) return aOrder - bOrder;
+
+    // Stable tie-breaker: original SKU list order in the sheet row.
+    return (idxBySku.get(a.sku) ?? 0) - (idxBySku.get(b.sku) ?? 0);
+  });
+
+  // Sheet SKUs are often Variants; store Style card ids so customer APIs can resolve them.
+  const orderedIds = productsInSheetOrder.map((p) => p.id).filter(Boolean);
+  return mapProductIdsToStyleIds(orderedIds);
 }
 
 async function upsertCollection({ label, productIds, txnSession, slug: slugOverride }) {

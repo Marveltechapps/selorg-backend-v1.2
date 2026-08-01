@@ -278,17 +278,31 @@ function buildHomePageFromLegacy(legacy) {
     }
 
     let data = {};
-    if (sk === 'categories' || typeByKey[sk] === 'super_category') {
+    if (blockType === 'categoryGrid' || sk === 'categories' || typeByKey[sk] === 'super_category') {
       data = { categories: categoryByKey[sk] || legacy.categories || [] };
-    } else if (sk === 'hero_banner') data = { banners: legacy.heroBanners || [] };
-    else if (sk === 'mid_banner') data = { banners: legacy.midBanners || [] };
-    else if (/^banner_main_/.test(sk) || typeByKey[sk] === 'banner_main') data = { banners: bannersByKey[sk] || [] };
-    else if (/^banner_sub_/.test(sk) || typeByKey[sk] === 'banner_sub') data = { banners: bannersByKey[sk] || [] };
-    else if (['deals', 'deals_2', 'wellbeing', 'new_deals', 'fresh_juice'].includes(sk) || typeByKey[sk] === 'collections')
+    } else if (blockType === 'heroBanner' || blockType === 'bannerCarousel') {
+      if (sk === 'hero_banner') data = { banners: legacy.heroBanners || [] };
+      else if (sk === 'mid_banner') data = { banners: legacy.midBanners || [] };
+      else data = { banners: bannersByKey[sk] || [] };
+    } else if (blockType === 'productCarousel' || blockType === 'collectionCarousel') {
       data = { products: section?.products || [] };
-    else if (sk === 'lifestyle' || typeByKey[sk] === 'lifestyle') data = { items: legacy.lifestyle || [] };
-    else if (sk === 'greens_banner' || sk === 'section_image') data = { promoBlocks: legacy.promoBlocks || {} };
-    else if (sk === 'organic_tagline' || taglineByKey[sk] !== undefined) data = {};
+    } else if (blockType === 'lifestyleGrid' || sk === 'lifestyle' || typeByKey[sk] === 'lifestyle') {
+      data = { items: legacy.lifestyle || [] };
+    } else if (blockType === 'promoImage' || sk === 'greens_banner' || sk === 'section_image' || sk === 'fullwidth_image') {
+      const all = legacy.promoBlocks || {};
+      // Prefer the promo keyed to this section; fall back to the full map for legacy single-slot pages.
+      data = {
+        promoBlocks: all[sk]
+          ? { [sk]: all[sk] }
+          : all,
+      };
+    } else if (blockType === 'organicTagline' || sk === 'organic_tagline' || taglineByKey[sk] !== undefined) {
+      data = {};
+    } else if (section?.products) {
+      // Unknown key that still has products — surface as a product rail rather than empty promo.
+      blockType = 'collectionCarousel';
+      data = { products: section.products };
+    }
 
     blocks.push({
       id: `legacy-${sk}-${order}`,

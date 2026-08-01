@@ -1,3 +1,8 @@
+/**
+ * Darkstore maintenance script.
+ * Demo/seed order insertion is permanently disabled — real orders only.
+ * This script only ensures store coordinates and can clean leftover demo collections.
+ */
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 
@@ -7,239 +12,46 @@ const Order = require('./darkstore/models/Order');
 const Staff = require('./darkstore/models/Staff');
 const StockAlert = require('./darkstore/models/StockAlert');
 const RTOAlert = require('./darkstore/models/RTOAlert');
-
 const Store = require('./merch/models/Store');
 
-/** Only Adyar darkstore - all orders route here */
+/** Only Adyar darkstore */
 const STORES = [
   { id: 'DS-Adyar-01', label: 'Adyar', lat: 13.0067, lng: 80.2573, radius: 10 },
 ];
-
-/** Predefined customer: 7418268091 @ Thiruvanmiyur (for testing) */
-const THIRUVANMIYUR_CUSTOMER = {
-  name: 'Thiruvanmiyur Customer',
-  phone: '+917418268091',
-  delivery_address: 'Ganesh Apartment, LB Road, Thiruvanmiyur, Chennai, Tamil Nadu 600041',
-};
-
-const CUSTOMER_NAMES = [
-  'Rahul Sharma', 'Priya Patel', 'Amit Kumar', 'Sneha Gupta', 'Vikram Singh',
-  'Ananya Das', 'Arjun Reddy', 'Meera Nair', 'Karan Malhotra', 'Divya Joshi',
-  'Rohan Verma', 'Pooja Mehta', 'Saurabh Yadav', 'Neha Agarwal', 'Deepak Pandey',
-  'Aisha Khan', 'Rajesh Iyer', 'Kavya Rao', 'Manish Dubey', 'Swati Mishra',
-];
-
-const STAFF_NAMES = {
-  'DS-Adyar-01': {
-    Picker: ['Alex Rivera', 'Jordan Chen', 'Sam Williams', 'Casey Jones'],
-    Packer: ['Morgan Lee', 'Riley Johnson', 'Dakota Kim'],
-    Loader: ['Quinn Adams'],
-    Rider: ['Blake Thompson', 'Avery Martinez'],
-    Supervisor: ['Taylor Brooks'],
-  },
-};
-
-const STOCK_ITEMS = [
-  { name: 'Organic Bananas', sku: 'BAN001' },
-  { name: 'Whole Milk 1L', sku: 'MLK001' },
-  { name: 'Brown Eggs (12)', sku: 'EGG001' },
-  { name: 'Sourdough Bread', sku: 'BRD001' },
-  { name: 'Greek Yogurt 500g', sku: 'YGT001' },
-  { name: 'Chicken Breast 1kg', sku: 'CHK001' },
-  { name: 'Basmati Rice 5kg', sku: 'RIC001' },
-  { name: 'Olive Oil 500ml', sku: 'OIL001' },
-  { name: 'Fresh Tomatoes 1kg', sku: 'TOM001' },
-  { name: 'Almond Butter 250g', sku: 'ALM001' },
-  { name: 'Orange Juice 1L', sku: 'OJC001' },
-  { name: 'Avocados (3 pack)', sku: 'AVO001' },
-];
-
-const ORDER_CONFIGS = {
-  'DS-Adyar-01': { newOrders: 8, processing: 5, ready: 3, baseId: 1000 },
-};
-
-const STOCK_ALERT_CONFIGS = {
-  'DS-Adyar-01': [
-    { idx: 0, current: 3, threshold: 20, severity: 'critical' },
-    { idx: 1, current: 8, threshold: 15, severity: 'warning' },
-    { idx: 2, current: 12, threshold: 25, severity: 'low' },
-  ],
-};
-
-const RTO_CONFIGS = {
-  'DS-Adyar-01': [
-    { issueType: 'customer_unreachable', severity: 'high', desc: 'Customer not answering phone after 3 attempts' },
-    { issueType: 'address_issue', severity: 'medium', desc: 'Incomplete delivery address, building not found' },
-  ],
-};
-
-function randomFrom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function generateOrders(storeId) {
-  const config = ORDER_CONFIGS[storeId];
-  const orders = [];
-  let ordNum = config.baseId;
-
-  const makeOrder = (status, slaStatus) => {
-    ordNum++;
-    const now = new Date();
-    const createdMinutesAgo = Math.floor(Math.random() * 30) + 1;
-    const createdAt = new Date(now.getTime() - createdMinutesAgo * 60000);
-    const deadline = new Date(createdAt.getTime() + 15 * 60000);
-    const types = ['Normal', 'Priority', 'Express', 'Premium'];
-    const typeWeights = [0.5, 0.25, 0.15, 0.1];
-    const r = Math.random();
-    let cumulative = 0;
-    let orderType = 'Normal';
-    for (let i = 0; i < types.length; i++) {
-      cumulative += typeWeights[i];
-      if (r <= cumulative) { orderType = types[i]; break; }
-    }
-    const minutesLeft = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 60000));
-    const secondsLeft = Math.max(0, Math.floor(((deadline.getTime() - now.getTime()) % 60000) / 1000));
-    return {
-      order_id: `ORD-${ordNum}`,
-      id: `#ORD-${ordNum}`,
-      store_id: storeId,
-      order_type: orderType,
-      status,
-      item_count: Math.floor(Math.random() * 8) + 1,
-      sla_timer: `${String(minutesLeft).padStart(2, '0')}:${String(secondsLeft).padStart(2, '0')}`,
-      sla_status: slaStatus,
-      sla_deadline: deadline,
-      customer_name: randomFrom(CUSTOMER_NAMES),
-      customer_phone: `+91${Math.floor(7000000000 + Math.random() * 3000000000)}`,
-      rto_risk: Math.random() < 0.15,
-      createdAt: createdAt,
-      updatedAt: now,
-    };
-  };
-
-  // First new order: predefined 7418268091 @ Thiruvanmiyur (for testing)
-  ordNum++;
-  const now = new Date();
-  const createdAgo = Math.floor(Math.random() * 10) + 1;
-  const createdAt = new Date(now.getTime() - createdAgo * 60000);
-  const deadline = new Date(createdAt.getTime() + 15 * 60000);
-  const minLeft = Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 60000));
-  const secLeft = Math.max(0, Math.floor(((deadline.getTime() - now.getTime()) % 60000) / 1000));
-  orders.push({
-    order_id: `ORD-${ordNum}`,
-    id: `#ORD-${ordNum}`,
-    store_id: storeId,
-    order_type: 'Normal',
-    status: 'new',
-    item_count: 1,
-    sla_timer: `${String(minLeft).padStart(2, '0')}:${String(secLeft).padStart(2, '0')}`,
-    sla_status: 'safe',
-    sla_deadline: deadline,
-    customer_name: THIRUVANMIYUR_CUSTOMER.name,
-    customer_phone: THIRUVANMIYUR_CUSTOMER.phone,
-    delivery_address: THIRUVANMIYUR_CUSTOMER.delivery_address,
-    rto_risk: false,
-    createdAt,
-    updatedAt: now,
-  });
-  for (let i = 0; i < config.newOrders - 1; i++) {
-    const sla = i < 1 ? 'critical' : i < 3 ? 'warning' : 'safe';
-    orders.push(makeOrder('new', sla));
-  }
-  for (let i = 0; i < config.processing; i++) {
-    const sla = i < 1 ? 'warning' : 'safe';
-    orders.push(makeOrder('processing', sla));
-  }
-  for (let i = 0; i < config.ready; i++) {
-    orders.push(makeOrder('ready', 'safe'));
-  }
-  return orders;
-}
-
-function generateStaff(storeId) {
-  const names = STAFF_NAMES[storeId];
-  const staff = [];
-  let idx = 100;
-
-  for (const [role, roleNames] of Object.entries(names)) {
-    for (const name of roleNames) {
-      idx++;
-      const isActive = Math.random() < 0.75;
-      const statuses = isActive ? ['Active', 'Active', 'Active', 'Break'] : ['Offline', 'Meeting'];
-      const zones = ['Zone 1 (Ambient)', 'Zone 2 (Chilled)', 'Zone 3 (Frozen)', 'Zone 4 (Fresh)'];
-      const now = new Date();
-      const shiftStart = new Date(now);
-      shiftStart.setHours(6, 0, 0, 0);
-      const shiftEnd = new Date(now);
-      shiftEnd.setHours(14, 0, 0, 0);
-      staff.push({
-        staff_id: `STF-${idx}`,
-        store_id: storeId,
-        name,
-        role,
-        zone: randomFrom(zones),
-        status: randomFrom(statuses),
-        current_shift: '6:00 AM - 2:00 PM',
-        shift_start: shiftStart,
-        shift_end: shiftEnd,
-        is_active: isActive,
-        current_load: isActive ? Math.floor(Math.random() * 80) + 10 : 0,
-      });
-    }
-  }
-  return staff;
-}
-
-function generateStockAlerts(storeId) {
-  const configs = STOCK_ALERT_CONFIGS[storeId];
-  return configs.map(c => ({
-    store_id: storeId,
-    item_name: STOCK_ITEMS[c.idx].name,
-    sku: STOCK_ITEMS[c.idx].sku,
-    current_count: c.current,
-    threshold: c.threshold,
-    severity: c.severity,
-    is_restocked: false,
-  }));
-}
-
-function generateRTOAlerts(storeId) {
-  const configs = RTO_CONFIGS[storeId];
-  const orderConfig = ORDER_CONFIGS[storeId];
-  return configs.map((c, i) => ({
-    order_id: `ORD-${orderConfig.baseId + i + 1}`,
-    store_id: storeId,
-    issue_type: c.issueType,
-    description: c.desc,
-    severity: c.severity,
-    customer_reachable: c.issueType !== 'customer_unreachable',
-    is_resolved: false,
-  }));
-}
 
 async function main() {
   const uri = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/selorg-admin-ops';
   await mongoose.connect(uri);
   console.log('Connected to MongoDB');
 
-  const storeIds = STORES.map(s => s.id);
+  const storeIds = STORES.map((s) => s.id);
 
   console.log('\n--- Ensuring Store documents have coordinates ---');
   for (const s of STORES) {
     await Store.updateOne(
       { code: s.id },
-      { $set: { latitude: s.lat, longitude: s.lng, deliveryRadius: s.radius, type: 'dark_store', status: 'active' } },
+      {
+        $set: {
+          latitude: s.lat,
+          longitude: s.lng,
+          deliveryRadius: s.radius,
+          type: 'dark_store',
+          status: 'active',
+        },
+      },
       { upsert: false }
     );
     console.log(`  ${s.id}: lat=${s.lat}, lng=${s.lng}, radius=${s.radius}km`);
   }
 
-  console.log('\n--- Cleaning existing darkstore data for target stores ---');
+  console.log('\n--- Cleaning existing darkstore demo data for target stores ---');
   await Order.deleteMany({ store_id: { $in: storeIds } });
   await Staff.deleteMany({ store_id: { $in: storeIds } });
   await StockAlert.deleteMany({ store_id: { $in: storeIds } });
   await RTOAlert.deleteMany({ store_id: { $in: storeIds } });
-  console.log('Cleaned existing data. Demo seeding for orders/staff/alerts has been disabled to enforce real data only.');
+  console.log(
+    'Cleaned existing data. Demo seeding for orders/staff/alerts remains disabled (real data only).'
+  );
 
   console.log('\n--- Verification ---');
   for (const store of STORES) {
@@ -254,7 +66,7 @@ async function main() {
   await mongoose.disconnect();
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Seed failed:', err);
   process.exit(1);
 });

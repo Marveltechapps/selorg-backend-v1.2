@@ -15,6 +15,8 @@ const { ProductAttribute } = require('../../models/ProductAttribute');
 const { uploadProductImage: uploadProductImageToS3 } = require('../../../utils/s3Upload');
 const { getBootstrapPreviewForAdmin } = require('../../services/bootstrapService');
 const cache = require('../../../utils/cache');
+const { buildAdminSearchFilter } = require('../../services/search/productSearchService');
+const { applySearchKeywordsToDoc } = require('../../services/search/productSearchKeywords');
 
 /** Normalize description to embedded object format. Accepts string or object. */
 function normalizeProductDescription(desc) {
@@ -717,16 +719,8 @@ exports.listProducts = async (req, res) => {
   const andParts = [];
 
   if (search && String(search).trim()) {
-    const s = String(search).trim();
-    const regex = new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    andParts.push({
-      $or: [
-        { name: regex },
-        { sku: regex },
-        { brand: regex },
-        { description: regex },
-      ],
-    });
+    const searchFilter = buildAdminSearchFilter(search);
+    if (searchFilter) andParts.push(searchFilter);
   }
 
   if (categoryId) {
@@ -900,6 +894,18 @@ exports.createProduct = async (req, res) => {
   const normalizedDesc = normalizeProductDescription(body.description);
   if (normalizedDesc !== undefined) body.description = normalizedDesc;
 
+  let categoryName = '';
+  let subcategoryName = '';
+  if (body.categoryId) {
+    const category = await Category.findById(body.categoryId).select('name').lean();
+    categoryName = category?.name || '';
+  }
+  if (body.subcategoryId) {
+    const subcategory = await Category.findById(body.subcategoryId).select('name').lean();
+    subcategoryName = subcategory?.name || '';
+  }
+  applySearchKeywordsToDoc(body, { categoryName, subcategoryName });
+
   const created = await Product.create(body);
   const populated = await Product.findById(created._id)
     .populate('categoryId', 'name slug')
@@ -989,12 +995,34 @@ exports.updateProduct = async (req, res) => {
   if (body.sku !== undefined) {
     const skuToCheck = String(body.sku || '').trim();
     if (skuToCheck) {
-      const existing = await Product.findOne({ sku: skuToCheck, _id: { $ne: req.params.id } }).lean();
-      if (existing) {
+      const dup = await Product.findOne({ sku: skuToCheck, _id: { $ne: req.params.id } }).lean();
+      if (dup) {
         return res.status(409).json({ success: false, message: `Product with SKU "${skuToCheck}" already exists.` });
       }
     }
   }
+
+  const existing = await Product.findById(req.params.id).lean();
+  if (!existing) {
+    return res.status(404).json({ success: false, message: 'Product not found' });
+  }
+
+  const merged = { ...existing, ...body };
+  let categoryName = '';
+  let subcategoryName = '';
+  const catId = merged.categoryId;
+  const subId = merged.subcategoryId;
+  if (catId) {
+    const category = await Category.findById(catId).select('name').lean();
+    categoryName = category?.name || '';
+  }
+  if (subId) {
+    const subcategory = await Category.findById(subId).select('name').lean();
+    subcategoryName = subcategory?.name || '';
+  }
+  applySearchKeywordsToDoc(merged, { categoryName, subcategoryName });
+  body.searchKeywords = merged.searchKeywords;
+  body.searchKeywordsNormalized = merged.searchKeywordsNormalized;
 
   const updated = await Product.findByIdAndUpdate(req.params.id, body, { new: true })
     .populate('categoryId', 'name slug')

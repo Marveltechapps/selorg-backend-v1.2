@@ -22,6 +22,7 @@ async function invalidateCustomerCachesSafely(cachePatterns = ['cache:*']) {
     for (const pattern of cachePatterns) {
       await cacheService.delPattern(pattern);
     }
+    await cacheService.del('home:payload:shared:v1');
   } catch (err) {
     console.error('cache invalidation after upload failed', err);
   }
@@ -658,6 +659,35 @@ module.exports = {
         warnings: [],
         errors: [{ message: err.message }],
       });
+    }
+  },
+
+  /**
+   * One-shot hygiene after Master Sheet uploads: deactivate PROD-* seed SKUs and
+   * collapse duplicate L2 subcategories created by re-imports.
+   */
+  consolidateCatalogTaxonomy: async (req, res) => {
+    try {
+      const {
+        deactivateLegacySeedProducts,
+        consolidateDuplicateSubcategories,
+      } = require('../../utils/categoryTaxonomyCleanup');
+      const warnings = [];
+      const seedDeactivated = await deactivateLegacySeedProducts();
+      const consolidated = await consolidateDuplicateSubcategories({ warnings });
+      await invalidateCustomerCachesSafely();
+      return res.status(200).json({
+        success: true,
+        data: {
+          seedDeactivated,
+          ...consolidated,
+          warnings: warnings.slice(0, 50),
+          warningCount: warnings.length,
+        },
+      });
+    } catch (err) {
+      console.error('consolidateCatalogTaxonomy error:', err);
+      return res.status(500).json({ success: false, message: err.message || 'Internal server error' });
     }
   },
 };

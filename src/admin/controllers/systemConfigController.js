@@ -26,7 +26,7 @@ const DEFAULTS = {
     primaryColor: '#e11d48',
     secondaryColor: '#0ea5e9',
     contactEmail: 'support@quickcommerce.com',
-    supportPhone: '+91-80-4567-8900',
+    supportPhone: '+919444183378',
   },
   delivery: {
     minOrderValue: 99,

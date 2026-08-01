@@ -29,6 +29,7 @@ router.post(
 );
 router.get('/import-jobs/content-hub/:jobId', catalogRead, cmsAdminController.getContentHubImportJob);
 router.get('/import-history/content-hub', catalogRead, cmsAdminController.listContentHubImportRuns);
+router.post('/consolidate-catalog-taxonomy', catalogWrite, cmsAdminController.consolidateCatalogTaxonomy);
 
 router.get('/pages', catalogRead, cmsAdminController.listPages);
 router.get('/pages/:id', catalogRead, cmsAdminController.getPage);

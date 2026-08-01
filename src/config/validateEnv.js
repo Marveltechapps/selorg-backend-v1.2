@@ -95,14 +95,42 @@ const validateEnvironment = () => {
     for (const key of requiredWorldline) {
       if (!process.env[key]) errors.push(`${key} is required when WORLDLINE_ENABLED=true`);
     }
-    if (
-      !process.env.WORLDLINE_WEB_APP_URL &&
-      !process.env.CUSTOMER_WEB_URL &&
-      !process.env.FRONTEND_URL
-    ) {
+
+    const {
+      isLocalOrPrivateHost,
+      resolveWebAppBaseUrl,
+      resolveWorldlineApiReturnUrl,
+    } = require('../customer-backend/utils/paymentRedirectUrls');
+
+    const webAppUrl =
+      process.env.WORLDLINE_WEB_APP_URL ||
+      process.env.CUSTOMER_WEB_URL ||
+      process.env.FRONTEND_URL;
+    if (!webAppUrl) {
       warnings.push(
-        'WORLDLINE_WEB_APP_URL (or FRONTEND_URL) not set — gateway return will redirect to http://localhost:5173/payment/result'
+        'WORLDLINE_WEB_APP_URL (or FRONTEND_URL) not set — gateway return will use the production web fallback in production'
       );
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      const returnUrl = process.env.WORLDLINE_RETURN_URL || '';
+      if (isLocalOrPrivateHost(returnUrl)) {
+        errors.push(
+          'WORLDLINE_RETURN_URL must not be localhost/private in production (got a local URL). ' +
+            'Set it to https://api.selorg.com/api/v1/customer/payments/worldline/return'
+        );
+      }
+      if (webAppUrl && isLocalOrPrivateHost(webAppUrl)) {
+        errors.push(
+          'WORLDLINE_WEB_APP_URL / FRONTEND_URL must not be localhost/private in production. ' +
+            'Set WORLDLINE_WEB_APP_URL=https://www.selorg.com'
+        );
+      }
+      // Log the effective URLs so misconfig is obvious at boot.
+      logger.info('Worldline production redirect URLs', {
+        webAppBase: resolveWebAppBaseUrl(logger),
+        apiReturnUrl: resolveWorldlineApiReturnUrl(logger),
+      });
     }
   } else if (process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE || process.env.WORLDLINE_SALT) {
     warnings.push('WORLDLINE_* variables are set but WORLDLINE_ENABLED is false');

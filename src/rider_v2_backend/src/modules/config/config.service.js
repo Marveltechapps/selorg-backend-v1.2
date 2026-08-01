@@ -14,7 +14,7 @@ function getAppConfig() {
     maxWithdrawalsPerDay: parseInt(process.env.RIDER_MAX_WITHDRAWALS_PER_DAY || "2", 10),
     orderListLimit: parseInt(process.env.RIDER_ORDER_LIST_LIMIT || "100", 10),
     payoutListLimit: parseInt(process.env.RIDER_PAYOUT_LIST_LIMIT || "20", 10),
-    supportPhone: process.env.RIDER_SUPPORT_PHONE || "1800-123-4567",
+    supportPhone: process.env.RIDER_SUPPORT_PHONE || "+919444183378",
     supportEmail: process.env.RIDER_SUPPORT_EMAIL || "support@selorg.com",
     privacyEmail: process.env.RIDER_PRIVACY_EMAIL || "privacy@selorg.com",
     legalEmail: process.env.RIDER_LEGAL_EMAIL || "legal@selorg.com",

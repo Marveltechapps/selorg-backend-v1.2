@@ -67,6 +67,11 @@ module.exports = {
       categories: parseInt(process.env.CACHE_TTL_CUSTOMER_CATEGORIES) || 120,
       products: parseInt(process.env.CACHE_TTL_CUSTOMER_PRODUCTS) || 60,
       legal: parseInt(process.env.CACHE_TTL_CUSTOMER_LEGAL) || 300,
+      // 0 = do not cache search (stock / ranking freshness)
+      search: Number.isFinite(parseInt(process.env.CACHE_TTL_CUSTOMER_SEARCH, 10))
+        ? parseInt(process.env.CACHE_TTL_CUSTOMER_SEARCH, 10)
+        : 0,
+      bootstrap: parseInt(process.env.CACHE_TTL_CUSTOMER_BOOTSTRAP) || 45,
       default: parseInt(process.env.CACHE_TTL_CUSTOMER) || 60,
     },
   },

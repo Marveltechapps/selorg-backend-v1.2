@@ -158,10 +158,10 @@ function formatOrderForApp(doc) {
   return {
     id: String(o._id),
     orderNumber: o.orderNumber,
-    items: (o.items || []).map((it) => ({
-      id: String(it._id),
-      productId: String(it.productId),
-      productName: it.productName,
+    items: (o.items || []).map((it, index) => ({
+      id: String(it._id || `${it.productId || 'item'}-${index}`),
+      productId: String(it.productId || ''),
+      productName: it.productName || 'Item',
       variantId: it.variantId || '',
       variantSize: it.variantSize || '',
       quantity: it.quantity,
@@ -201,9 +201,12 @@ function formatOrderForApp(doc) {
       : { id: '', type: 'cash' },
     itemTotal: o.itemTotal,
     adjustedTotal: o.adjustedTotal,
+    totalTax: o.totalTax || 0,
     handlingCharge: o.handlingCharge,
     deliveryFee: o.deliveryFee,
+    deliveryTip: o.deliveryTip || 0,
     discount: o.discount,
+    couponCode: o.checkoutCouponCode || '',
     pricingSnapshot: o.pricingSnapshot || null,
     walletDeduction: o.walletDeduction || 0,
     totalBill: o.totalBill,
@@ -1042,10 +1045,13 @@ async function createOrder(userId, body) {
         }
       }
 
-      // Items are copied onto the order — clear the cart for every checkout so the
-      // next order starts fresh. Failed/cancelled online payments restore lines
-      // from the order via voidUnpaidOnlineOrder / cancelOrder.
-      await clearUserCart(userId, session);
+      // COD: cart is safe to clear once the order document is persisted.
+      // Online (Card/UPI): keep cart lines until payment is verified in
+      // releaseOrderFulfillment. Failed/cancelled payments then leave the
+      // cart intact (voidUnpaidOnlineOrder still restores if it was cleared).
+      if (!deferFulfillment) {
+        await clearUserCart(userId, session);
+      }
     });
   } finally {
     await session.endSession();

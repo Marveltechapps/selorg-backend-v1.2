@@ -55,6 +55,8 @@ const bannerSchema = new mongoose.Schema(
     sectionCode: { type: String, default: '' },
     /** Optional wide/display URL (customer app prefers over imageUrl for hero/mid banners). */
     bannerImageUrl: { type: String, default: '' },
+    /** Top-level video (Master Sheet Banner URL when type/extension is video). */
+    videoUrl: { type: String, default: '' },
     thumbnailUrl: { type: String, default: '' },
     mediaId: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerMedia', default: null },
     link: String, // Legacy - kept for backward compatibility during migration

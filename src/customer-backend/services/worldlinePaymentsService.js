@@ -6,6 +6,12 @@ const { WorldlinePayment } = require('../models/WorldlinePayment');
 const { releaseOrderFulfillment, voidUnpaidOnlineOrder } = require('./orderService');
 const { creditWallet, MAX_TOP_UP_AMOUNT } = require('./walletService');
 const logger = require('../../core/utils/logger');
+const {
+  resolveWebAppBaseUrl,
+  resolveReturnUrlForPlatform,
+  resolveWorldlineApiReturnUrl,
+  isLocalOrPrivateHost,
+} = require('../utils/paymentRedirectUrls');
 const fs = require('fs');
 
 // #region agent log
@@ -145,34 +151,6 @@ function resolveWorldlineHashAlgo(requestAlgo) {
   const fromClient = parseAlgoToken(requestAlgo);
   if (fromClient) return fromClient;
   return 'sh2';
-}
-
-function resolveWebAppBaseUrl() {
-  const candidates = [
-    process.env.WORLDLINE_WEB_APP_URL,
-    process.env.CUSTOMER_WEB_URL,
-    process.env.FRONTEND_URL,
-  ];
-  for (const candidate of candidates) {
-    const trimmed = String(candidate ?? '').trim();
-    if (trimmed) return trimmed.replace(/\/$/, '');
-  }
-  // Only ever fall back to localhost during local development; a production
-  // process must never send customers back to a dev machine.
-  if (process.env.NODE_ENV !== 'production') return 'http://localhost:5173';
-  return 'https://www.selorg.com';
-}
-
-/**
- * Web checkout must return to a silent static bridge page (not a React response route).
- * The bridge postMessages the opener or bounces to /payment without exposing a callback URL.
- */
-function resolveReturnUrlForPlatform(platform) {
-  const normalized = normalizePlatform(platform);
-  if (normalized === 'web') {
-    return `${resolveWebAppBaseUrl()}/paynimo-return.html`;
-  }
-  return trimEnv(process.env.WORLDLINE_RETURN_URL);
 }
 
 function deviceIdForPlatform(platform, algo) {
@@ -451,12 +429,31 @@ const WORLDLINE_ERROR_HASH_MISMATCH_EMPTY_TPSL =
  */
 function mapStatus(statusCodeOrTxnStatus) {
   const code = String(statusCodeOrTxnStatus || '').trim();
-  if (code === '0300') return 'success';
-  if (code === '0392') return 'cancelled';
-  if (code === '0396') return 'pending';
-  if (code === '0398') return 'pending';
-  if (code === '0399') return 'failed';
-  if (code === '0002') return 'cancelled';
+  const lower = code.toLowerCase();
+  if (code === '0300' || lower === 'success') return 'success';
+  if (
+    code === '0392' ||
+    code === '0002' ||
+    lower === 'cancelled' ||
+    lower === 'canceled' ||
+    lower === 'cancel' ||
+    lower === 'user_cancelled' ||
+    lower === 'user_canceled' ||
+    lower === 'aborted' ||
+    lower === 'abort'
+  ) {
+    return 'cancelled';
+  }
+  if (code === '0396' || code === '0398' || lower === 'pending') return 'pending';
+  if (
+    code === '0399' ||
+    lower === 'failed' ||
+    lower === 'failure' ||
+    lower === 'error' ||
+    lower === 'timeout'
+  ) {
+    return 'failed';
+  }
   if (!code) return 'unknown';
   return 'failed';
 }
@@ -484,6 +481,72 @@ function formatTimeElapsed(secondsInput) {
 
 function isTerminal(status) {
   return status === 'success' || status === 'failed' || status === 'cancelled';
+}
+
+/**
+ * Canonical payment outcome for client UI (retry screen, toasts, navigation).
+ * Clients must render from this field — do not infer from uiState alone.
+ *
+ * Values: SUCCESS | PENDING | AWAITING_PAYMENT | INITIATED | FAILED |
+ *         CANCELLED | USER_CANCELLED | ABORTED | TIMEOUT
+ */
+function resolvePaymentOutcome(payment) {
+  if (!payment) return 'AWAITING_PAYMENT';
+
+  const status = String(payment.status || '').toLowerCase();
+  const statusCode = String(payment.statusCode || '').trim();
+  const verificationError = String(payment.verificationError || 'none').toLowerCase();
+  const msg = String(payment.statusMessage || payment.lastFailureReason || '').toLowerCase();
+  const expiresAt = payment.sessionExpiresAt ? new Date(payment.sessionExpiresAt).getTime() : null;
+  const isExpired = expiresAt != null && Number.isFinite(expiresAt) && Date.now() > expiresAt;
+
+  if (status === 'success' && verificationError === 'none') {
+    return 'SUCCESS';
+  }
+  if (status === 'success') {
+    return 'PENDING';
+  }
+  if (status === 'pending') {
+    return 'PENDING';
+  }
+
+  // Session timed out before a terminal gateway result.
+  if (isExpired && !isTerminal(status)) {
+    return 'TIMEOUT';
+  }
+  if (
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('took too long') ||
+    msg.includes('session expired')
+  ) {
+    return 'TIMEOUT';
+  }
+
+  if (status === 'cancelled') {
+    if (statusCode === '0392' || msg.includes('user cancel') || msg.includes('cancelled by user')) {
+      return 'USER_CANCELLED';
+    }
+    if (msg.includes('abort')) {
+      return 'ABORTED';
+    }
+    return 'CANCELLED';
+  }
+
+  if (status === 'failed') {
+    return 'FAILED';
+  }
+  if (status === 'initiated') {
+    return 'INITIATED';
+  }
+  if (status === 'created') {
+    return 'AWAITING_PAYMENT';
+  }
+  if (status === 'unknown') {
+    return 'PENDING';
+  }
+
+  return 'AWAITING_PAYMENT';
 }
 
 /** Payment-session notifications only ever apply to gateway prepayment orders. */
@@ -759,7 +822,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
   const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
   const salt = trimEnv(process.env.WORLDLINE_SALT);
-  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform);
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger);
 
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
@@ -1034,7 +1097,7 @@ async function createWalletTopUpSession(userId, {
   const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
   const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
   const salt = trimEnv(process.env.WORLDLINE_SALT);
-  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform);
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger);
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
   const amountStr = formatWorldlineTxnAmount(parsedAmount);
@@ -1233,7 +1296,7 @@ async function createStandalonePaymentSession({
   const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
   const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
   const salt = trimEnv(process.env.WORLDLINE_SALT);
-  const returnUrl = trimEnv(process.env.WORLDLINE_RETURN_URL);
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger);
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
   const amount = Number(amountInr);
@@ -1443,6 +1506,7 @@ async function getStandalonePaymentStatus(externalOrderRef, userIdInput) {
       orderId: payment ? String(payment.orderId) : null,
       uiState,
       recommendedAction,
+      paymentOutcome: resolvePaymentOutcome(payment),
       latestPayment: payment
         ? {
             txnId: payment.txnId,
@@ -2109,6 +2173,7 @@ async function getStatus(userId, { orderId }) {
           payment.status === 'success' && payment.verificationError === 'none' ? 'paid' : 'pending',
         uiState,
         recommendedAction,
+        paymentOutcome: resolvePaymentOutcome(payment),
         purpose: payment.purpose || 'order',
         walletCredited: !!payment.walletCredited,
         latestPayment: {
@@ -2200,6 +2265,7 @@ async function getStatus(userId, { orderId }) {
       orderPaymentStatus: order.paymentStatus,
       uiState,
       recommendedAction,
+      paymentOutcome: resolvePaymentOutcome(payment),
       purpose: 'order',
       latestPayment: payment
         ? {
@@ -2244,12 +2310,14 @@ module.exports = {
   standaloneInitiateEnabled,
   maybeCreditWalletForSuccessfulPayment,
   maybeNotifyPaymentTimeout,
+  resolvePaymentOutcome,
   // exported for tests
   _internals: {
     computeToken,
     computeResponseHash,
     mapStatus,
     isTerminal,
+    resolvePaymentOutcome,
     formatWorldlineTxnAmount,
     resolveWorldlineHashAlgo,
     deviceIdForPlatform,
@@ -2258,6 +2326,10 @@ module.exports = {
     WORLDLINE_PAYNIMO_MSG_PIPE_ORDER,
     mapStatusLabel,
     formatTimeElapsed,
+    resolveWebAppBaseUrl: () => resolveWebAppBaseUrl(logger),
+    resolveReturnUrlForPlatform: (platform) => resolveReturnUrlForPlatform(platform, logger),
+    resolveWorldlineApiReturnUrl: () => resolveWorldlineApiReturnUrl(logger),
+    isLocalOrPrivateHost,
   },
 };
 

@@ -2,7 +2,10 @@ const { Collection } = require('../../models/Collection');
 const { Product } = require('../../models/Product');
 const { Tag } = require('../../models/Tag');
 const { enrichProduct } = require('../../utils/customerMediaEnrichment');
-const { enrichProductsWithVariants } = require('../../utils/productVariantsPayload');
+const {
+  enrichProductsWithVariants,
+  mapProductIdsToStyleIds,
+} = require('../../utils/productVariantsPayload');
 const { attachLiveSellableStock } = require('../../utils/productStock');
 
 /**
@@ -12,7 +15,9 @@ async function resolveCollectionProducts(collectionId, options = {}) {
   const col = await Collection.findOne({ _id: collectionId, isActive: true }).lean();
   if (!col) return [];
   const page = Math.max(1, parseInt(options.page, 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(options.limit, 10) || 20));
+  // Homepage rails pass a higher limit so Master Sheet collections are not truncated to 20.
+  const defaultLimit = options.homeRail ? 50 : 20;
+  const limit = Math.min(50, Math.max(1, parseInt(options.limit, 10) || defaultLimit));
   const sortOverride = String(options.sort || '').trim();
 
   const now = new Date();
@@ -24,7 +29,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
   let productIds = [];
 
   if (col.type === 'manual' && Array.isArray(col.productIds) && col.productIds.length > 0) {
-    productIds = col.productIds;
+    productIds = await mapProductIdsToStyleIds(col.productIds);
   } else if (col.type === 'rule-based' && col.rules) {
     const query = { isActive: true, isSaleable: true, classification: 'Style', status: 'active' };
     const { categoryIds, tagIds, priceMin, priceMax, featured } = col.rules || {};

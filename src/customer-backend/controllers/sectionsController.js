@@ -40,8 +40,9 @@ async function getSectionProducts(req, res) {
       return res.status(404).json({ success: false, message: 'Section not found' });
     }
 
+    const allIds = section.productIds || [];
     const query = {
-      _id: { $in: section.productIds || [] },
+      _id: { $in: allIds },
       isActive: true,
       isSaleable: true,
       classification: 'Style',
@@ -54,6 +55,45 @@ async function getSectionProducts(req, res) {
       name_asc: { name: 1 },
     };
     const dbSort = sort ? (sortMap[sort] || sortMap.sortOrder) : null;
+
+    // Preserve manual CMS order: page the ID list first, then fetch only that page.
+    if (!sort && allIds.length > 0) {
+      const idStrings = allIds.map((id) => String(id));
+      const pageIds = idStrings.slice((page - 1) * limit, page * limit);
+      const products = await Product.find({
+        ...query,
+        _id: { $in: pageIds },
+      })
+        .select({ baseCost: 0 })
+        .lean();
+      const orderMap = new Map(pageIds.map((id, idx) => [id, idx]));
+      const ordered = products.sort(
+        (a, b) => (orderMap.get(String(a._id)) ?? 9999) - (orderMap.get(String(b._id)) ?? 9999)
+      );
+
+      if (ordered.length === 0 && page === 1) {
+        const curatedRes = await respondCurated(res, key, page, limit);
+        if (curatedRes) return curatedRes;
+      }
+
+      // Approximate total from configured IDs (saleable filter may shrink slightly).
+      const total = idStrings.length;
+      return res.json({
+        success: true,
+        data: {
+          title: section.title || section.sectionKey,
+          viewAllLink: section.viewAllLink || '',
+          products: ordered,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+          },
+        },
+      });
+    }
+
     const products = await Product.find(query)
       .sort(dbSort || {})
       .select({ baseCost: 0 })
@@ -61,7 +101,7 @@ async function getSectionProducts(req, res) {
 
     let ordered = products;
     if (!sort) {
-      const orderMap = new Map((section.productIds || []).map((id, idx) => [String(id), idx]));
+      const orderMap = new Map(allIds.map((id, idx) => [String(id), idx]));
       ordered = products.sort((a, b) => (orderMap.get(String(a._id)) ?? 9999) - (orderMap.get(String(b._id)) ?? 9999));
     }
 
