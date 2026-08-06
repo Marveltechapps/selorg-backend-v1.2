@@ -26,6 +26,50 @@ function normalizePublicSupport(support = {}) {
   };
 }
 
+function ensureWalletPaymentMethod(paymentMethods) {
+  const list = Array.isArray(paymentMethods) ? paymentMethods.map((pm) => ({ ...pm })) : [];
+  const hasWallet = list.some((m) =>
+    ['wallet', 'selorg_wallet'].includes(String(m?.key || '').toLowerCase())
+  );
+  if (hasWallet) {
+    return list.map((m) => {
+      const key = String(m?.key || '').toLowerCase();
+      if (key === 'wallet' || key === 'selorg_wallet') {
+        return {
+          ...m,
+          label: m.label || 'Selorg Wallet',
+          description: m.description || 'Pay with your Selorg Wallet balance',
+          icon: m.icon || 'wallet',
+          imageUrl: m.imageUrl || '',
+          isActive: m.isActive !== false,
+        };
+      }
+      return { ...m, imageUrl: m.imageUrl || '' };
+    });
+  }
+
+  const walletMethod = (DEFAULT_APP_CONFIG.paymentMethods || []).find(
+    (m) => String(m.key).toLowerCase() === 'wallet'
+  ) || {
+    key: 'wallet',
+    label: 'Selorg Wallet',
+    description: 'Pay with your Selorg Wallet balance',
+    icon: 'wallet',
+    imageUrl: '',
+    isActive: true,
+    order: 0,
+  };
+
+  return [
+    { ...walletMethod, isActive: true, order: 0, imageUrl: walletMethod.imageUrl || '' },
+    ...list.map((m, idx) => ({
+      ...m,
+      imageUrl: m.imageUrl || '',
+      order: typeof m.order === 'number' ? m.order + 1 : idx + 1,
+    })),
+  ];
+}
+
 function normalizePublicConfig(config) {
   const base = config && typeof config === 'object' ? { ...config } : { ...DEFAULT_APP_CONFIG };
   base.support = normalizePublicSupport(base.support || {});
@@ -40,12 +84,11 @@ function normalizePublicConfig(config) {
     ...(DEFAULT_APP_CONFIG.wallet || {}),
     ...(base.wallet || {}),
   };
-  if (Array.isArray(base.paymentMethods)) {
-    base.paymentMethods = base.paymentMethods.map((pm) => ({
-      ...pm,
-      imageUrl: pm.imageUrl || '',
-    }));
-  }
+  base.featureFlags = {
+    ...(DEFAULT_APP_CONFIG.featureFlags || {}),
+    ...(base.featureFlags || {}),
+  };
+  base.paymentMethods = ensureWalletPaymentMethod(base.paymentMethods);
   if (Array.isArray(base.supportCategories)) {
     base.supportCategories = base.supportCategories.map((cat) => ({
       ...cat,
@@ -143,6 +186,26 @@ exports.getPublicConfig = async (req, res) => {
     // Clients must see the delivery pricing the engine actually bills with,
     // so guest carts and logged-in carts show identical fees.
     const data = applyEffectiveCheckoutPricing(normalizePublicConfig(config));
+
+    // Persist Selorg Wallet into CMS if the live document is missing it
+    // (covers DBs that predate the wallet checkout work).
+    const storedHasWallet = Array.isArray(config.paymentMethods)
+      && config.paymentMethods.some((m) =>
+        ['wallet', 'selorg_wallet'].includes(String(m?.key || '').toLowerCase())
+      );
+    if (!storedHasWallet && Array.isArray(data.paymentMethods)) {
+      setImmediate(async () => {
+        try {
+          await AppConfig.updateOne(
+            { key: 'default' },
+            { $set: { paymentMethods: data.paymentMethods } }
+          );
+        } catch (persistErr) {
+          console.warn('[getPublicConfig] failed to persist wallet payment method', persistErr?.message);
+        }
+      });
+    }
+
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

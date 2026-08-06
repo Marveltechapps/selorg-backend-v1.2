@@ -1,6 +1,18 @@
 const bcrypt = require('bcryptjs');
 const { CustomerUser } = require('../models/CustomerUser');
 const cacheService = require('../../core/services/cache.service');
+const {
+  isPlaceholderCustomerEmail,
+  sanitizeCustomerEmail,
+} = require('../utils/customerDisplay');
+
+function toPublicProfile(user) {
+  if (!user) return user;
+  return {
+    ...user,
+    email: sanitizeCustomerEmail(user.email) || null,
+  };
+}
 
 function noStore(res) {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -29,7 +41,7 @@ async function getProfile(req, res) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, data: toPublicProfile(user) });
   } catch (err) {
     console.error('getProfile error:', err);
     res.status(500).json({ success: false, message: 'Internal server error' });
@@ -73,7 +85,13 @@ async function updateProfile(req, res) {
 
     if (updates.email !== undefined) {
       const normalizedEmail = String(updates.email || '').trim().toLowerCase();
-      updates.email = normalizedEmail || undefined;
+      if (!normalizedEmail || isPlaceholderCustomerEmail(normalizedEmail)) {
+        // Clear placeholder / empty values instead of persisting fakes.
+        // Use $unset (not null) so sparse unique email index stays valid.
+        updates.email = null;
+      } else {
+        updates.email = normalizedEmail;
+      }
     }
 
     if (updates.name !== undefined) {
@@ -106,19 +124,35 @@ async function updateProfile(req, res) {
         updates.savedCheckoutContact = next;
       }
     }
-    const user = await CustomerUser.findByIdAndUpdate(
-      req.user._id,
-      { $set: updates },
-      { new: true }
-    )
-    .select('-passwordHash')
-    .lean();
+
+    const unsetFields = {};
+    if (updates.email === null) {
+      delete updates.email;
+      unsetFields.email = 1;
+    }
+
+    const updateOps = {};
+    if (Object.keys(updates).length > 0) updateOps.$set = updates;
+    if (Object.keys(unsetFields).length > 0) updateOps.$unset = unsetFields;
+    if (Object.keys(updateOps).length === 0) {
+      const current = await CustomerUser.findById(req.user._id).select('-passwordHash').lean();
+      if (!current) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      res.status(200).json({ success: true, data: toPublicProfile(current) });
+      return;
+    }
+
+    const user = await CustomerUser.findByIdAndUpdate(req.user._id, updateOps, { new: true })
+      .select('-passwordHash')
+      .lean();
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
     await invalidateCustomerProfileCache();
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, data: toPublicProfile(user) });
   } catch (err) {
     console.error('updateProfile error:', err);
     if (err?.code === 11000 && err?.keyPattern?.email) {
@@ -197,7 +231,7 @@ async function uploadAvatar(req, res) {
       return;
     }
     await invalidateCustomerProfileCache();
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, data: toPublicProfile(user) });
   } catch (err) {
     console.error('uploadAvatar error:', err);
     res.status(500).json({ success: false, message: err.message || 'Internal server error' });

@@ -11,6 +11,10 @@ const { clearCart: clearUserCart } = require('./cartService');
 const { resolveStoreId } = require('./storeLocator');
 const { geocodeAddress } = require('./geocodingService');
 const { assertStockAllowsAsync } = require('../utils/productStock');
+const {
+  buildPaymentMethodPresentation,
+  buildEstimatedDeliveryMessage,
+} = require('../utils/paymentMethodDisplay');
 
 /** All orders route to Adyar darkstore only */
 const ADYAR_STORE_ID = 'DS-Adyar-01';
@@ -155,6 +159,27 @@ async function resolveAddressTrackingDetails(order) {
 
 function formatOrderForApp(doc) {
   const o = doc.toObject ? doc.toObject() : doc;
+  const paymentPresentation = buildPaymentMethodPresentation(o, o._worldlinePayment || null);
+  const paymentMethodPayload = o.paymentMethod
+    ? {
+        id: o.paymentMethodId || '',
+        type: o.paymentMethod.methodType || 'cash',
+        last4: o.paymentMethod.last4,
+        instrument: o.paymentMethod.instrument || paymentPresentation.instrument || '',
+        displayLabel: o.paymentMethod.displayLabel || paymentPresentation.display || '',
+        paymentMode: o.paymentMethod.paymentMode || '',
+        display: paymentPresentation.display,
+        detailDisplay: paymentPresentation.detailDisplay || paymentPresentation.display,
+        lines: paymentPresentation.lines,
+      }
+    : {
+        id: '',
+        type: 'cash',
+        display: 'Cash on Delivery',
+        detailDisplay: 'Cash on Delivery',
+        lines: [{ label: 'Cash on Delivery', amount: null }],
+      };
+
   return {
     id: String(o._id),
     orderNumber: o.orderNumber,
@@ -192,13 +217,9 @@ function formatOrderForApp(doc) {
         }
       : {},
     deliveryNotes: o.deliveryNotes || '',
-    paymentMethod: o.paymentMethod
-      ? {
-          id: o.paymentMethodId || '',
-          type: o.paymentMethod.methodType || 'cash',
-          last4: o.paymentMethod.last4,
-        }
-      : { id: '', type: 'cash' },
+    paymentMethod: paymentMethodPayload,
+    paymentMethodDisplay: paymentPresentation.detailDisplay || paymentPresentation.display,
+    estimatedDeliveryMessage: buildEstimatedDeliveryMessage(o),
     itemTotal: o.itemTotal,
     adjustedTotal: o.adjustedTotal,
     totalTax: o.totalTax || 0,
@@ -209,6 +230,33 @@ function formatOrderForApp(doc) {
     couponCode: o.checkoutCouponCode || '',
     pricingSnapshot: o.pricingSnapshot || null,
     walletDeduction: o.walletDeduction || 0,
+    onlineAmountDue: (() => {
+      const walletPart = Number(o.walletDeduction) || 0;
+      const total = Number(o.totalBill) || 0;
+      const methodType = o.paymentMethod?.methodType;
+      if (walletPart > 0) {
+        if (o.onlineAmountDue != null && Number(o.onlineAmountDue) >= 0) {
+          return Number(o.onlineAmountDue);
+        }
+        return Math.max(0, roundOrderMoney(total - walletPart));
+      }
+      if (isGatewayPrepayment(methodType)) return total;
+      return 0;
+    })(),
+    requiresOnlinePayment: (() => {
+      const methodType = o.paymentMethod?.methodType;
+      if (!isGatewayPrepayment(methodType)) return false;
+      if (o.paymentStatus === 'paid' || o.status === 'cancelled') return false;
+      const walletPart = Number(o.walletDeduction) || 0;
+      const total = Number(o.totalBill) || 0;
+      const due =
+        walletPart > 0
+          ? o.onlineAmountDue != null && Number(o.onlineAmountDue) >= 0
+            ? Number(o.onlineAmountDue)
+            : Math.max(0, roundOrderMoney(total - walletPart))
+          : total;
+      return due > 0 && o.paymentStatus === 'pending';
+    })(),
     totalBill: o.totalBill,
     createdAt: o.createdAt ? new Date(o.createdAt).toISOString() : null,
     estimatedDelivery: o.estimatedDelivery,
@@ -259,11 +307,81 @@ async function getOrderById(userId, orderId) {
   if (!order) return null;
   await reconcileOrderWithLatestWorldlinePayment(userId, order);
   order = await Order.findOne({ _id: orderId, userId }).lean();
-  return order ? formatOrderForApp({ ...order, _id: order._id }) : null;
+  if (!order) return null;
+
+  const worldlinePayment = await WorldlinePayment.findOne({
+    orderId: order._id,
+    purpose: { $ne: 'wallet_topup' },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return formatOrderForApp({
+    ...order,
+    _id: order._id,
+    _worldlinePayment: worldlinePayment || null,
+  });
 }
 
 function isGatewayPrepayment(resolvedMethodType) {
   return resolvedMethodType === 'card' || resolvedMethodType === 'upi' || resolvedMethodType === 'digital';
+}
+
+function isWalletCheckoutRequest(methodType) {
+  const key = String(methodType || '').trim().toLowerCase();
+  return key === 'wallet' || key === 'selorg_wallet';
+}
+
+function roundOrderMoney(amount) {
+  return Math.round((Number(amount) || 0) * 100) / 100;
+}
+
+/**
+ * Restore wallet funds taken for a partial-wallet order when online payment is voided.
+ * Idempotent via Order.walletRefundedAt + wallet ledger unique reference.
+ */
+async function refundWalletDeductionOnVoid(orderDoc) {
+  const deduction = roundOrderMoney(orderDoc?.walletDeduction);
+  if (!(deduction > 0)) return { skipped: true, reason: 'no_deduction' };
+  if (orderDoc.walletRefundedAt) return { skipped: true, reason: 'already_refunded' };
+
+  const claimed = await Order.findOneAndUpdate(
+    {
+      _id: orderDoc._id,
+      walletDeduction: { $gt: 0 },
+      walletRefundedAt: null,
+    },
+    { $set: { walletRefundedAt: new Date() } },
+    { new: true }
+  );
+  if (!claimed) return { skipped: true, reason: 'claim_failed' };
+
+  try {
+    const { refundWalletForFailedOrderPayment } = require('./walletService');
+    const result = await refundWalletForFailedOrderPayment(
+      claimed.userId,
+      deduction,
+      claimed._id,
+      { description: `Wallet restored for cancelled order ${claimed.orderNumber || claimed._id}` }
+    );
+    if (result?.error) {
+      // Allow a later retry to re-attempt the credit.
+      await Order.updateOne({ _id: claimed._id }, { $set: { walletRefundedAt: null } });
+      console.warn('[order-service] wallet void refund failed', {
+        orderId: String(claimed._id),
+        error: result.error,
+      });
+      return { error: result.error };
+    }
+    return { ok: true, credited: result?.credited ?? deduction, alreadyCredited: !!result?.alreadyCredited };
+  } catch (err) {
+    await Order.updateOne({ _id: claimed._id }, { $set: { walletRefundedAt: null } });
+    console.warn('[order-service] wallet void refund exception', {
+      orderId: String(claimed._id),
+      error: err?.message,
+    });
+    return { error: err?.message || 'wallet refund failed' };
+  }
 }
 
 /** Darkstore, warehouse, finance stubs, WebSocket — same as legacy post-createOrder block. */
@@ -305,7 +423,17 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
     ].filter(Boolean);
     const deliveryAddrStr = deliveryAddrParts.join(', ') || response.deliveryAddress?.address || '';
 
+    const dsPaymentMethod = (() => {
+      const m = String(resolvedMethodType || '').toLowerCase();
+      if (m === 'upi') return 'upi';
+      if (m === 'wallet') return 'wallet';
+      if (m === 'cash' || m === 'cod') return 'cash';
+      // Worldline / digital / card all map to darkstore enum `card`
+      return 'card';
+    })();
+
     const dsItems = (response.items || []).map((it) => ({
+      productId: it.productId ? String(it.productId) : '',
       productName: it.productName || '',
       quantity: it.quantity || 1,
       price: it.price || 0,
@@ -335,7 +463,7 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
           delivery_notes: response.deliveryNotes || '',
           rto_risk: false,
           payment_status: paymentStatus,
-          payment_method: resolvedMethodType,
+          payment_method: dsPaymentMethod,
           total_bill: totalBill,
         });
         try {
@@ -356,7 +484,7 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
             order_type: 'Normal',
             createdAt: new Date(),
             payment_status: paymentStatus,
-            payment_method: resolvedMethodType,
+            payment_method: dsPaymentMethod,
             total_bill: totalBill,
           };
           websocketService?.broadcastToRole?.('darkstore', 'order:created', orderEvent);
@@ -402,14 +530,18 @@ async function runPostOrderIntegrations(userId, response, paymentStatus, resolve
 
     try {
       const paymentType = response.paymentMethod?.type || 'cash';
-      const methodDisplayMap = {
-        card: 'Credit/Debit Card',
-        upi: 'UPI',
-        digital: 'Digital Payment',
-        wallet: 'Wallet',
-        cash: 'Cash on Delivery',
-      };
-      const methodDisplay = methodDisplayMap[paymentType] || paymentType;
+      const methodDisplay =
+        response.paymentMethodDisplay ||
+        response.paymentMethod?.detailDisplay ||
+        response.paymentMethod?.display ||
+        ({
+          card: 'Credit/Debit Card',
+          upi: 'UPI',
+          digital: 'Worldline (UPI/Card)',
+          wallet: 'Selorg Wallet',
+          cash: 'Cash on Delivery',
+        })[paymentType] ||
+        paymentType;
       const gatewayRef = paymentType === 'cash' ? `COD-${Date.now()}` : `GW-${Date.now()}`;
       const initialStatus = 'pending';
 
@@ -635,6 +767,13 @@ async function voidUnpaidOnlineOrder(userId, orderId, reason = '', outcome = 'fa
     return { ok: true, skipped: true };
   }
 
+  // Partial wallet: restore funds taken before Worldline when online pay fails.
+  try {
+    await refundWalletDeductionOnVoid(claimed);
+  } catch (e) {
+    console.warn('[order-service] wallet deduction refund on void failed (non-blocking):', e?.message);
+  }
+
   await restoreCartFromOrder(userId, claimed);
 
   // Notify the verified payment outcome — never "Order Placed" here.
@@ -714,8 +853,18 @@ async function reconcileOrderWithLatestWorldlinePayment(userId, orderLean) {
       });
       return;
     }
-    if (order.paymentStatus !== 'paid') {
+    if (order.paymentStatus !== 'paid' || !order.paymentMethod?.displayLabel) {
       order.paymentStatus = 'paid';
+      try {
+        const { inferInstrumentFieldsFromWorldline } = require('../utils/paymentMethodDisplay');
+        const fields = inferInstrumentFieldsFromWorldline(latest);
+        if (!order.paymentMethod) order.paymentMethod = { methodType: 'digital' };
+        if (fields.instrument) order.paymentMethod.instrument = fields.instrument;
+        if (fields.displayLabel) order.paymentMethod.displayLabel = fields.displayLabel;
+        if (fields.paymentMode) order.paymentMethod.paymentMode = fields.paymentMode;
+      } catch (_) {
+        /* non-blocking */
+      }
       await order.save();
     }
     try {
@@ -911,7 +1060,6 @@ async function createOrder(userId, body) {
 
   const resolvedMethodType = paymentMethodType || (paymentMethodId ? 'card' : 'cash');
   const checkoutCouponCode = couponCode ? String(couponCode).trim().toUpperCase() : '';
-  const deferFulfillment = isGatewayPrepayment(resolvedMethodType);
   let engineResult = null;
   try {
     engineResult = await calculatePricing({
@@ -950,22 +1098,101 @@ async function createOrder(userId, body) {
   const orderNumber = await generateOrderNumber();
   const slaMinutes = Math.max(
     10,
-    Number(process.env.DEFAULT_DELIVERY_SLA_MINUTES) || 45
+    Number(process.env.DEFAULT_DELIVERY_SLA_MINUTES) || 30
   );
   const estimatedDelivery = new Date(Date.now() + slaMinutes * 60 * 1000);
 
   const matchedStoreObjectId = await resolveStoreId(ADYAR_STORE_ID);
 
-  // Online payments are backend-led (Worldline). Mark as pending until gateway confirms.
-  const paymentStatus = resolvedMethodType === 'cash' ? 'cod_pending' : 'pending';
+  // --- Selorg Wallet checkout (full or partial) ---
+  // Amounts are always computed server-side from live wallet balance + order total.
+  let walletDeduction = 0;
+  let onlineAmountDue = 0;
+  let storedMethodType = resolvedMethodType;
+  let storedPaymentMethodId = paymentMethodId || '';
+  const walletCheckoutRequested = isWalletCheckoutRequest(resolvedMethodType);
+
+  if (walletCheckoutRequested) {
+    const { getOrCreateWallet, roundInr } = require('./walletService');
+    const wallet = await getOrCreateWallet(userId);
+    if (!wallet.isActive) {
+      return { error: 'Selorg Wallet is not available' };
+    }
+    const balance = roundInr(wallet.balance);
+    if (!(balance > 0)) {
+      return { error: 'Insufficient wallet balance. Please add money to your Selorg Wallet.' };
+    }
+    const bill = roundOrderMoney(totalBill);
+    walletDeduction = roundOrderMoney(Math.min(balance, bill));
+    onlineAmountDue = roundOrderMoney(bill - walletDeduction);
+    if (onlineAmountDue <= 0) {
+      storedMethodType = 'wallet';
+      storedPaymentMethodId = 'selorg_wallet';
+      onlineAmountDue = 0;
+    } else {
+      const minOnline = Number(process.env.WORLDLINE_MIN_AMOUNT_INR) || 1;
+      if (onlineAmountDue < minOnline) {
+        // Cannot open a Worldline session for a sub-minimum remainder.
+        if (balance >= bill) {
+          walletDeduction = bill;
+          onlineAmountDue = 0;
+          storedMethodType = 'wallet';
+          storedPaymentMethodId = 'selorg_wallet';
+        } else {
+          return {
+            error:
+              `After applying your wallet, the remaining amount (₹${onlineAmountDue}) is below the minimum online payment of ₹${minOnline}. ` +
+              'Please add money to your wallet to cover the full order, or pay online without using the wallet.',
+          };
+        }
+      } else {
+        storedMethodType = 'digital';
+        storedPaymentMethodId = 'wallet_partial_worldline';
+      }
+    }
+  }
+
+  const deferFulfillment = isGatewayPrepayment(storedMethodType);
+  // Online: pending until Worldline confirms. Full wallet: paid after atomic debit.
+  let paymentStatus = storedMethodType === 'cash' ? 'cod_pending' : 'pending';
 
   const session = await mongoose.startSession();
   let order;
   try {
     await session.withTransaction(async () => {
+      const orderObjectId = new mongoose.Types.ObjectId();
+
+      if (walletCheckoutRequested && walletDeduction > 0) {
+        const { debitWalletForOrder } = require('./walletService');
+        const debit = await debitWalletForOrder(userId, walletDeduction, orderObjectId, {
+          session,
+          description: `Payment for order ${orderNumber}`,
+        });
+        if (debit.error) {
+          const err = new Error(debit.error);
+          err.code = 'WALLET_DEBIT_FAILED';
+          throw err;
+        }
+        if (storedMethodType === 'wallet') {
+          paymentStatus = 'paid';
+        }
+      } else if (storedMethodType === 'wallet') {
+        paymentStatus = 'paid';
+      }
+
+      const timelineNote =
+        storedMethodType === 'wallet'
+          ? 'Paid with Selorg Wallet'
+          : walletDeduction > 0
+            ? 'Partial wallet payment — awaiting online payment for remainder'
+            : deferFulfillment
+              ? 'Awaiting payment'
+              : 'Order placed';
+
       const createdOrders = await Order.create(
         [
           {
+            _id: orderObjectId,
             userId: new mongoose.Types.ObjectId(userId),
             orderNumber,
             items: orderItems,
@@ -974,7 +1201,7 @@ async function createOrder(userId, body) {
               {
                 status: 'pending',
                 timestamp: new Date(),
-                note: deferFulfillment ? 'Awaiting payment' : 'Order placed',
+                note: timelineNote,
                 actor: 'customer',
               },
             ],
@@ -991,9 +1218,9 @@ async function createOrder(userId, body) {
               longitude: deliveryLongitude,
             },
             deliveryNotes: body.deliveryNotes || '',
-            paymentMethodId: paymentMethodId || '',
+            paymentMethodId: storedPaymentMethodId,
             paymentMethod: {
-              methodType: resolvedMethodType,
+              methodType: storedMethodType,
               last4: '',
             },
             paymentStatus,
@@ -1003,6 +1230,8 @@ async function createOrder(userId, body) {
             deliveryFee,
             deliveryTip: deliveryTip || 0,
             discount,
+            walletDeduction,
+            onlineAmountDue,
             totalBill,
             estimatedDelivery,
             pricingSnapshot: usePricingEngineForOrders ? engineResult : undefined,
@@ -1045,14 +1274,20 @@ async function createOrder(userId, body) {
         }
       }
 
-      // COD: cart is safe to clear once the order document is persisted.
-      // Online (Card/UPI): keep cart lines until payment is verified in
-      // releaseOrderFulfillment. Failed/cancelled payments then leave the
-      // cart intact (voidUnpaidOnlineOrder still restores if it was cleared).
+      // COD / full wallet: clear cart once persisted.
+      // Online / partial wallet: keep cart until releaseOrderFulfillment.
       if (!deferFulfillment) {
         await clearUserCart(userId, session);
       }
     });
+  } catch (err) {
+    if (
+      err?.code === 'WALLET_DEBIT_FAILED' ||
+      /insufficient wallet|wallet not available/i.test(err?.message || '')
+    ) {
+      return { error: err.message || 'Wallet payment failed' };
+    }
+    throw err;
   } finally {
     await session.endSession();
   }
@@ -1077,9 +1312,9 @@ async function createOrder(userId, body) {
         }
 
         if (providedEmail) {
+          const { isPlaceholderCustomerEmail } = require('../utils/customerDisplay');
           const currentEmail = typeof current.email === 'string' ? current.email.trim().toLowerCase() : '';
-          const isPlaceholderEmail =
-            !currentEmail || currentEmail.includes('no-email') || currentEmail.startsWith('customer-');
+          const isPlaceholderEmail = isPlaceholderCustomerEmail(currentEmail);
 
           // Avoid unique email conflicts when another customer already uses it.
           if (isPlaceholderEmail || currentEmail === providedEmail) {
@@ -1104,10 +1339,13 @@ async function createOrder(userId, body) {
   const populated = await Order.findById(order._id).lean();
   const response = formatOrderForApp({ ...populated, _id: populated._id });
   response.debugPricing = engineResult || null;
+  response.requiresOnlinePayment = deferFulfillment && onlineAmountDue > 0;
+  response.onlineAmountDue = onlineAmountDue;
+  response.walletDeduction = walletDeduction;
 
   if (!deferFulfillment) {
     try {
-      await runPostOrderIntegrations(userId, response, paymentStatus, resolvedMethodType, totalBill);
+      await runPostOrderIntegrations(userId, response, paymentStatus, storedMethodType, totalBill);
     } catch (err) {
       console.warn('Post-order integrations failed (non-blocking):', err.message);
     }
@@ -1161,7 +1399,7 @@ async function updateCustomerOrderStatus(orderId, newStatus, { actor, note, ride
     actor: actor || STATUS_ACTOR_MAP[newStatus] || 'system',
   });
 
-  if (riderId) order.riderId = riderId;
+  if (riderId) order.riderId = String(riderId);
   if (newStatus === 'delivered') {
     order.deliveredAt = new Date();
     // COD is collected at handover — delivery completes the payment.
@@ -1292,70 +1530,105 @@ async function buildTrackingPayload(order) {
 
   formatted.deliveryAddressLine = buildDeliveryAddressString(order.deliveryAddress);
 
-  // Attach rider details if assigned
+  // Attach real rider details (RiderV2 first — live GPS from rider app; legacy Rider fallback)
   if (order.riderId) {
     try {
-      const Rider = require('../../rider/models/Rider');
-      const RiderHR = require('../../rider/models/RiderHR');
-      const Vehicle = require('../../rider/models/Vehicle');
-      const riderIdValue = order.riderId;
-      const riderQuery = mongoose.isValidObjectId(riderIdValue)
-        ? { $or: [{ _id: riderIdValue }, { id: String(riderIdValue) }] }
-        : { id: String(riderIdValue) };
+      const riderIdValue = String(order.riderId);
+      let partnerAttached = false;
 
-      const rider = await Rider.findOne(riderQuery).lean();
-      if (rider) {
-        let phone = '';
-        try {
-          const hr = await RiderHR.findOne(
-            { id: rider.id },
-            { phone: 1 }
-          ).lean();
-          phone = hr?.phone || '';
-        } catch {
-          // RiderHR optional
-        }
-
-        let vehicleLabel = '';
-        try {
-          const vehicle = await Vehicle.findOne({
-            assignedRiderId: rider.id,
-            status: { $ne: 'inactive' },
-          })
-            .select('type vehicleId')
-            .lean();
-          if (vehicle) {
-            vehicleLabel = [vehicle.type, vehicle.vehicleId].filter(Boolean).join(' · ');
-          }
-        } catch {
-          // Vehicle lookup optional
-        }
-
-        formatted.deliveryPartner = {
-          name: rider.name || '',
-          initials: rider.avatarInitials || '',
-          phone,
-          vehicle: vehicleLabel || undefined,
-        };
-
-        if (rider.location) {
-          const lat = rider.location.lat ?? rider.location.latitude;
-          const lng = rider.location.lng ?? rider.location.longitude;
-          if (typeof lat === 'number' && typeof lng === 'number') {
+      try {
+        const RiderV2 = require('../../rider_v2_backend/src/models/Rider').Rider;
+        const v2 = await RiderV2.findOne({ riderId: riderIdValue }).lean();
+        if (v2) {
+          const initials = String(v2.name || '')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((p) => p[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase();
+          const vehicleLabel = [v2.vehicle?.type, v2.vehicle?.number || v2.vehicle?.vehicleNumber]
+            .filter(Boolean)
+            .join(' · ');
+          formatted.deliveryPartner = {
+            name: v2.name || '',
+            initials: initials || '',
+            phone: v2.phoneNumber || '',
+            vehicle: vehicleLabel || undefined,
+          };
+          const loc = v2.currentLocation;
+          if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
             formatted.riderLocation = {
-              latitude: lat,
-              longitude: lng,
-              updatedAt:
-                rider.location.updatedAt ||
-                rider.location.lastUpdated ||
-                rider.updatedAt ||
-                null,
+              latitude: loc.lat,
+              longitude: loc.lng,
+              updatedAt: loc.updatedAt || v2.updatedAt || null,
             };
+          }
+          partnerAttached = true;
+        }
+      } catch {
+        // RiderV2 optional
+      }
+
+      if (!partnerAttached) {
+        const Rider = require('../../rider/models/Rider');
+        const RiderHR = require('../../rider/models/RiderHR');
+        const Vehicle = require('../../rider/models/Vehicle');
+        const riderQuery = mongoose.isValidObjectId(riderIdValue)
+          ? { $or: [{ _id: riderIdValue }, { id: riderIdValue }] }
+          : { id: riderIdValue };
+
+        const rider = await Rider.findOne(riderQuery).lean();
+        if (rider) {
+          let phone = '';
+          try {
+            const hr = await RiderHR.findOne({ id: rider.id }, { phone: 1 }).lean();
+            phone = hr?.phone || '';
+          } catch {
+            // RiderHR optional
+          }
+
+          let vehicleLabel = '';
+          try {
+            const vehicle = await Vehicle.findOne({
+              assignedRiderId: rider.id,
+              status: { $ne: 'inactive' },
+            })
+              .select('type vehicleId')
+              .lean();
+            if (vehicle) {
+              vehicleLabel = [vehicle.type, vehicle.vehicleId].filter(Boolean).join(' · ');
+            }
+          } catch {
+            // Vehicle lookup optional
+          }
+
+          formatted.deliveryPartner = {
+            name: rider.name || '',
+            initials: rider.avatarInitials || '',
+            phone,
+            vehicle: vehicleLabel || undefined,
+          };
+
+          if (rider.location) {
+            const lat = rider.location.lat ?? rider.location.latitude;
+            const lng = rider.location.lng ?? rider.location.longitude;
+            if (typeof lat === 'number' && typeof lng === 'number') {
+              formatted.riderLocation = {
+                latitude: lat,
+                longitude: lng,
+                updatedAt:
+                  rider.location.updatedAt ||
+                  rider.location.lastUpdated ||
+                  rider.updatedAt ||
+                  null,
+              };
+            }
           }
         }
       }
     } catch {
-      // Rider model lookup optional
+      // Rider lookup optional
     }
   }
 
@@ -1379,38 +1652,56 @@ async function reorderItems(userId, orderId) {
   if (!order) return { error: 'Order not found' };
   if (!order.items || order.items.length === 0) return { error: 'No items to reorder' };
 
-  const { Cart } = require('../models/Cart');
-  const { matchCartLine, dedupeCartLines, invalidateCartGetCache } = require('./cartService');
-  let cart = await Cart.findOne({ userId });
-  if (!cart) {
-    cart = new Cart({ userId, items: [] });
-  }
+  // Use addItem so each line gets live catalog price + stock checks (no stale
+  // order snapshot prices, no out-of-stock products silently added).
+  const { addItem } = require('./cartService');
+  const added = [];
+  const skipped = [];
 
   for (const item of order.items) {
-    // Normalized product+variant matching — raw string equality created duplicate
-    // lines when the stored variantId was '' on one side and the productId on the other.
-    const existing = cart.items.find((ci) => matchCartLine(ci, item.productId, item.variantId));
-    if (existing) {
-      existing.quantity += item.quantity;
-    } else {
-      cart.items.push({
-        productId: item.productId,
-        variantId: item.variantId || '',
-        variantSize: item.variantSize || '',
-        quantity: item.quantity,
-        price: item.price,
-        originalPrice: item.originalPrice || item.price,
-        gstRate: item.gstRate || 0,
-        productName: item.productName || '',
-        image: item.image || '',
+    const productName = item.productName || 'Item';
+    const qty = Math.max(1, Number(item.quantity) || 1);
+    const result = await addItem(userId, {
+      productId: item.productId,
+      variantId: item.variantId || '',
+      quantity: qty,
+    });
+    if (result?.error) {
+      skipped.push({
+        productId: String(item.productId || ''),
+        productName,
+        reason: String(result.error),
       });
+      continue;
     }
+    added.push({
+      productId: String(item.productId || ''),
+      productName,
+      quantity: qty,
+    });
   }
 
-  await cart.save();
-  await dedupeCartLines(cart.userId);
-  await invalidateCartGetCache();
-  return { success: true, itemsAdded: order.items.length };
+  if (added.length === 0) {
+    const names = skipped
+      .map((s) => s.productName)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(', ');
+    return {
+      error: names
+        ? `None of the items from this order are available (${names}${skipped.length > 3 ? '…' : ''}).`
+        : 'None of the items from this order are currently available.',
+      skipped,
+      itemsAdded: 0,
+    };
+  }
+
+  return {
+    success: true,
+    itemsAdded: added.length,
+    added,
+    skipped,
+  };
 }
 
 module.exports = {
@@ -1423,5 +1714,6 @@ module.exports = {
   updateCustomerOrderStatus,
   releaseOrderFulfillment,
   voidUnpaidOnlineOrder,
+  refundWalletDeductionOnVoid,
   reorderItems,
 };

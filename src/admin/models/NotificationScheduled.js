@@ -10,7 +10,7 @@ const NotificationScheduledSchema = new mongoose.Schema(
     templateName: { type: String },
     scheduledAt: { type: Date, required: true },
     targetUsers: { type: Number, default: 0 },
-    channels: [{ type: String, enum: ['push', 'sms', 'email', 'in-app'] }],
+    channels: [{ type: String, enum: ['push', 'sms', 'email', 'whatsapp', 'in-app'] }],
     recurring: { type: String, enum: ['daily', 'weekly', 'monthly'] },
     status: {
       type: String,

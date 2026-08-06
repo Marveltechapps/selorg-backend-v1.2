@@ -31,11 +31,19 @@ const userSchema = new mongoose.Schema(
     },
     /** Communication channel preferences for the customer app / web */
     notificationPreferences: {
+      /** Device / Expo / Web push alerts (OS / browser tray) */
       push: { type: Boolean, default: true },
+      /** In-app Notification Center / bell badge */
+      inApp: { type: Boolean, default: true },
       sms: { type: Boolean, default: true },
       whatsapp: { type: Boolean, default: true },
       email: { type: Boolean, default: true },
       dnd: { type: Boolean, default: false },
+      /**
+       * Per-category channel matrix:
+       * { order: { push, inApp, sms, whatsapp, email }, offers: {...}, ... }
+       */
+      categories: { type: mongoose.Schema.Types.Mixed, default: undefined },
     },
   },
   { timestamps: true }

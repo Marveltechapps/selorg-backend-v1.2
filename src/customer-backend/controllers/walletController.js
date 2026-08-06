@@ -1,6 +1,6 @@
 const { CustomerWallet } = require('../models/CustomerWallet');
 const { WalletTransaction } = require('../models/WalletTransaction');
-const { getOrCreateWallet } = require('../services/walletService');
+const { getOrCreateWallet, debitWalletForOrder } = require('../services/walletService');
 const { createWalletTopUpSession } = require('../services/worldlinePaymentsService');
 
 async function getBalance(req, res) {
@@ -54,7 +54,12 @@ async function getTransactions(req, res) {
     res.status(200).json({
       success: true,
       data: transactions,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
     });
   } catch (err) {
     console.error('wallet getTransactions error:', err);
@@ -62,45 +67,64 @@ async function getTransactions(req, res) {
   }
 }
 
+/**
+ * Legacy direct debit endpoint. Prefer order create with paymentMethodType=wallet —
+ * that path validates the order total server-side and is idempotent per order.
+ */
 async function debitForCheckout(req, res) {
   try {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const { amount, orderId } = req.body;
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid amount' });
+    const { amount, orderId } = req.body || {};
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: 'orderId is required. Wallet checkout must be done through order creation.',
+      });
     }
 
-    const wallet = await CustomerWallet.findOne({ customerId: userId });
-    if (!wallet || !wallet.isActive) {
-      return res.status(400).json({ success: false, message: 'Wallet not available' });
+    const { Order } = require('../models/Order');
+    const order = await Order.findOne({
+      _id: orderId,
+      userId,
+    }).lean();
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
     }
-    if (wallet.balance < amount) {
-      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    if (order.paymentStatus === 'paid') {
+      return res.status(400).json({ success: false, message: 'Order is already paid' });
+    }
+    if (order.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Order is cancelled' });
     }
 
-    const balanceBefore = wallet.balance;
-    wallet.balance -= amount;
-    wallet.lastTransactionAt = new Date();
-    await wallet.save();
+    const expected =
+      Number(order.walletDeduction) > 0
+        ? Number(order.walletDeduction)
+        : Number(order.totalBill) || 0;
+    const requested = Number(amount);
+    if (Number.isFinite(requested) && Math.abs(requested - expected) > 0.009) {
+      return res.status(400).json({
+        success: false,
+        message: 'Wallet amount must match the order wallet deduction computed by the server',
+      });
+    }
 
-    await WalletTransaction.create({
-      walletId: wallet._id,
-      customerId: userId,
-      type: 'debit',
-      amount,
-      balanceBefore,
-      balanceAfter: wallet.balance,
-      source: 'order_payment',
-      referenceId: orderId,
-      referenceType: 'order',
-      description: 'Payment for order',
+    const result = await debitWalletForOrder(userId, expected, order._id, {
+      description: `Payment for order ${order.orderNumber || order._id}`,
     });
+    if (result.error) {
+      return res.status(400).json({ success: false, message: result.error });
+    }
 
     res.status(200).json({
       success: true,
-      data: { balance: wallet.balance, deducted: amount },
+      data: {
+        balance: result.balance,
+        deducted: result.deducted,
+        alreadyDebited: !!result.alreadyDebited,
+      },
     });
   } catch (err) {
     console.error('wallet debit error:', err);

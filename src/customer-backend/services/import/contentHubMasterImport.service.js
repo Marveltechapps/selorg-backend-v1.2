@@ -12,6 +12,7 @@ const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassificatio
 const {
   deactivateLegacySeedProducts,
   consolidateDuplicateSubcategories,
+  consolidateDuplicateTopCategories,
 } = require('../../utils/categoryTaxonomyCleanup');
 
 const PRODUCT_BULK_CHUNK = 250;
@@ -617,6 +618,23 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
                 name: { $regex: `^${escaped}$`, $options: 'i' },
               }).session(txnSession).lean();
               if (existing) cacheCategory(existing);
+              // Plural/singular twins ("Millet Mandi" vs "Millets Mandi") share a token fingerprint.
+              if (!existing) {
+                const { categoryFingerprint } = require('../../utils/categoryTaxonomyCleanup');
+                const wantFp = categoryFingerprint(name);
+                if (wantFp) {
+                  const tops = await Category.find({
+                    level: 1,
+                    parentId: null,
+                    isActive: true,
+                  })
+                    .select('_id name slug hierarchyCodes')
+                    .session(txnSession)
+                    .lean();
+                  existing = tops.find((c) => categoryFingerprint(c.name) === wantFp) || null;
+                  if (existing) cacheCategory(existing);
+                }
+              }
             }
             const desiredSlug = slugify(name);
             const slug = existing
@@ -1623,14 +1641,21 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
             message: `Deactivated ${seedDeactivated} legacy seed/demo SKU(s) (PROD-*)`,
           });
         }
+        const topConsolidated = await consolidateDuplicateTopCategories({
+          session: txnSession,
+          warnings,
+        });
         const consolidated = await consolidateDuplicateSubcategories({
           session: txnSession,
           warnings,
         });
         counts.categories = counts.categories || {};
-        counts.categories.duplicateGroups = consolidated.groups;
-        counts.categories.duplicatesDeactivated = consolidated.deactivated;
-        counts.categories.productsRemapped = consolidated.remapped;
+        counts.categories.duplicateGroups =
+          (topConsolidated.groups || 0) + (consolidated.groups || 0);
+        counts.categories.duplicatesDeactivated =
+          (topConsolidated.deactivated || 0) + (consolidated.deactivated || 0);
+        counts.categories.productsRemapped =
+          (topConsolidated.remapped || 0) + (consolidated.remapped || 0);
       } catch (e) {
         warnings.push({
           sheet: 'Categories',

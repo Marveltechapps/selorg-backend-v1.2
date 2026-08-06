@@ -23,8 +23,8 @@ function registerEventListeners() {
         const order = await Order.findById(orderId);
         if (!order) return;
         // Placement wording is derived from the order's real payment method/status:
-        // COD → "Cash on Delivery order placed", wallet → "Order placed successfully",
-        // unpaid online → "awaiting payment" (never "Order Placed" before payment).
+        // COD / wallet / paid online → single "Order placed successfully" (deduped).
+        // unpaid online → skipped (gateway outcome notifies instead).
         await sendOrderPlacementNotification(order);
       } catch (err) {
         logger.warn('[domain-event] order.created notification skipped', { error: err?.message });

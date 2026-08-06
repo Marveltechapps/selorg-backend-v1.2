@@ -502,22 +502,149 @@ const sendViaTwilioPlain = (phone, bodyText) => {
 };
 
 /**
- * Transactional SMS (e.g. account deletion confirmation). Uses Twilio when configured;
- * otherwise logs in dev and returns sent:true so flows are not blocked.
+ * Transactional SMS (order/payment alerts, account notices).
+ * Tries Twilio first, then Spear/config smsvendor via smsGateway.sendSmsText.
+ * Never reports fake success when no provider is configured.
  */
 const sendPickerTransactionalSms = async (phone, text) => {
-  const trimmed = String(phone).replace(/\D/g, '');
-  if (!trimmed) {
+  const trimmed = String(phone).replace(/\D/g, '').slice(-10);
+  if (!trimmed || trimmed.length !== 10) {
     return { sent: false, errorCode: 'SMS_INVALID_NUMBER', userMessage: 'Invalid phone number.' };
   }
   lastSmsError = null;
   lastSmsResult = null;
+  const msg = String(text || '').trim();
+  if (!msg) {
+    return { sent: false, errorCode: 'SMS_EMPTY_BODY', userMessage: 'Empty SMS body.' };
+  }
+
   const twilioCfg = getTwilioConfig();
   if (twilioCfg.accountSid && twilioCfg.authToken && twilioCfg.phoneNumber) {
-    return sendViaTwilioPlain(trimmed, text);
+    const r = await sendViaTwilioPlain(trimmed, msg);
+    if (r.sent) return { ...r, provider: 'twilio', channel: 'sms' };
   }
-  console.log(`[SMS] Transactional (no Twilio): ${trimmed} — ${text}`);
-  return { sent: true, devLogged: true };
+
+  try {
+    const { sendSmsText } = require('../../utils/smsGateway');
+    const gateway = await sendSmsText(trimmed, msg);
+    if (gateway?.success) {
+      lastSmsResult = { sent: true };
+      lastSmsError = null;
+      return { sent: true, provider: 'smsvendor', channel: 'sms' };
+    }
+    if (gateway && gateway.success === false) {
+      setLastSmsError('smsvendor', gateway.statusCode, gateway.body, gateway.error);
+    }
+  } catch (err) {
+    console.warn('[SMS] Transactional smsGateway fallback error:', err?.message);
+  }
+
+  return (
+    getLastSmsResult() || {
+      sent: false,
+      configured: !!(twilioCfg.accountSid && twilioCfg.authToken && twilioCfg.phoneNumber) || !!getSmsVendorUrl(),
+      userMessage: 'Unable to send SMS. Please try again.',
+      internalLog: '[SMS] Transactional providers failed or not configured',
+    }
+  );
+};
+
+/** Twilio WhatsApp with an arbitrary transactional body (not OTP-only). */
+const sendViaTwilioWhatsAppPlain = (phone, bodyText) => {
+  const { accountSid: sid, authToken: token, whatsappFrom } = getTwilioConfig();
+  if (!sid || !token || !whatsappFrom) {
+    return Promise.resolve({
+      sent: false,
+      configured: false,
+      userMessage: 'WhatsApp is not configured on the server.',
+      internalLog: '[WhatsApp] TWILIO_WHATSAPP_FROM missing',
+    });
+  }
+  const e164 = toE164India(phone) || (String(phone).startsWith('+') ? phone : `+91${normalizeMobileForVendor(phone)}`);
+  if (!e164 || !e164.startsWith('+')) {
+    setLastSmsError('Twilio WhatsApp', null, null, 'Invalid phone format');
+    return Promise.resolve({ sent: false, ...getLastSmsResult() });
+  }
+  const to = e164.startsWith('whatsapp:') ? e164 : `whatsapp:${e164}`;
+  const from = whatsappFrom.startsWith('whatsapp:') ? whatsappFrom : `whatsapp:${whatsappFrom.replace(/^whatsapp:/i, '')}`;
+  const msg = String(bodyText || '').slice(0, 1400);
+  const body = new URLSearchParams({ To: to, From: from, Body: msg }).toString();
+  const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'api.twilio.com',
+        path: `/2010-04-01/Accounts/${sid}/Messages.json`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${auth}`,
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          const ok = res.statusCode >= 200 && res.statusCode < 300;
+          if (ok) {
+            lastSmsResult = { sent: true, channel: 'whatsapp' };
+            lastSmsError = null;
+            console.log(`[WhatsApp] Transactional message sent to ${to}`);
+            resolve({ sent: true, channel: 'whatsapp', provider: 'twilio' });
+          } else {
+            let errMessage = null;
+            try {
+              const j = JSON.parse(data);
+              errMessage = j?.message ?? j?.error_message ?? j?.more_info ?? null;
+            } catch (_) {}
+            setLastSmsError('Twilio WhatsApp', res.statusCode, data, errMessage || undefined);
+            console.warn('[WhatsApp] Twilio FAIL – HTTP', res.statusCode, 'body:', (data || '').slice(0, MAX_DEBUG_BODY_LENGTH));
+            resolve({ sent: false, configured: true, ...getLastSmsResult() });
+          }
+        });
+      }
+    );
+    req.on('error', (err) => {
+      setLastSmsError('Twilio WhatsApp', null, null, err?.message);
+      resolve({ sent: false, configured: true, ...getLastSmsResult() });
+    });
+    req.setTimeout(SMS_TIMEOUT_MS, () => {
+      req.destroy();
+      setLastSmsError('Twilio WhatsApp', null, null, 'Request timeout');
+      resolve({ sent: false, configured: true, ...getLastSmsResult() });
+    });
+    req.write(body);
+    req.end();
+  });
+};
+
+/**
+ * Transactional WhatsApp (order/payment alerts). Does not fall back to SMS —
+ * callers decide channel fan-out from user preferences.
+ * OTP WhatsApp remains on sendOtpWhatsApp (independent of notification prefs).
+ */
+const sendTransactionalWhatsApp = async (phone, text) => {
+  const trimmed = String(phone).replace(/\D/g, '').slice(-10);
+  if (!trimmed || trimmed.length !== 10) {
+    return { sent: false, errorCode: 'SMS_INVALID_NUMBER', userMessage: 'Invalid phone number.' };
+  }
+  lastSmsError = null;
+  lastSmsResult = null;
+  const msg = String(text || '').trim();
+  if (!msg) {
+    return { sent: false, errorCode: 'SMS_EMPTY_BODY', userMessage: 'Empty WhatsApp body.' };
+  }
+  const twilioCfg = getTwilioConfig();
+  if (!(twilioCfg.accountSid && twilioCfg.authToken && twilioCfg.whatsappFrom)) {
+    return {
+      sent: false,
+      configured: false,
+      userMessage: 'WhatsApp is not configured on the server.',
+      internalLog: '[WhatsApp] Twilio WhatsApp not configured',
+    };
+  }
+  return sendViaTwilioWhatsAppPlain(trimmed, msg);
 };
 
 /** Twilio – global, works in India. Phone: 10-digit → +91XXXXXXXXXX via toE164India. Creds from config + env. */
@@ -789,6 +916,7 @@ module.exports = {
   sendOtpSms,
   sendOtpWhatsApp,
   sendPickerTransactionalSms,
+  sendTransactionalWhatsApp,
   withOtpMessageTemplate,
   getLastSmsError,
   getLastSmsResult,

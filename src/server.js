@@ -517,6 +517,15 @@ if (process.env.NODE_ENV !== 'test') {
       logger.warn('Coupon status management job failed to start', { error: couponJobErr?.message });
     }
 
+    // Scheduled notification campaigns (pending → dispatch)
+    try {
+      const notificationSchedulerJob = require('./customer-backend/jobs/notificationSchedulerJob');
+      notificationSchedulerJob.start(30 * 1000);
+      logger.info('Notification scheduler job started (interval: 30s)');
+    } catch (notifSchedErr) {
+      logger.warn('Notification scheduler job failed to start', { error: notifSchedErr?.message });
+    }
+
     // Start Worldline payment reconciliation job (stale pending -> unknown)
     try {
       const worldlineReconciliationJob = require('./customer-backend/jobs/worldlineReconciliationJob');

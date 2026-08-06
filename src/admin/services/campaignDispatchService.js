@@ -1,13 +1,12 @@
 /**
- * Dispatches admin notification campaigns to customer segments.
+ * Dispatches admin notification campaigns through the unified notification pipeline.
+ * Respects user channel + category preferences for every recipient.
  */
 const { CustomerUser } = require('../../customer-backend/models/CustomerUser');
-const { PushToken } = require('../../customer-backend/models/PushToken');
-const { Notification } = require('../../customer-backend/models/Notification');
-const NotificationHistory = require('../models/NotificationHistory');
 const NotificationCampaign = require('../models/NotificationCampaign');
 const NotificationTemplate = require('../models/NotificationTemplate');
-const { deliverToExpo } = require('../../customer-backend/services/notificationService');
+const { sendNotification } = require('../../customer-backend/services/unifiedNotificationService');
+const { resolveCategory } = require('../../customer-backend/constants/notificationCategories');
 const logger = require('../../core/utils/logger');
 
 const BATCH_SIZE = 200;
@@ -50,73 +49,55 @@ function buildSegmentFilter(segment) {
   }
 }
 
+/** Map admin channel names → unified preference channel keys. */
+function mapChannels(channels) {
+  const set = new Set();
+  for (const ch of channels || []) {
+    if (ch === 'in-app' || ch === 'inApp') set.add('inApp');
+    else if (ch === 'push' || ch === 'web-push') set.add('push');
+    else if (ch === 'sms') set.add('sms');
+    else if (ch === 'whatsapp' || ch === 'wa') set.add('whatsapp');
+    else if (ch === 'email') set.add('email');
+  }
+  return [...set];
+}
+
 async function processBatch(users, campaign, template, channels) {
   let sent = 0;
   let delivered = 0;
-  const historyRecords = [];
+  const category = resolveCategory(template.category);
+  const requested = mapChannels(channels);
 
   for (const user of users) {
     const displayName = user.name || user.email || user.phoneNumber || 'Customer';
     const vars = { user_name: displayName, name: displayName };
     const title = fillTemplateVariables(template.title, vars);
     const body = fillTemplateVariables(template.body, vars);
-    const userId = user._id.toString();
+    const userId = user._id;
 
-    for (const channel of channels) {
-      if (channel === 'in-app') {
-        await Notification.create({
-          userId: user._id,
-          title,
-          body,
-          data: { campaignId: campaign._id.toString(), type: 'campaign' },
-        }).catch((err) => {
-          logger.warn('In-app campaign notification failed', { userId, err: err.message });
-        });
-        sent += 1;
-        delivered += 1;
-        historyRecords.push({
-          userId,
-          userName: displayName,
-          templateName: template.name,
-          title,
-          body,
-          channel: 'in-app',
-          status: 'delivered',
-          sentAt: new Date(),
-          deliveredAt: new Date(),
-          campaignId: campaign._id,
-        });
-      } else if (channel === 'push') {
-        const tokenDocs = await PushToken.find({ userId: user._id, active: true }).lean();
-        const tokens = tokenDocs.map((d) => d.token).filter(Boolean);
-        if (tokens.length > 0) {
-          await deliverToExpo(tokens, title, body, {
-            type: 'campaign',
-            campaignId: campaign._id.toString(),
-          });
-          sent += 1;
-          delivered += 1;
-        }
-        historyRecords.push({
-          userId,
-          userName: displayName,
-          templateName: template.name,
-          title,
-          body,
-          channel: 'push',
-          status: tokens.length > 0 ? 'sent' : 'failed',
-          sentAt: new Date(),
-          failureReason: tokens.length === 0 ? 'No active push tokens' : undefined,
-          campaignId: campaign._id,
-        });
-      }
-    }
-  }
-
-  if (historyRecords.length > 0) {
-    await NotificationHistory.insertMany(historyRecords, { ordered: false }).catch((err) => {
-      logger.warn('Campaign history insert failed', { err: err.message });
+    const result = await sendNotification({
+      userId,
+      title,
+      body,
+      type: 'CAMPAIGN',
+      category,
+      channels: requested.length ? requested : undefined,
+      campaignId: campaign._id,
+      user,
+      data: {
+        campaignId: campaign._id.toString(),
+        type: 'campaign',
+        category,
+        deepLink: template.deepLink || undefined,
+        imageUrl: template.imageUrl || undefined,
+      },
+      dedupeKey: `campaign:${campaign._id}:${userId}`,
     });
+
+    sent += 1;
+    if (result.success && !result.skipped && (result.delivered?.length > 0 || result.inboxCreated)) {
+      delivered += 1;
+    }
   }
 
   return { sent, delivered };
@@ -132,14 +113,16 @@ async function dispatchCampaign(campaign, template) {
       ? campaign.channels
       : template.channels?.length > 0
         ? template.channels
-        : ['push'];
+        : ['push', 'in-app'];
 
   let targetUsers = 0;
   let sentCount = 0;
   let deliveredCount = 0;
   let batch = [];
 
-  const cursor = CustomerUser.find(filter).select('_id name email phoneNumber').cursor();
+  const cursor = CustomerUser.find(filter)
+    .select('_id name email phoneNumber notificationPreferences savedCheckoutContact')
+    .cursor();
 
   for await (const user of cursor) {
     batch.push(user);
@@ -186,4 +169,4 @@ async function dispatchCampaign(campaign, template) {
   return { targetUsers, sentCount, deliveredCount, deliveryRate };
 }
 
-module.exports = { dispatchCampaign, buildSegmentFilter, fillTemplateVariables };
+module.exports = { dispatchCampaign, buildSegmentFilter, fillTemplateVariables, mapChannels };

@@ -13,7 +13,17 @@ const { syncAssignOrderToHhd } = require('../../shared/services/assignOrderSyncS
 const { Order: CustomerOrder } = require('../../customer-backend/models/Order');
 const { updateCustomerOrderStatus } = require('../../customer-backend/services/orderService');
 
-const DARKSTORE_TO_CUSTOMER_STATUS = { processing: 'confirmed', ready: 'getting-packed', cancelled: 'cancelled' };
+const DARKSTORE_TO_CUSTOMER_STATUS = {
+  ASSIGNED: 'confirmed',
+  processing: 'confirmed',
+  PICKING: 'confirmed',
+  PICKED: 'getting-packed',
+  PACKED: 'getting-packed',
+  READY_FOR_DISPATCH: 'getting-packed',
+  ready: 'getting-packed',
+  cancelled: 'cancelled',
+  CANCELLED: 'cancelled',
+};
 
 async function propagateToCustomerOrder(darkstoreOrderId, darkstoreStatus) {
   const customerStatus = DARKSTORE_TO_CUSTOMER_STATUS[darkstoreStatus];

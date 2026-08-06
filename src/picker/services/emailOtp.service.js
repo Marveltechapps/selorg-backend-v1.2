@@ -567,10 +567,119 @@ async function sendPickerEmailOtp({ to, otp, expiresInMinutes = 5, appName = APP
   };
 }
 
+function buildTransactionalEmailHtml(title, body, appName) {
+  const brand = appName || APP_NAME;
+  const safeTitle = String(title || 'Notification').replace(/</g, '&lt;');
+  const safeBody = String(body || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>');
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background-color:#F3F4F6;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#F3F4F6;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background-color:#ECFDF5;padding:28px 32px 22px;text-align:center;border-bottom:1px solid #D1FAE5;">
+              <div style="font-size:22px;font-weight:700;color:#111827;letter-spacing:-0.3px;">${brand}</div>
+              <div style="font-size:14px;color:#6B7280;margin-top:6px;">Account notification</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 12px;font-size:20px;line-height:28px;color:#111827;">${safeTitle}</h1>
+              <p style="margin:0;font-size:15px;line-height:24px;color:#4B5563;">${safeBody}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 28px;font-size:12px;line-height:18px;color:#9CA3AF;">
+              You received this email because email notifications are enabled in your Selorg account settings.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Generic transactional email (orders, payments, wallet, support).
+ * Reuses the same Resend/Brevo/SendGrid/SES/SMTP stack as OTP — OTP delivery
+ * is not affected by customer notificationPreferences.email.
+ *
+ * @param {{ to: string, subject: string, text: string, html?: string, appName?: string, from?: string }} params
+ */
+async function sendTransactionalEmail({
+  to,
+  subject,
+  text,
+  html,
+  appName = 'Selorg',
+  from,
+}) {
+  const destination = String(to || '').trim();
+  if (!destination || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(destination)) {
+    return { sent: false, configured: true, userMessage: 'Invalid email address.' };
+  }
+
+  const payload = {
+    to: destination,
+    subject: String(subject || 'Selorg notification').slice(0, 200),
+    text: String(text || ''),
+    html: html || buildTransactionalEmailHtml(subject, text, appName),
+    from: buildAppEmailFrom(appName, from),
+  };
+
+  if (!isEmailOtpConfigured()) {
+    return {
+      sent: false,
+      configured: false,
+      userMessage: 'Email is not configured on the server.',
+    };
+  }
+
+  const mode = getProviderMode();
+
+  if (hasFastProvider()) {
+    try {
+      const fastResult = await raceFastProviders(payload);
+      if (fastResult?.sent) return fastResult;
+    } catch (err) {
+      console.warn(`[Transactional Email] Fast providers failed for ${destination}: ${err?.message}`);
+      if (mode === 'fast') {
+        return {
+          sent: false,
+          configured: true,
+          userMessage: 'Failed to send email. Please try again.',
+          internalError: err?.message,
+        };
+      }
+    }
+  }
+
+  if (isSmtpConfigured()) {
+    return sendViaSmtp(payload);
+  }
+
+  return {
+    sent: false,
+    configured: true,
+    userMessage: 'Failed to send email. Please try again.',
+    internalError: 'No email provider available',
+  };
+}
+
 logProviderStatus();
 
 module.exports = {
   sendPickerEmailOtp,
+  sendTransactionalEmail,
   warmSmtpConnection,
   logProviderStatus,
   APP_NAME,

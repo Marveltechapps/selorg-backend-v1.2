@@ -12,7 +12,21 @@ const {
   resolveWorldlineApiReturnUrl,
   isLocalOrPrivateHost,
 } = require('../utils/paymentRedirectUrls');
+const { inferInstrumentFieldsFromWorldline } = require('../utils/paymentMethodDisplay');
 const fs = require('fs');
+
+function applyWorldlineInstrumentToOrder(order, worldlinePayment) {
+  if (!order || !worldlinePayment) return;
+  try {
+    const fields = inferInstrumentFieldsFromWorldline(worldlinePayment);
+    if (!order.paymentMethod) order.paymentMethod = {};
+    if (fields.instrument) order.paymentMethod.instrument = fields.instrument;
+    if (fields.displayLabel) order.paymentMethod.displayLabel = fields.displayLabel;
+    if (fields.paymentMode) order.paymentMethod.paymentMode = fields.paymentMode;
+  } catch (e) {
+    logger.warn('applyWorldlineInstrumentToOrder failed', { error: e?.message });
+  }
+}
 
 // #region agent log
 const DEBUG_SESSION = '636da9';
@@ -852,11 +866,17 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     return { error: 'This order is already paid.' };
   }
 
-  const amount = Number(order.totalBill || 0);
-  const amountStr = formatWorldlineTxnAmount(amount);
+  const walletPart = Number(order.walletDeduction) || 0;
+  const chargedAmount =
+    walletPart > 0
+      ? order.onlineAmountDue != null && Number(order.onlineAmountDue) >= 0
+        ? Number(order.onlineAmountDue)
+        : Math.max(0, Number(order.totalBill || 0) - walletPart)
+      : Number(order.totalBill || 0);
+  const amountStr = formatWorldlineTxnAmount(chargedAmount);
   const { min, max } = getAmountLimits();
-  if (!(amount >= min && amount <= max)) {
-    return { error: worldlineAmountRangeError(amount, min, max) };
+  if (!(chargedAmount >= min && chargedAmount <= max)) {
+    return { error: worldlineAmountRangeError(chargedAmount, min, max) };
   }
 
   // Find latest attempt for this order + platform
@@ -998,7 +1018,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
         token,
         txnId,
         deviceId,
-        amountInr: amount,
+        amountInr: chargedAmount,
         status: 'created',
         sessionExpiresAt,
         rawSessionRequest: sessionPayload,
@@ -1694,6 +1714,7 @@ async function completePayment(userId, { orderId, txnId, response, clientDebug }
         });
       } else {
         order.paymentStatus = 'paid';
+        applyWorldlineInstrumentToOrder(order, effectivePayment);
         await order.save();
         try {
           await releaseOrderFulfillment(String(orderId));
@@ -1936,6 +1957,7 @@ async function processGatewayReturn({ response, allowedUserId }) {
         });
       } else {
         order.paymentStatus = 'paid';
+        applyWorldlineInstrumentToOrder(order, effectivePayment);
         await order.save();
         try {
           await releaseOrderFulfillment(String(order._id));

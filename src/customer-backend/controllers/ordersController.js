@@ -274,7 +274,8 @@ async function reorder(req, res) {
   try {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-    const { orderId } = req.params;
+    // Route is POST /orders/:id/reorder — param name is `id`, not `orderId`.
+    const orderId = req.params.id;
     const result = await reorderItems(userId, orderId);
     if (result.error) return res.status(400).json({ success: false, message: result.error });
     res.status(200).json({ success: true, data: result });

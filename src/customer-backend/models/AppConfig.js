@@ -237,7 +237,16 @@ const DEFAULT_APP_CONFIG = {
     defaultCollectionKey: '',
   },
   paymentMethods: [
-    { key: 'cash', label: 'Cash on Delivery', description: 'Pay when your order arrives', icon: 'cash', imageUrl: '', isActive: true, order: 0 },
+    {
+      key: 'wallet',
+      label: 'Selorg Wallet',
+      description: 'Pay with your Selorg Wallet balance',
+      icon: 'wallet',
+      imageUrl: '',
+      isActive: true,
+      order: 0,
+    },
+    { key: 'cash', label: 'Cash on Delivery', description: 'Pay when your order arrives', icon: 'cash', imageUrl: '', isActive: true, order: 1 },
     {
       key: 'digital',
       label: 'Digital Payment',
@@ -245,7 +254,7 @@ const DEFAULT_APP_CONFIG = {
       icon: 'card',
       imageUrl: '',
       isActive: true,
-      order: 1,
+      order: 2,
     },
   ],
   featureFlags: {
@@ -325,7 +334,8 @@ const DEFAULT_APP_CONFIG = {
   },
   notifications: {
     channelsAvailable: [
-      { key: 'push', label: 'Push Notifications', description: 'Receive push notifications on your device', isActive: true },
+      { key: 'push', label: 'Push Notifications', description: 'Receive device alerts for orders and offers', isActive: true },
+      { key: 'inApp', label: 'In-App Notifications', description: 'Show alerts in the notification icon and inbox', isActive: true },
       { key: 'sms', label: 'SMS', description: 'Receive SMS notifications', isActive: true },
       { key: 'whatsapp', label: 'WhatsApp', description: 'Get updates on WhatsApp', isActive: true },
       { key: 'email', label: 'Email', description: 'Receive email notifications', isActive: true },

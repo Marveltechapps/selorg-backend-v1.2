@@ -671,15 +671,18 @@ module.exports = {
       const {
         deactivateLegacySeedProducts,
         consolidateDuplicateSubcategories,
+        consolidateDuplicateTopCategories,
       } = require('../../utils/categoryTaxonomyCleanup');
       const warnings = [];
       const seedDeactivated = await deactivateLegacySeedProducts();
+      const topConsolidated = await consolidateDuplicateTopCategories({ warnings });
       const consolidated = await consolidateDuplicateSubcategories({ warnings });
       await invalidateCustomerCachesSafely();
       return res.status(200).json({
         success: true,
         data: {
           seedDeactivated,
+          topCategories: topConsolidated,
           ...consolidated,
           warnings: warnings.slice(0, 50),
           warningCount: warnings.length,

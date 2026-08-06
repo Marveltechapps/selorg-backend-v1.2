@@ -1,5 +1,7 @@
 const { Notification } = require('../../models/Notification');
 const { CustomerUser } = require('../../models/CustomerUser');
+const { sendNotification } = require('../../services/unifiedNotificationService');
+const { resolveCategory } = require('../../constants/notificationCategories');
 
 exports.list = async (req, res) => {
   try {
@@ -17,9 +19,13 @@ exports.list = async (req, res) => {
   }
 };
 
+/**
+ * Admin blast — routes through unified pipeline (prefs + all channels).
+ * Body: { title, body, data, audience: 'all'|'specific', userIds?, channels?, category? }
+ */
 exports.send = async (req, res) => {
   try {
-    const { title, body, data, audience, userIds } = req.body;
+    const { title, body, data, audience, userIds, channels, category } = req.body;
     if (!title) {
       return res.status(400).json({ success: false, error: 'title is required' });
     }
@@ -32,19 +38,34 @@ exports.send = async (req, res) => {
     } else if (audience === 'specific' && Array.isArray(userIds) && userIds.length > 0) {
       targetUserIds = userIds;
     } else {
-      return res.status(400).json({ success: false, error: 'Specify audience="all" or audience="specific" with userIds array' });
+      return res.status(400).json({
+        success: false,
+        error: 'Specify audience="all" or audience="specific" with userIds array',
+      });
     }
 
-    const notifications = targetUserIds.map((uid) => ({
-      userId: uid,
-      title,
-      body: body || '',
-      data: data || {},
-      read: false,
-    }));
+    const resolvedCategory = resolveCategory(
+      data?.type || 'SYSTEM_ANNOUNCEMENT',
+      category || data?.category
+    );
 
-    const result = await Notification.insertMany(notifications);
-    res.status(201).json({ success: true, sent: result.length });
+    let sent = 0;
+    let skipped = 0;
+    for (const uid of targetUserIds) {
+      const result = await sendNotification({
+        userId: uid,
+        title,
+        body: body || '',
+        type: data?.type || 'SYSTEM_ANNOUNCEMENT',
+        category: resolvedCategory,
+        data: data || {},
+        channels,
+      });
+      if (result.skipped) skipped += 1;
+      else if (result.success) sent += 1;
+    }
+
+    res.status(201).json({ success: true, sent, skipped, total: targetUserIds.length });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -63,12 +84,17 @@ exports.remove = async (req, res) => {
 exports.stats = async (req, res) => {
   try {
     const [total, unread] = await Promise.all([
-      Notification.countDocuments(),
-      Notification.countDocuments({ read: false }),
+      Notification.countDocuments({ suppressed: { $ne: true } }),
+      Notification.countDocuments({ read: false, suppressed: { $ne: true } }),
     ]);
     const recentByDay = await Notification.aggregate([
       { $match: { createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          count: { $sum: 1 },
+        },
+      },
       { $sort: { _id: -1 } },
     ]);
     res.json({ success: true, data: { total, unread, read: total - unread, recentByDay } });

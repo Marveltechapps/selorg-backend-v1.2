@@ -48,6 +48,8 @@ async function auditAdminAction(req, action, entityId, details = {}) {
 function enrichCustomerIdentity(customer) {
   if (!customer) return customer;
 
+  const { isPlaceholderCustomerEmail, sanitizeCustomerEmail } = require('../../customer-backend/utils/customerDisplay');
+
   const fallbackName = customer.savedCheckoutContact?.fullName
     ? String(customer.savedCheckoutContact.fullName).trim()
     : '';
@@ -56,14 +58,15 @@ function enrichCustomerIdentity(customer) {
     : '';
 
   const currentName = customer.name ? String(customer.name).trim() : '';
-  const currentEmail = customer.email ? String(customer.email).trim() : '';
-  const isPlaceholderEmail =
-    !currentEmail || currentEmail.includes('no-email') || currentEmail.startsWith('customer-');
+  const currentEmail = sanitizeCustomerEmail(customer.email);
+  const checkoutEmail = isPlaceholderCustomerEmail(fallbackEmail)
+    ? ''
+    : fallbackEmail;
 
   return {
     ...customer,
     name: currentName || fallbackName || '',
-    email: isPlaceholderEmail ? (fallbackEmail || '') : currentEmail,
+    email: currentEmail || checkoutEmail || '',
   };
 }
 

@@ -29,6 +29,8 @@ router.put('/automation/:id', authenticateToken, notificationsController.updateA
 // Analytics & History
 router.get('/analytics', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.getAnalytics);
 router.get('/history', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.listHistory);
+router.post('/history/:id/retry', authenticateToken, notificationsController.retryHistory);
+router.post('/history/retry-failed', authenticateToken, notificationsController.retryFailedBatch);
 router.get('/channels', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.getChannels);
 router.get('/timeseries', authenticateToken, cacheMiddleware(cacheTtl), notificationsController.getTimeSeries);
 

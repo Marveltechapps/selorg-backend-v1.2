@@ -355,7 +355,11 @@ const notificationsController = {
 
   // --- History ---
   listHistory: asyncHandler(async (req, res) => {
-    const history = await NotificationHistory.find().sort({ sentAt: -1 }).limit(500).lean();
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.channel) filter.channel = req.query.channel;
+    if (req.query.campaignId) filter.campaignId = req.query.campaignId;
+    const history = await NotificationHistory.find(filter).sort({ sentAt: -1 }).limit(500).lean();
     const data = history.map((h) => ({
       ...h,
       id: h._id.toString(),
@@ -364,15 +368,37 @@ const notificationsController = {
     res.json({ success: true, data });
   }),
 
+  retryHistory: asyncHandler(async (req, res) => {
+    const { retryFailedNotification } = require('../../customer-backend/services/unifiedNotificationService');
+    const result = await retryFailedNotification(req.params.id);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    await invalidateNotifications().catch(() => {});
+    res.json({ success: true, data: result });
+  }),
+
+  retryFailedBatch: asyncHandler(async (req, res) => {
+    const { retryFailedBatch } = require('../../customer-backend/services/unifiedNotificationService');
+    const result = await retryFailedBatch({
+      campaignId: req.body?.campaignId || null,
+      limit: Math.min(parseInt(req.body?.limit, 10) || 100, 500),
+    });
+    await invalidateNotifications().catch(() => {});
+    res.json({ success: true, data: result });
+  }),
+
   // --- Channel performance ---
   getChannels: asyncHandler(async (req, res) => {
     const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const history = await NotificationHistory.find({ sentAt: { $gte: last24h } }).lean();
-    const channels = ['push', 'sms', 'email', 'in-app'];
+    const channels = ['push', 'sms', 'email', 'whatsapp', 'in-app'];
     const data = channels.map((ch) => {
       const byCh = history.filter((h) => h.channel === ch);
       const sent = byCh.length;
-      const delivered = byCh.filter((h) => ['delivered', 'opened', 'clicked'].includes(h.status)).length;
+      const delivered = byCh.filter((h) =>
+        ['sent', 'delivered', 'opened', 'clicked'].includes(h.status)
+      ).length;
       const opened = byCh.filter((h) => ['opened', 'clicked'].includes(h.status)).length;
       const clicked = byCh.filter((h) => h.status === 'clicked').length;
       return {
@@ -406,7 +432,7 @@ const notificationsController = {
       const key = d.toISOString();
       if (buckets[key]) {
         buckets[key].sent += 1;
-        if (['delivered', 'opened', 'clicked'].includes(h.status)) buckets[key].delivered += 1;
+        if (['sent', 'delivered', 'opened', 'clicked'].includes(h.status)) buckets[key].delivered += 1;
         if (['opened', 'clicked'].includes(h.status)) buckets[key].opened += 1;
         if (h.status === 'clicked') buckets[key].clicked += 1;
       }

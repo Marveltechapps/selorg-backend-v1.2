@@ -12,6 +12,7 @@ const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassificatio
 const {
   deactivateLegacySeedProducts,
   consolidateDuplicateSubcategories,
+  consolidateDuplicateTopCategories,
 } = require('../../utils/categoryTaxonomyCleanup');
 const { applySearchKeywordsWithCategories } = require('../search/productSearchKeywords');
 
@@ -701,10 +702,14 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
           message: `Deactivated ${seedDeactivated} legacy seed/demo SKU(s) (PROD-*)`,
         });
       }
+      const topConsolidated = await consolidateDuplicateTopCategories({ session, warnings });
       const consolidated = await consolidateDuplicateSubcategories({ session, warnings });
-      counts.categories.duplicateGroups = consolidated.groups;
-      counts.categories.duplicatesDeactivated = consolidated.deactivated;
-      counts.categories.productsRemapped = consolidated.remapped;
+      counts.categories.duplicateGroups =
+        (topConsolidated.groups || 0) + (consolidated.groups || 0);
+      counts.categories.duplicatesDeactivated =
+        (topConsolidated.deactivated || 0) + (consolidated.deactivated || 0);
+      counts.categories.productsRemapped =
+        (topConsolidated.remapped || 0) + (consolidated.remapped || 0);
     } catch (e) {
       warnings.push({ sheet: 'Categories', message: `Taxonomy cleanup failed: ${e.message}` });
     }

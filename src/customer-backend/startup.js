@@ -304,6 +304,32 @@ function run() {
           existing.markModified('wallet');
           changed = true;
         }
+
+        // Ensure Selorg Wallet appears as a checkout payment method on existing configs.
+        const paymentMethods = Array.isArray(existing.paymentMethods) ? existing.paymentMethods : [];
+        const hasWalletMethod = paymentMethods.some(
+          (m) => String(m?.key || '').toLowerCase() === 'wallet' || String(m?.key || '').toLowerCase() === 'selorg_wallet'
+        );
+        if (!hasWalletMethod) {
+          const walletMethod = (DEFAULT_APP_CONFIG.paymentMethods || []).find(
+            (m) => String(m.key).toLowerCase() === 'wallet'
+          ) || {
+            key: 'wallet',
+            label: 'Selorg Wallet',
+            description: 'Pay with your Selorg Wallet balance',
+            icon: 'wallet',
+            imageUrl: '',
+            isActive: true,
+            order: 0,
+          };
+          existing.paymentMethods = [walletMethod, ...paymentMethods.map((m, idx) => ({
+            ...m,
+            order: typeof m.order === 'number' ? m.order + 1 : idx + 1,
+          }))];
+          existing.markModified('paymentMethods');
+          changed = true;
+          logger.info('Customer AppConfig: added Selorg Wallet payment method');
+        }
         if (!existing.catalog) {
           existing.catalog = DEFAULT_APP_CONFIG.catalog;
           existing.markModified('catalog');

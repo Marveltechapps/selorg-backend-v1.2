@@ -659,6 +659,30 @@ const assignOrder = async (warehouseKeyOrOrderId, orderIdOrRiderId, riderIdOrOve
         etaMinutes: etaMins,
       });
     }
+
+    // Link customer order to the real RiderV2 rider so tracking shows name/phone/GPS.
+    try {
+      const { Order: CustomerOrder } = require('../../customer-backend/models/Order');
+      const { updateCustomerOrderStatus } = require('../../customer-backend/services/orderService');
+      const customerOrder = await CustomerOrder.findOne({ orderNumber: orderIdVal });
+      if (customerOrder) {
+        if (customerOrder.status === 'pending') {
+          await updateCustomerOrderStatus(customerOrder._id, 'confirmed', {
+            actor: 'dispatch',
+            riderId: String(effectiveRiderId),
+            note: 'Rider assigned',
+          });
+        } else {
+          customerOrder.riderId = String(effectiveRiderId);
+          await customerOrder.save();
+        }
+      }
+    } catch (custLinkErr) {
+      logger.warn('[RiderV2Order] Failed to link rider to customer order (non-blocking)', {
+        orderNumber: orderIdVal,
+        error: custLinkErr?.message,
+      });
+    }
   } catch (syncErr) {
     logger.error('[RiderV2Order] Sync failed - rider app will not see this order', {
       orderId: orderDoc.id || orderDoc.order_id || orderId,
@@ -704,30 +728,11 @@ const alertOrder = async (warehouseKeyOrOrderId, orderIdOrReason, reasonMaybe) =
 
   let order = await Order.findOne(mergeWarehouseFilter({ id: orderId }, warehouseKey));
 
-  // In development mode, create mock order if not found
-  if (appConfig.nodeEnv === 'development') {
-    if (!order) {
-      order = {
-        id: orderId,
-        status: 'assigned',
-        riderId: 'test-rider-1',
-        etaMinutes: 15,
-        slaDeadline: new Date(Date.now() + 3600000),
-        pickupLocation: 'Store Location A',
-        dropLocation: 'Customer Address 1',
-        customerName: 'Test Customer',
-        items: ['Item A', 'Item B'],
-        timeline: [],
-        save: async function() { return this; }
-      };
-    }
-  } else {
-    // Production mode - strict validation
-    if (!order) {
-      const error = new Error('Order not found');
-      error.statusCode = 404;
-      throw error;
-    }
+  // In development mode, do not invent fake orders — return 404 like production.
+  if (!order) {
+    const error = new Error('Order not found');
+    error.statusCode = 404;
+    throw error;
   }
 
   // Create alert (in production, save to alerts collection)

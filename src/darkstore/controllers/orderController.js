@@ -16,9 +16,15 @@ const orderAssignmentService = require('../services/orderAssignmentService');
 const orderAssignService = require('../services/orderAssignService');
 
 const DARKSTORE_TO_CUSTOMER_STATUS = {
+  ASSIGNED: 'confirmed',
   processing: 'confirmed',
+  PICKING: 'confirmed',
+  PICKED: 'getting-packed',
+  PACKED: 'getting-packed',
+  READY_FOR_DISPATCH: 'getting-packed',
   ready: 'getting-packed',
   cancelled: 'cancelled',
+  CANCELLED: 'cancelled',
 };
 
 async function propagateToCustomerOrder(darkstoreOrderId, darkstoreStatus) {

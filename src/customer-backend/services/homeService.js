@@ -15,6 +15,7 @@ const { resolveCuratedSectionProducts, RAIL_ALIASES } = require('./merchandising
 const { enrichHomePayloadLegacy } = require('../utils/customerMediaEnrichment');
 const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
+const { dedupeTopCategoriesByFingerprint } = require('../utils/categoryTaxonomyCleanup');
 const { dedupeHomeSectionDefinitions } = require('../utils/dedupeHomeSectionDefinitions');
 const { collectionMergeKey, stripKeyNumericSuffix } = require('../utils/homeSectionKeys');
 const cacheService = require('../../core/services/cache.service');
@@ -152,9 +153,13 @@ async function buildSharedHomePayloadFromDefs(config, definitionsFromCollection)
       }
     }
   }
-  const categories = filterCatalogLabels(categoryByKey[Object.keys(categoryByKey)[0]] || []);
+  const categories = filterCatalogLabels(
+    dedupeTopCategoriesByFingerprint(categoryByKey[Object.keys(categoryByKey)[0]] || [])
+  );
   for (const key of Object.keys(categoryByKey)) {
-    categoryByKey[key] = filterCatalogLabels(categoryByKey[key] || []);
+    categoryByKey[key] = filterCatalogLabels(
+      dedupeTopCategoriesByFingerprint(categoryByKey[key] || [])
+    );
   }
   const now = new Date();
   const scheduleQuery = {

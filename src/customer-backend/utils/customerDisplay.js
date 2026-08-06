@@ -1,10 +1,32 @@
 const GENERIC_NAMES = new Set(['customer', 'unknown', 'user', '']);
 
+/** Synthetic emails assigned historically to phone-only OTP users. */
+const PLACEHOLDER_EMAIL_RE = /^no-email-.*@no-email\.selorg$/i;
+
 function formatPhoneForDisplay(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
   if (digits.length === 10) return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
   if (digits.length > 10) return `+${digits}`;
   return String(phone || '').trim();
+}
+
+function isPlaceholderCustomerEmail(email) {
+  if (email == null) return true;
+  const trimmed = String(email).trim();
+  if (!trimmed) return true;
+  if (PLACEHOLDER_EMAIL_RE.test(trimmed)) return true;
+  if (trimmed.includes('no-email')) return true;
+  if (trimmed.startsWith('customer-') && trimmed.endsWith('@selorg.com')) return true;
+  return false;
+}
+
+/**
+ * Return a real customer email, or empty string when missing / placeholder.
+ * Never invents a fake address for API clients.
+ */
+function sanitizeCustomerEmail(email) {
+  if (isPlaceholderCustomerEmail(email)) return '';
+  return String(email).trim();
 }
 
 /**
@@ -48,7 +70,10 @@ function isGenericCustomerName(name) {
 
 module.exports = {
   GENERIC_NAMES,
+  PLACEHOLDER_EMAIL_RE,
   formatPhoneForDisplay,
+  isPlaceholderCustomerEmail,
+  sanitizeCustomerEmail,
   resolveCustomerIdentity,
   isGenericCustomerName,
 };

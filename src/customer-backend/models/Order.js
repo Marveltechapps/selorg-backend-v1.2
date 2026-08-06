@@ -66,6 +66,12 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: {
       methodType: { type: String, enum: ['card', 'upi', 'cash', 'wallet', 'digital'], default: 'cash' },
       last4: String,
+      /** Resolved instrument after Worldline success (e.g. phonepe, gpay, card, upi). */
+      instrument: { type: String, default: '' },
+      /** Customer-facing label cached from gateway (e.g. "PhonePe UPI"). */
+      displayLabel: { type: String, default: '' },
+      /** Paynimo session paymentMode when known (UPI, cards, netBanking, all). */
+      paymentMode: { type: String, default: '' },
     },
     paymentStatus: {
       type: String,
@@ -80,6 +86,10 @@ const orderSchema = new mongoose.Schema(
     deliveryTip: { type: Number, default: 0 },
     discount: { type: Number, default: 0 },
     walletDeduction: { type: Number, default: 0 },
+    /** Remaining amount charged via Worldline after wallet deduction (0 for full-wallet / COD). */
+    onlineAmountDue: { type: Number, default: 0 },
+    /** Set once when a voided unpaid online order has restored the wallet deduction. */
+    walletRefundedAt: { type: Date, default: null },
     totalBill: { type: Number, required: true, default: 0 },
     pricingSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
     estimatedDelivery: { type: Date },
@@ -96,7 +106,7 @@ const orderSchema = new mongoose.Schema(
     refundAmount: { type: Number, default: 0 },
     supportTicketId: { type: mongoose.Schema.Types.ObjectId, ref: 'AdminSupportTicket' },
     storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store' },
-    riderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Rider' },
+    riderId: { type: String, default: null, index: true },
     ratingScore: { type: Number, min: 1, max: 5 },
     ratingComment: { type: String, default: '' },
     /** When true, cart was cleared and darkstore/finance side-effects ran (or immediate checkout path). */

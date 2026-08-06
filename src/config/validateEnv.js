@@ -136,6 +136,20 @@ const validateEnvironment = () => {
     warnings.push('WORLDLINE_* variables are set but WORLDLINE_ENABLED is false');
   }
 
+  // Browser Web Push (VAPID) — optional but recommended for Chrome/Edge push
+  const vapidPublic = String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim();
+  const vapidPrivate = String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim();
+  if (!vapidPublic || !vapidPrivate) {
+    warnings.push(
+      'WEB_PUSH_VAPID_PUBLIC_KEY / WEB_PUSH_VAPID_PRIVATE_KEY not set — browser Web Push disabled. ' +
+        'Generate with: npx web-push generate-vapid-keys'
+    );
+  } else if (vapidPublic && !vapidPrivate) {
+    errors.push('WEB_PUSH_VAPID_PRIVATE_KEY is required when WEB_PUSH_VAPID_PUBLIC_KEY is set');
+  } else if (!vapidPublic && vapidPrivate) {
+    errors.push('WEB_PUSH_VAPID_PUBLIC_KEY is required when WEB_PUSH_VAPID_PRIVATE_KEY is set');
+  }
+
   // Log warnings
   if (warnings.length > 0) {
     warnings.forEach(warning => logger.warn(warning));
@@ -158,6 +172,7 @@ const validateEnvironment = () => {
     worldlineEnabled,
     hasWorldlineMerchantId: !!(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE),
     hasWorldlineSalt: !!process.env.WORLDLINE_SALT,
+    webPushConfigured: !!(vapidPublic && vapidPrivate),
   });
 };
 

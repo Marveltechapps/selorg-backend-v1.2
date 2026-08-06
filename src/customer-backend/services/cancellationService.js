@@ -6,6 +6,10 @@ const { sendOrderStatusNotification, sendRefundNotification } = require('./notif
 const { creditWallet } = require('./autoRefundService');
 const { restoreCartFromOrder } = require('./cartService');
 
+function roundMoney(amount) {
+  return Math.round((Number(amount) || 0) * 100) / 100;
+}
+
 /** Daily cancel cap per user (calendar day). Default 1000; override with CUSTOMER_MAX_CANCELLATIONS_PER_DAY. */
 function getEffectiveMaxCancellationsPerDay() {
   const raw = process.env.CUSTOMER_MAX_CANCELLATIONS_PER_DAY;
@@ -44,6 +48,21 @@ async function getActivePolicy(paymentMethod) {
   return { ...base, maxCancellationsPerDay: getEffectiveMaxCancellationsPerDay() };
 }
 
+/** Darkstore / ops stages where customer cancel must be blocked even if the
+ *  customer-facing status is still `confirmed` (e.g. PICKING maps to confirmed). */
+const NON_CANCELLABLE_FULFILLMENT_STATUSES = new Set([
+  'PICKING',
+  'PICKED',
+  'PACKED',
+  'READY_FOR_DISPATCH',
+  'ready',
+  'completed',
+  'OUT_FOR_DELIVERY',
+  'out-for-delivery',
+  'on-the-way',
+  'DISPATCHED',
+]);
+
 async function canCustomerCancel(userId, orderId) {
   const order = await Order.findOne({ _id: orderId, userId }).lean();
   if (!order) return { allowed: false, reason: 'Order not found' };
@@ -56,6 +75,25 @@ async function canCustomerCancel(userId, orderId) {
 
   if (!policy.allowedStatuses.includes(order.status)) {
     return { allowed: false, reason: `Cannot cancel order in "${order.status}" status` };
+  }
+
+  // Block cancel once darkstore has started picking/packing even while the
+  // customer order status remains `confirmed`.
+  if (order.orderNumber) {
+    try {
+      const DarkstoreOrder = require('../../darkstore/models/Order');
+      const dsOrder = await DarkstoreOrder.findOne({ order_id: order.orderNumber })
+        .select('status')
+        .lean();
+      if (dsOrder && NON_CANCELLABLE_FULFILLMENT_STATUSES.has(String(dsOrder.status || ''))) {
+        return {
+          allowed: false,
+          reason: `Cannot cancel order while fulfillment is in "${dsOrder.status}" status`,
+        };
+      }
+    } catch (e) {
+      // Darkstore model may be unavailable in some test harnesses — policy status still applies.
+    }
   }
 
   const orderAge = (Date.now() - new Date(order.createdAt).getTime()) / 60000;
@@ -143,6 +181,33 @@ async function executeCancellation(userId, orderId, reason = '') {
     order.paymentStatus = 'failed';
   }
 
+  // Unpaid partial-wallet orders: restore wallet debit when customer cancels before online pay.
+  if (isUnreleasedGateway && Number(order.walletDeduction) > 0 && !order.walletRefundedAt) {
+    try {
+      const { refundWalletForFailedOrderPayment } = require('./walletService');
+      const claimedRefund = await Order.findOneAndUpdate(
+        { _id: order._id, walletDeduction: { $gt: 0 }, walletRefundedAt: null },
+        { $set: { walletRefundedAt: new Date() } },
+        { new: true }
+      );
+      if (claimedRefund) {
+        const result = await refundWalletForFailedOrderPayment(
+          userId,
+          Number(order.walletDeduction),
+          order._id,
+          { description: `Wallet restored after cancelling order ${order.orderNumber || order._id}` }
+        );
+        if (result?.error) {
+          await Order.updateOne({ _id: order._id }, { $set: { walletRefundedAt: null } });
+        } else {
+          order.walletRefundedAt = claimedRefund.walletRefundedAt || new Date();
+        }
+      }
+    } catch (e) {
+      console.warn('wallet restore on cancel failed (non-blocking):', e?.message);
+    }
+  }
+
   let refundAmount = 0;
   let refundMethod = check.policy.refundMethod || 'original_payment';
   let refundNotificationType = null;
@@ -158,10 +223,49 @@ async function executeCancellation(userId, orderId, reason = '') {
       order.refundStatus = 'pending';
       refundNotificationType = 'REFUND_INITIATED';
 
-      if (refundMethod === 'wallet') {
-        await creditWallet(userId, refundAmount, String(order._id), String(order._id));
+      const walletPortion = Math.min(
+        refundAmount,
+        Math.max(0, Number(order.walletDeduction) || 0)
+      );
+      const isFullWalletPay = order.paymentMethod?.methodType === 'wallet';
+
+      // Full wallet orders always refund to wallet. Partial wallet: restore wallet
+      // portion immediately; remainder follows configured refund policy.
+      if (isFullWalletPay || refundMethod === 'wallet') {
+        await creditWallet(userId, refundAmount, String(order._id), `cancel-${order._id}`);
         order.refundStatus = 'processed';
         refundNotificationType = 'REFUND_COMPLETED';
+        refundMethod = 'wallet';
+      } else if (walletPortion > 0) {
+        await creditWallet(
+          userId,
+          walletPortion,
+          `cancel-wallet-${order._id}`,
+          String(order._id)
+        );
+        const onlineRefund = roundMoney(refundAmount - walletPortion);
+        if (onlineRefund > 0) {
+          if (refundMethod === 'manual') {
+            order.refundStatus = 'pending';
+          } else {
+            try {
+              const refund = await createCancelRefundRequest(
+                order,
+                onlineRefund,
+                'original_payment',
+                reason
+              );
+              order.refundId = refund._id;
+              order.refundStatus = refund.status || 'pending';
+            } catch (e) {
+              console.warn('createCancelRefundRequest failed (non-blocking):', e?.message);
+            }
+          }
+        } else {
+          order.refundStatus = 'processed';
+          refundNotificationType = 'REFUND_COMPLETED';
+          refundMethod = 'wallet';
+        }
       } else if (refundMethod === 'manual') {
         order.refundStatus = 'pending';
       } else {

@@ -19,7 +19,7 @@ const NotificationCampaignSchema = new mongoose.Schema(
       enum: ['draft', 'scheduled', 'active', 'paused', 'completed'],
       default: 'draft',
     },
-    channels: [{ type: String, enum: ['push', 'sms', 'email', 'in-app'] }],
+    channels: [{ type: String, enum: ['push', 'sms', 'email', 'whatsapp', 'in-app'] }],
     scheduledAt: { type: Date },
     startedAt: { type: Date },
     completedAt: { type: Date },

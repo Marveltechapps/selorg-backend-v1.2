@@ -192,10 +192,12 @@ var getRiderByPhone = exports.getRiderByPhone = /*#__PURE__*/function () {
 }();
 var updateRiderLocation = exports.updateRiderLocation = /*#__PURE__*/function () {
   var _ref4 = _asyncToGenerator(/*#__PURE__*/_regenerator().m(function _callee4(input) {
+    var updated, RiderV2Order, CustomerOrder, activeOrders, i, ro, co, websocketService, msg;
     return _regenerator().w(function (_context4) {
       while (1) switch (_context4.n) {
         case 0:
-          return _context4.a(2, _Rider.Rider.findOneAndUpdate({
+          _context4.n = 1;
+          return _Rider.Rider.findOneAndUpdate({
             riderId: input.riderId
           }, {
             currentLocation: {
@@ -205,7 +207,60 @@ var updateRiderLocation = exports.updateRiderLocation = /*#__PURE__*/function ()
             }
           }, {
             "new": true
-          }));
+          });
+        case 1:
+          updated = _context4.v;
+          // Broadcast live location to customer order subscribers (polling clients also re-read RiderV2 GPS).
+          try {
+            RiderV2Order = require("../../models/Order.js").Order;
+            CustomerOrder = require("../../../../customer-backend/models/Order").Order;
+            _context4.n = 2;
+            return RiderV2Order.find({
+              "riderAssignment.riderId": String(input.riderId),
+              status: {
+                $in: ["assigned", "arrived_at_darkstore", "picked", "out_for_delivery", "arrived_at_customer"]
+              }
+            }).lean();
+          } catch (_broadcastErr) {
+            return _context4.a(2, updated);
+          }
+        case 2:
+          activeOrders = _context4.v || [];
+          i = 0;
+        case 3:
+          if (!(i < activeOrders.length)) {
+            _context4.n = 6;
+            break;
+          }
+          ro = activeOrders[i];
+          _context4.n = 4;
+          return CustomerOrder.findOne({
+            orderNumber: ro.orderNumber
+          }).lean();
+        case 4:
+          co = _context4.v;
+          if (co) {
+            msg = {
+              type: "rider_location",
+              orderId: String(co._id),
+              orderNumber: co.orderNumber,
+              latitude: input.lat,
+              longitude: input.lng,
+              updatedAt: new Date().toISOString()
+            };
+            try {
+              require("../websocket/websocket.service.js").webSocketService.notifyOrderCustomers(String(co._id), msg);
+            } catch (_wsErr) {}
+            try {
+              websocketService = require("../../../../utils/websocket");
+              websocketService && websocketService.broadcastToRole && websocketService.broadcastToRole("customer", "rider:location", msg);
+            } catch (_ws2Err) {}
+          }
+          i++;
+          _context4.n = 3;
+          break;
+        case 6:
+          return _context4.a(2, updated);
       }
     }, _callee4);
   }));

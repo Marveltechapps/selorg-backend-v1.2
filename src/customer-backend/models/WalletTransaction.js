@@ -44,13 +44,14 @@ const walletTransactionSchema = new mongoose.Schema(
 walletTransactionSchema.index({ walletId: 1, createdAt: -1 });
 walletTransactionSchema.index({ customerId: 1, createdAt: -1 });
 walletTransactionSchema.index({ source: 1 });
-// Idempotent payment top-ups: one ledger row per gateway txn id.
+// Idempotent ledger rows keyed by source + reference (top-up txn, order debit, void refund).
 walletTransactionSchema.index(
   { customerId: 1, source: 1, referenceId: 1 },
   {
+    name: 'wallet_ledger_idempotency_v2',
     unique: true,
     partialFilterExpression: {
-      source: 'payment_topup',
+      source: { $in: ['payment_topup', 'order_payment', 'refund'] },
       referenceId: { $type: 'string', $gt: '' },
     },
   }

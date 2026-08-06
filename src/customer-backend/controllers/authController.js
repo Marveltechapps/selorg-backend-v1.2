@@ -2,6 +2,7 @@ const { OtpSession } = require('../models/OtpSession');
 const { CustomerUser } = require('../models/CustomerUser');
 const { generateOtp, hashOtp, verifyOtp, getExpiryDate } = require('../utils/otpUtils');
 const { sendSms } = require('../services/otpProviderService');
+const { sanitizeCustomerEmail } = require('../utils/customerDisplay');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -347,7 +348,6 @@ async function sendOtp(req, res) {
 
 async function upsertCustomerUser(session) {
   const now = new Date();
-  const fallbackEmail = `no-email-${Date.now()}-${Math.floor(Math.random() * 100000)}@no-email.selorg`;
   const isEmailLogin = !!session.email;
 
   let existingUser;
@@ -362,6 +362,8 @@ async function upsertCustomerUser(session) {
   const setFields = isEmailLogin
     ? { lastLogin: now }
     : { phoneVerified: true, phoneVerifiedAt: now, lastLogin: now };
+  // Phone-only signups must not receive a synthetic/placeholder email.
+  // Email is optional (sparse unique index) until the user adds one.
   const insertFields = isEmailLogin
     ? {
         email: session.email,
@@ -369,7 +371,6 @@ async function upsertCustomerUser(session) {
       }
     : {
         phoneNumber: session.phoneNumber,
-        email: fallbackEmail,
         status: 'active',
       };
 
@@ -494,7 +495,8 @@ async function verifyOtpController(req, res) {
       console.warn('WebSocket broadcast failed (non-blocking)', wsErr?.message);
     }
 
-    const payload = { sub: String(user._id), phoneNumber: user.phoneNumber, email: user.email };
+    const publicEmail = sanitizeCustomerEmail(user.email);
+    const payload = { sub: String(user._id), phoneNumber: user.phoneNumber, email: publicEmail || undefined };
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_EXPIRES_SECONDS });
     const responseData = {
       accessToken,
@@ -502,7 +504,7 @@ async function verifyOtpController(req, res) {
       user: {
         _id: String(user._id),
         phoneNumber: user.phoneNumber,
-        email: user.email,
+        email: publicEmail || null,
         name: user.name || '',
         phoneVerified: user.phoneVerified,
       },

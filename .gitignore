@@ -85,6 +85,10 @@ tmp/
 *.key
 *.crt
 *.p12
+*firebase-adminsdk*.json
+*-firebase-adminsdk-*.json
+serviceAccount*.json
+**/service-account*.json
 
 # ==========================
 # Misc

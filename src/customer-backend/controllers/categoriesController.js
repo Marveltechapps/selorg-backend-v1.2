@@ -16,6 +16,7 @@ const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
 const {
   dedupeSubcategoriesByName,
+  dedupeTopCategoriesByFingerprint,
   findSameNamedSubcategoryTwins,
   normalizeCategoryName,
   pickCanonicalSubcategory,
@@ -34,17 +35,32 @@ async function listCategories(req, res) {
     })
       .sort({ order: 1 })
       .lean();
-    // Dedupe case-variant L1s ("RICE Mandi" / "Rice Mandi") — keep first by order.
-    const seenNames = new Set();
-    const deduped = [];
-    for (const c of categories || []) {
-      const key = String(c.name || '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, ' ');
-      if (!key || seenNames.has(key)) continue;
-      seenNames.add(key);
-      deduped.push(c);
+    // Dedupe case + plural/singular L1 twins ("Millet Mandi" / "Millets Mandi").
+    const deduped = dedupeTopCategoriesByFingerprint(categories || []);
+    if ((categories || []).length > deduped.length) {
+      setImmediate(() => {
+        const {
+          consolidateDuplicateTopCategories,
+          consolidateDuplicateSubcategories,
+        } = require('../utils/categoryTaxonomyCleanup');
+        Promise.resolve()
+          .then(() => consolidateDuplicateTopCategories({ warnings: [] }))
+          .then((top) =>
+            consolidateDuplicateSubcategories({ warnings: [] }).then((sub) => ({ top, sub }))
+          )
+          .then(async ({ top }) => {
+            if (top?.deactivated > 0) {
+              try {
+                const { invalidateCustomerCatalogCaches } = require('../services/inventoryAvailabilitySync');
+                await invalidateCustomerCatalogCaches();
+              } catch (_) {
+                /* ignore */
+              }
+              console.log('[taxonomy] consolidated duplicate top categories', JSON.stringify(top));
+            }
+          })
+          .catch((err) => console.warn('[taxonomy] L1 consolidate failed:', err.message));
+      });
     }
     const data = filterCatalogLabels(
       deduped.map((c) => {

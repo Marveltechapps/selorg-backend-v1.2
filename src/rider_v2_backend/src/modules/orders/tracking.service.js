@@ -50,36 +50,47 @@ var updateRiderLocation = exports.updateRiderLocation = /*#__PURE__*/function ()
               order = _step.value;
               etaUpdate = {
                 orderId: String(order._id),
-                estimatedArrival: new Date(Date.now() + 15 * 60 * 1000),
-                // Placeholder: 15 min ETA
+                estimatedArrival: new Date(Date.now() + (Number(process.env.DEFAULT_DELIVERY_SLA_MINUTES) || 30) * 60 * 1000),
                 distanceRemaining: 0,
-                // Would be calculated using routing service
                 currentLocation: {
                   lat: location.lat,
                   lng: location.lng
                 }
-              }; // Send to rider
+              };
               _websocketService.webSocketService.notifyOrderUpdate(riderId, {
                 type: "location_update",
                 orderId: String(order._id),
                 location: etaUpdate
               });
-              _websocketService.webSocketService.notifyOrderCustomers(String(order._id), {
-                type: "rider_location",
-                payload: {
-                  orderId: String(order._id),
-                  currentLocation: { lat: location.lat, lng: location.lng },
-                  estimatedArrival: etaUpdate.estimatedArrival
-                },
-                timestamp: new Date().toISOString()
-              });
+              // Resolve customer order id asynchronously so mobile/web subscribers match.
+              (function (riderOrder, loc, eta) {
+                try {
+                  require("../../../../customer-backend/models/Order").Order.findOne({
+                    orderNumber: riderOrder.orderNumber
+                  }).lean().then(function (co) {
+                    var targetId = co ? String(co._id) : String(riderOrder._id);
+                    _websocketService.webSocketService.notifyOrderCustomers(targetId, {
+                      type: "rider_location",
+                      payload: {
+                        orderId: targetId,
+                        orderNumber: riderOrder.orderNumber,
+                        currentLocation: {
+                          lat: loc.lat,
+                          lng: loc.lng
+                        },
+                        estimatedArrival: eta.estimatedArrival
+                      },
+                      timestamp: new Date().toISOString()
+                    });
+                  }).catch(function () {});
+                } catch (_e) {}
+              })(order, location, etaUpdate);
             }
           } catch (err) {
             _iterator.e(err);
           } finally {
             _iterator.f();
           }
-        case 3:
           return _context.a(2);
       }
     }, _callee);
