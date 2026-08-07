@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const { CustomerUser } = require('../models/CustomerUser');
+const tokenBlocklist = require('../../core/services/tokenBlocklist');
 
 const JWT_SECRET =
   process.env.CUSTOMER_JWT_SECRET || process.env.JWT_SECRET || 'dev_jwt_secret_change_in_prod';
@@ -22,10 +23,15 @@ async function optionalAuth(req, _res, next) {
       next();
       return;
     }
+    const token = parts[1];
     let payload;
     try {
-      payload = jwt.verify(parts[1], JWT_SECRET);
+      payload = jwt.verify(token, JWT_SECRET);
     } catch {
+      next();
+      return;
+    }
+    if (tokenBlocklist.has(token)) {
       next();
       return;
     }

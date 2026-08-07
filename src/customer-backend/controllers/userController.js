@@ -55,32 +55,51 @@ async function updateProfile(req, res) {
       res.status(401).json({ success: false, message: 'Unauthorized' });
       return;
     }
-    const allowed = ['name', 'email', 'phoneNumber', 'avatarUrl'];
+    const allowed = ['name', 'email', 'avatarUrl'];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
     // Backward-compatible aliases from older/mobile payloads.
-    if (req.body.mobileNumber !== undefined && updates.phoneNumber === undefined) {
-      updates.phoneNumber = req.body.mobileNumber;
-    } else if (req.body.phone !== undefined && updates.phoneNumber === undefined) {
-      updates.phoneNumber = req.body.phone;
-    }
     if (req.body.profileImageUrl !== undefined && updates.avatarUrl === undefined) {
       updates.avatarUrl = req.body.profileImageUrl;
     }
 
-    if (updates.avatarUrl !== undefined) {
-      updates.avatarUrl = String(updates.avatarUrl || '').trim();
-    }
-
-    if (updates.phoneNumber !== undefined) {
-      const digits = String(updates.phoneNumber || '').replace(/\D/g, '');
-      if (digits.length !== 10) {
-        res.status(400).json({ success: false, message: 'phoneNumber must be exactly 10 digits' });
+    // Auth phone is immutable via profile update. Linking requires OTP verify endpoints.
+    const phoneAttempt =
+      req.body.phoneNumber !== undefined ||
+      req.body.mobileNumber !== undefined ||
+      req.body.phone !== undefined;
+    if (phoneAttempt) {
+      const { isPhoneLocked, normalizePhone } = require('./authController');
+      const current = await CustomerUser.findById(req.user._id)
+        .select('phoneNumber phoneVerified')
+        .lean();
+      if (isPhoneLocked(current)) {
+        res.status(403).json({
+          success: false,
+          message: 'Verified phone number cannot be changed. Contact support for account recovery.',
+          code: 'PHONE_LOCKED',
+        });
         return;
       }
-      updates.phoneNumber = digits;
+      // Even when unlocked, do not accept raw phone writes — must use OTP link flow.
+      const attempted = normalizePhone(
+        req.body.phoneNumber ?? req.body.mobileNumber ?? req.body.phone
+      );
+      const existing = normalizePhone(current?.phoneNumber);
+      if (attempted && attempted !== existing) {
+        res.status(403).json({
+          success: false,
+          message: 'Phone number must be verified via OTP before it can be saved',
+          code: 'PHONE_OTP_REQUIRED',
+        });
+        return;
+      }
+    }
+
+    if (updates.avatarUrl !== undefined) {
+      updates.avatarUrl = String(updates.avatarUrl || '').trim();
     }
 
     if (updates.email !== undefined) {

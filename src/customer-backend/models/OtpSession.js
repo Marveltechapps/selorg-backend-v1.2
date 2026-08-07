@@ -14,6 +14,10 @@ const otpSessionSchema = new mongoose.Schema(
     attemptCount: { type: Number, default: 0 },
     verified: { type: Boolean, default: false },
     verifiedAt: { type: Date, default: null },
+    /** login = auth OTP; link_phone = authenticated profile phone linking */
+    purpose: { type: String, enum: ['login', 'link_phone'], default: 'login', index: true },
+    /** Set for link_phone so verify can bind OTP to the authenticated user */
+    userId: { type: String, default: null, index: true },
     metadata: { ip: String, userAgent: String, deviceId: String },
   },
   { timestamps: true }

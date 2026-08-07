@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const { CustomerUser } = require('../models/CustomerUser');
+const tokenBlocklist = require('../../core/services/tokenBlocklist');
 
 const JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || process.env.JWT_SECRET || 'dev_jwt_secret_change_in_prod';
 
@@ -22,6 +23,10 @@ async function auth(req, res, next) {
       payload = jwt.verify(token, JWT_SECRET);
     } catch (err) {
       res.status(401).json({ success: false, message: 'Invalid token' });
+      return;
+    }
+    if (tokenBlocklist.has(token)) {
+      res.status(401).json({ success: false, message: 'Token has been revoked. Please log in again.' });
       return;
     }
     if (!payload || !payload.sub) {

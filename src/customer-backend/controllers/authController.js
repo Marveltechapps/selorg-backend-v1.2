@@ -262,7 +262,7 @@ async function sendEmailOtpFlow(normalizedEmail, res) {
   });
 }
 
-async function createOtpSession({ phoneNumber, email, otp, channel, providerResponseId }) {
+async function createOtpSession({ phoneNumber, email, otp, channel, providerResponseId, purpose, userId }) {
   const sessionId = crypto.randomUUID();
   await OtpSession.create({
     sessionId,
@@ -275,9 +275,241 @@ async function createOtpSession({ phoneNumber, email, otp, channel, providerResp
     resendCount: 0,
     attemptCount: 0,
     verified: false,
+    purpose: purpose || 'login',
+    userId: userId ? String(userId) : null,
     providerResponseId: providerResponseId ? String(providerResponseId).slice(0, 255) : undefined,
   });
   return sessionId;
+}
+
+function isPhoneLocked(user) {
+  if (!user) return false;
+  const digits = normalizePhone(user.phoneNumber);
+  return !!(user.phoneVerified && digits && digits.length === 10);
+}
+
+/**
+ * Authenticated: send OTP to link a phone number to the current account.
+ * Reuses the same SMS/WhatsApp delivery path as login OTP.
+ */
+async function sendLinkPhoneOtp(req, res) {
+  try {
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const user = await CustomerUser.findById(req.user._id).lean();
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    if (isPhoneLocked(user)) {
+      res.status(403).json({
+        success: false,
+        message: 'A verified phone number is already linked and cannot be changed',
+        code: 'PHONE_LOCKED',
+      });
+      return;
+    }
+
+    const { phoneNumber, channel: rawChannel, preferredChannel } = req.body || {};
+    const channel = String(preferredChannel || rawChannel || 'sms').toLowerCase();
+    if (channel === 'email') {
+      res.status(400).json({ success: false, message: 'Phone linking requires SMS or WhatsApp OTP' });
+      return;
+    }
+
+    const digits = normalizePhone(phoneNumber);
+    if (digits.length !== 10 || /^0+$/.test(digits)) {
+      res.status(400).json({ success: false, message: 'phoneNumber must be exactly 10 digits' });
+      return;
+    }
+
+    const taken = await CustomerUser.findOne({
+      phoneNumber: digits,
+      _id: { $ne: user._id },
+    })
+      .select('_id phoneVerified')
+      .lean();
+    if (taken) {
+      res.status(409).json({
+        success: false,
+        message: 'This phone number is already linked to another account',
+        code: 'PHONE_IN_USE',
+      });
+      return;
+    }
+
+    const otp =
+      allowFixedTestOtp() && digits === TEST_MOBILE ? TEST_OTP : generateOtp(4);
+    if (shouldLogOtp()) {
+      console.log(`[sendLinkPhoneOtp] Generated OTP for ${digits}: ${otp}`);
+    }
+
+    const providerResult = await deliverOtpToPhone(digits, otp, channel);
+    if (!providerResult || !providerResult.success) {
+      const errorMsg = providerResult?.error || 'SMS provider unavailable';
+      console.error(`[sendLinkPhoneOtp] Provider failed for ${digits}: ${errorMsg}`);
+      return res.status(500).json({
+        success: false,
+        message: clientDeliveryFailureMessage(errorMsg, 'Failed to send OTP'),
+        internalCode: 'OTP_PROVIDER_ERROR',
+      });
+    }
+
+    const deliveredChannel = providerResult.channel || (channel === 'whatsapp' ? 'whatsapp' : 'sms');
+    const sessionId = await createOtpSession({
+      phoneNumber: digits,
+      otp,
+      channel: deliveredChannel,
+      providerResponseId: providerResult.body,
+      purpose: 'link_phone',
+      userId: String(user._id),
+    });
+
+    res.status(200).json({
+      success: true,
+      sessionId,
+      channel: deliveredChannel,
+      resendCooldownSeconds: RESEND_COOLDOWN_SECONDS,
+      message: 'OTP sent successfully',
+    });
+  } catch (err) {
+    console.error('sendLinkPhoneOtp error', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+}
+
+/**
+ * Authenticated: verify OTP and permanently link phone to the current account.
+ */
+async function verifyLinkPhoneOtp(req, res) {
+  try {
+    if (!req.user?._id) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const { sessionId, otp } = req.body || {};
+    if (!sessionId || !otp) {
+      res.status(400).json({ success: false, message: 'sessionId and otp required' });
+      return;
+    }
+
+    const session = await OtpSession.findOne({ sessionId });
+    if (!session) {
+      res.status(400).json({ success: false, message: 'Invalid session' });
+      return;
+    }
+    if (session.purpose !== 'link_phone') {
+      res.status(400).json({ success: false, message: 'Invalid OTP session for phone linking' });
+      return;
+    }
+    if (String(session.userId || '') !== String(req.user._id)) {
+      res.status(403).json({ success: false, message: 'OTP session does not belong to this account' });
+      return;
+    }
+    if (session.verified) {
+      res.status(400).json({ success: false, message: 'OTP already used' });
+      return;
+    }
+    if (session.otpExpiresAt && session.otpExpiresAt < new Date()) {
+      res.status(400).json({ success: false, message: 'OTP expired' });
+      return;
+    }
+
+    const ok = verifyOtp(otp, session.otpHash);
+    session.attemptCount = (session.attemptCount || 0) + 1;
+    await session.save();
+    if (!ok) {
+      res.status(400).json({ success: false, message: 'Invalid OTP' });
+      return;
+    }
+
+    const digits = normalizePhone(session.phoneNumber);
+    if (digits.length !== 10) {
+      res.status(400).json({ success: false, message: 'Invalid phone number on OTP session' });
+      return;
+    }
+
+    const user = await CustomerUser.findById(req.user._id);
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+    if (isPhoneLocked(user)) {
+      res.status(403).json({
+        success: false,
+        message: 'A verified phone number is already linked and cannot be changed',
+        code: 'PHONE_LOCKED',
+      });
+      return;
+    }
+
+    const taken = await CustomerUser.findOne({
+      phoneNumber: digits,
+      _id: { $ne: user._id },
+    })
+      .select('_id')
+      .lean();
+    if (taken) {
+      res.status(409).json({
+        success: false,
+        message: 'This phone number is already linked to another account',
+        code: 'PHONE_IN_USE',
+      });
+      return;
+    }
+
+    session.verified = true;
+    session.verifiedAt = new Date();
+    await session.save();
+
+    const now = new Date();
+    user.phoneNumber = digits;
+    user.phoneVerified = true;
+    user.phoneVerifiedAt = now;
+    try {
+      await user.save();
+    } catch (saveErr) {
+      if (saveErr?.code === 11000 || saveErr?.code === 'E11000') {
+        res.status(409).json({
+          success: false,
+          message: 'This phone number is already linked to another account',
+          code: 'PHONE_IN_USE',
+        });
+        return;
+      }
+      throw saveErr;
+    }
+
+    try {
+      const cacheService = require('../../core/services/cache.service');
+      await cacheService.delPattern('cache:*/user/profile*');
+    } catch (cacheErr) {
+      console.warn('link phone cache invalidation failed', cacheErr?.message);
+    }
+
+    const publicEmail = sanitizeCustomerEmail(user.email);
+    res.status(200).json({
+      success: true,
+      message: 'Phone number verified and linked',
+      data: {
+        _id: String(user._id),
+        phoneNumber: user.phoneNumber,
+        email: publicEmail || null,
+        name: user.name || '',
+        phoneVerified: true,
+        phoneVerifiedAt: now,
+        avatarUrl: user.avatarUrl || '',
+      },
+    });
+  } catch (err) {
+    console.error('verifyLinkPhoneOtp error', err);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 }
 
 async function sendOtp(req, res) {
@@ -417,6 +649,14 @@ async function verifyOtpController(req, res) {
       res.status(400).json({ success: false, message: 'Invalid session' });
       return;
     }
+    if (session.purpose === 'link_phone') {
+      res.status(400).json({
+        success: false,
+        message: 'Use phone verify endpoint to link this number to your account',
+        code: 'LINK_PHONE_SESSION',
+      });
+      return;
+    }
     if (session.verified) {
       res.status(400).json({ success: false, message: 'OTP already used' });
       return;
@@ -534,6 +774,12 @@ async function resendOtp(req, res) {
       res.status(400).json({ success: false, message: 'Invalid session' });
       return;
     }
+    if (session.purpose === 'link_phone') {
+      if (!req.user?._id || String(session.userId || '') !== String(req.user._id)) {
+        res.status(403).json({ success: false, message: 'OTP session does not belong to this account' });
+        return;
+      }
+    }
     if (session.verified) {
       res.status(400).json({ success: false, message: 'OTP already used' });
       return;
@@ -593,4 +839,51 @@ async function resendOtp(req, res) {
   }
 }
 
-module.exports = { sendOtp, verifyOtpController, resendOtp };
+/**
+ * POST /auth/logout — revoke the current Bearer access token (and optional refresh token).
+ * Auth is optional so a client that already cleared storage can still send the raw token.
+ */
+async function logout(req, res) {
+  try {
+    const tokenBlocklist = require('../../core/services/tokenBlocklist');
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    const accessToken =
+      authHeader && String(authHeader).startsWith('Bearer ')
+        ? String(authHeader).slice(7).trim()
+        : '';
+    const refreshToken = String(req.body?.refreshToken || '').trim();
+
+    const revoke = (token) => {
+      if (!token) return;
+      try {
+        const decoded = jwt.decode(token);
+        const exp = decoded && decoded.exp;
+        if (exp && exp > Math.floor(Date.now() / 1000)) {
+          tokenBlocklist.add(token, exp);
+        }
+      } catch {
+        // Still succeed so the client can clear local state
+      }
+    };
+
+    revoke(accessToken);
+    revoke(refreshToken);
+
+    res.status(200).json({ success: true, message: 'Logged out successfully.' });
+  } catch (err) {
+    console.error('logout error', err);
+    // Never block client logout on server failure
+    res.status(200).json({ success: true, message: 'Logged out successfully.' });
+  }
+}
+
+module.exports = {
+  sendOtp,
+  verifyOtpController,
+  resendOtp,
+  logout,
+  sendLinkPhoneOtp,
+  verifyLinkPhoneOtp,
+  isPhoneLocked,
+  normalizePhone,
+};

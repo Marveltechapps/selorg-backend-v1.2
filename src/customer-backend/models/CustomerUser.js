@@ -39,6 +39,9 @@ const userSchema = new mongoose.Schema(
       whatsapp: { type: Boolean, default: true },
       email: { type: Boolean, default: true },
       dnd: { type: Boolean, default: false },
+      /** Local quiet hours when DND is on (0–23). */
+      dndStartHour: { type: Number, default: 22 },
+      dndEndHour: { type: Number, default: 7 },
       /**
        * Per-category channel matrix:
        * { order: { push, inApp, sms, whatsapp, email }, offers: {...}, ... }
