@@ -6,6 +6,7 @@ const { pickFirstNonStubString } = require('../utils/mediaUrl');
 const {
   resolveAvailableStock,
   resolveAvailableStockForProduct,
+  resolveMaxOrderLimit,
   isProductPurchasable,
   assertStockAllowsAsync,
   attachLiveSellableStock,
@@ -38,11 +39,55 @@ async function invalidateCartGetCache() {
 async function getCartForUser(userId, options = {}) {
   const uid = normalizeUserId(userId);
   await dedupeCartLines(uid);
+  // Heal carts that exceeded MaxOrderLimit (e.g. guest merge before limit enforcement).
+  await clampCartToMaxOrderLimits(uid);
   const cart = await Cart.findOne({ userId: uid }).lean();
   if (!cart || !cart.items || cart.items.length === 0) {
     return { items: [], itemTotal: 0, discount: 0, deliveryFee: 0, handlingCharge: 0, tax: 0, total: 0 };
   }
   return formatCartResponse(cart, { userId: uid, ...options });
+}
+
+/**
+ * Cap each line at Master Sheet MaxOrderLimit so stale over-limit carts cannot
+ * proceed to checkout display / payment with illegal quantities.
+ */
+async function clampCartToMaxOrderLimits(userId) {
+  const uid = normalizeUserId(userId);
+  const cart = await Cart.findOne({ userId: uid });
+  if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) return false;
+
+  const productIds = [
+    ...new Set(
+      cart.items
+        .map((it) => String(it.productId || '').trim())
+        .filter((id) => id && mongoose.Types.ObjectId.isValid(id)),
+    ),
+  ];
+  if (productIds.length === 0) return false;
+
+  const products = await Product.find({ _id: { $in: productIds } })
+    .select('maxOrderLimit hierarchyCode classification')
+    .lean();
+  const withLimits = await Promise.all(products.map((p) => ensureMaxOrderLimitFromStyle(p)));
+  const byId = new Map(withLimits.map((p) => [String(p._id), p]));
+
+  let changed = false;
+  for (const it of cart.items) {
+    const max = resolveMaxOrderLimit(byId.get(String(it.productId)));
+    if (max == null) continue;
+    const qty = Number(it.quantity) || 0;
+    if (qty > max) {
+      it.quantity = max;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await cart.save();
+    await invalidateCartGetCache();
+  }
+  return changed;
 }
 
 /** Stable cart line key — empty variantId and productId-only SKUs must match. */
@@ -248,17 +293,60 @@ async function hydrateCartItemStock(items) {
   }
 
   const products = await Product.find({ _id: { $in: productIds } })
-    .select('stock stockQuantity isActive isSaleable isPurchasable status')
+    .select('stock stockQuantity isActive isSaleable isPurchasable status maxOrderLimit hierarchyCode classification')
     .lean();
-  const withStock = await attachLiveSellableStock(products);
+  const withInherited = await Promise.all(products.map((p) => ensureMaxOrderLimitFromStyle(p)));
+  const withStock = await attachLiveSellableStock(withInherited);
   const byId = new Map(withStock.map((p) => [String(p._id), p]));
+  const { pickMaxOrderLimit } = require('../utils/catalogMediaFields');
 
   return items.map((it) => {
     const catalog = byId.get(String(it.productId));
     const stock = resolveAvailableStock(catalog);
     const inStock = isProductPurchasable(catalog);
-    return { ...it, stock, inStock, storeStock: catalog?.storeStock, catalogStockQuantity: catalog?.catalogStockQuantity };
+    return {
+      ...it,
+      stock,
+      inStock,
+      storeStock: catalog?.storeStock,
+      catalogStockQuantity: catalog?.catalogStockQuantity,
+      maxOrderLimit: pickMaxOrderLimit(catalog || {}),
+    };
   });
+}
+
+/**
+ * When a Variant SKU has no MaxOrderLimit, inherit from the Style (or any sibling) row.
+ */
+async function ensureMaxOrderLimitFromStyle(catalogProduct) {
+  if (!catalogProduct) return catalogProduct;
+  if (resolveMaxOrderLimit(catalogProduct) != null) return catalogProduct;
+  const code = String(catalogProduct.hierarchyCode || '').trim();
+  if (!code) return catalogProduct;
+  // Prefer Style sibling; otherwise any sibling that already has a limit.
+  const style = await Product.findOne({
+    hierarchyCode: code,
+    classification: 'Style',
+    isActive: true,
+    maxOrderLimit: { $gt: 0 },
+  })
+    .select('maxOrderLimit')
+    .lean();
+  if (style && resolveMaxOrderLimit(style) != null) {
+    return { ...catalogProduct, maxOrderLimit: style.maxOrderLimit };
+  }
+  const sibling = await Product.findOne({
+    hierarchyCode: code,
+    isActive: true,
+    maxOrderLimit: { $gt: 0 },
+    _id: { $ne: catalogProduct._id },
+  })
+    .select('maxOrderLimit')
+    .lean();
+  if (sibling && resolveMaxOrderLimit(sibling) != null) {
+    return { ...catalogProduct, maxOrderLimit: sibling.maxOrderLimit };
+  }
+  return catalogProduct;
 }
 
 /**
@@ -313,6 +401,9 @@ async function resolveLineSnapshot(productId, variantId) {
   }
 
   if (!variantSize) variantSize = '1 unit';
+
+  // Variant SKUs sometimes omit MaxOrderLimit while the Style row has it — inherit for enforcement.
+  catalogProduct = await ensureMaxOrderLimitFromStyle(catalogProduct);
 
   return {
     lineProductId,
@@ -632,16 +723,26 @@ async function mergeGuestItems(userId, guestItems, mergeKey) {
     const existing = cart.items.find((it) => matchCartLine(it, lineProductId, lineVariantId));
     const existingQty = Number(existing?.quantity) || 0;
 
-    // Cap merged quantity at live sellable stock instead of dropping the line.
+    // Cap merged quantity at live sellable stock AND Master Sheet MaxOrderLimit.
     const available = await resolveAvailableStockForProductSafe(catalogProduct);
     if (!isProductPurchasable(catalogProduct, available) || available <= 0) {
       skipped.push({ productId: guestLine.productId, reason: 'Out of stock' });
       continue;
     }
-    const target = Math.min(existingQty + guestLine.quantity, available);
+    const maxOrder = resolveMaxOrderLimit(catalogProduct);
+    const purchasableCap =
+      maxOrder != null ? Math.min(available, maxOrder) : available;
+    const desired = existingQty + guestLine.quantity;
+    const target = Math.min(desired, purchasableCap);
     if (target <= existingQty) {
-      if (target < existingQty + guestLine.quantity) {
-        skipped.push({ productId: guestLine.productId, reason: 'Stock limit reached' });
+      if (desired > existingQty) {
+        skipped.push({
+          productId: guestLine.productId,
+          reason:
+            maxOrder != null && desired > maxOrder
+              ? `Maximum order limit reached. You can order only ${maxOrder} units of this product.`
+              : 'Stock limit reached',
+        });
       }
       continue;
     }
@@ -669,6 +770,7 @@ async function mergeGuestItems(userId, guestItems, mergeKey) {
   // mergeKey was already claimed atomically above — only persist the items.
   await cart.save();
   await dedupeCartLines(uid);
+  await clampCartToMaxOrderLimits(uid);
   await invalidateCartGetCache();
 
   const fresh = await Cart.findOne({ userId: uid }).lean();

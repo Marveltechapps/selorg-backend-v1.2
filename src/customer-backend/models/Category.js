@@ -9,6 +9,14 @@ const categorySchema = new mongoose.Schema(
     thumbnailUrl: { type: String, default: '' },
     /** Optional mid-size URL for cards (falls back to thumbnailUrl / imageUrl). */
     cardImageUrl: { type: String, default: '' },
+    /**
+     * Category / SubCategory media from Master Sheet
+     * (Category Media / SubCategory Media sheets, or Banner columns on Category Display Image).
+     * L1 = category hero; L2 = subcategory hero. Empty string = not set.
+     */
+    bannerImage: { type: String, default: '' },
+    bannerVideo: { type: String, default: '' },
+    youtubeUrl: { type: String, default: '' },
     emoji: { type: String, default: '' },
     hierarchyCodes: [{ type: String }],
     level: { type: Number, default: 1, min: 1, max: 3, index: true },

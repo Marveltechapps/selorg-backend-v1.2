@@ -15,10 +15,30 @@ const DEFAULT_PREFERENCES = {
   whatsapp: true,
   email: true,
   dnd: false,
+  dndStartHour: 22,
+  dndEndHour: 7,
   categories: defaultCategoriesPreferences(),
 };
 
-const ALLOWED_KEYS = ['push', 'inApp', 'sms', 'whatsapp', 'email', 'dnd', 'categories'];
+const ALLOWED_KEYS = [
+  'push',
+  'inApp',
+  'sms',
+  'whatsapp',
+  'email',
+  'dnd',
+  'dndStartHour',
+  'dndEndHour',
+  'categories',
+];
+
+function clampHour(value, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  const h = Math.floor(n);
+  if (h < 0 || h > 23) return fallback;
+  return h;
+}
 
 function normalizeCategoryChannels(raw) {
   const base = { ...DEFAULT_CATEGORY_CHANNELS };
@@ -48,12 +68,16 @@ function normalizePreferences(raw) {
     whatsapp: true,
     email: true,
     dnd: false,
+    dndStartHour: 22,
+    dndEndHour: 7,
     categories: defaultCategoriesPreferences(),
   };
   if (!raw || typeof raw !== 'object') return base;
   for (const key of ['push', 'inApp', 'sms', 'whatsapp', 'email', 'dnd']) {
     if (typeof raw[key] === 'boolean') base[key] = raw[key];
   }
+  base.dndStartHour = clampHour(raw.dndStartHour, 22);
+  base.dndEndHour = clampHour(raw.dndEndHour, 7);
   base.categories = normalizeCategories(raw.categories);
   return base;
 }
@@ -135,6 +159,12 @@ async function updatePreferences(userId, patch) {
     if (typeof patch[key] === 'boolean') {
       updates[`notificationPreferences.${key}`] = patch[key];
     }
+  }
+  if (patch.dndStartHour !== undefined) {
+    updates['notificationPreferences.dndStartHour'] = clampHour(patch.dndStartHour, previous.dndStartHour);
+  }
+  if (patch.dndEndHour !== undefined) {
+    updates['notificationPreferences.dndEndHour'] = clampHour(patch.dndEndHour, previous.dndEndHour);
   }
   if (patch.categories && typeof patch.categories === 'object') {
     updates['notificationPreferences.categories'] = mergeCategoryPatch(

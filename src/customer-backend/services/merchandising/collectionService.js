@@ -66,6 +66,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
         isSaleable: 1,
         stock: 1,
         stockQuantity: 1,
+        maxOrderLimit: 1,
         hierarchyCode: 1,
         variants: 1,
       })
@@ -105,6 +106,7 @@ async function resolveCollectionProducts(collectionId, options = {}) {
       isSaleable: 1,
       stock: 1,
       stockQuantity: 1,
+      maxOrderLimit: 1,
       hierarchyCode: 1,
       variants: 1,
     });

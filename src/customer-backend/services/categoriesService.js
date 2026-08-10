@@ -8,6 +8,7 @@ const { Product } = require('../models/Product');
 const { enrichProductsWithVariants, pickImageFields } = require('../utils/productVariantsPayload');
 const { enrichProduct, enrichCategory } = require('../utils/customerMediaEnrichment');
 const { attachLiveSellableStock } = require('../utils/productStock');
+const { pickCategoryMediaFields, pickMaxOrderLimit } = require('../utils/catalogMediaFields');
 
 const DEFAULT_PRODUCT_LIMIT = 50;
 
@@ -256,9 +257,11 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
       imageUrl: categoryOut.imageUrl || categoryOut.thumbnailUrl || null,
       thumbnailUrl: categoryOut.thumbnailUrl || null,
       cardImageUrl: categoryOut.cardImageUrl || null,
+      // Categories (L1) do not carry banner/video/YouTube — only SubCategories do.
     },
     subcategories: subcategories.map((s) => {
       const sub = enrichCategory(s);
+      const media = pickCategoryMediaFields(s);
       return {
         id: String(s._id),
         name: s.name,
@@ -266,11 +269,15 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
         imageUrl: sub.imageUrl || sub.thumbnailUrl || null,
         thumbnailUrl: sub.thumbnailUrl || null,
         cardImageUrl: sub.cardImageUrl || null,
+        bannerImage: media.bannerImage,
+        bannerVideo: media.bannerVideo,
+        youtubeUrl: media.youtubeUrl,
       };
     }),
     banners: banners.map((b) => ({
       id: String(b._id),
       imageUrl: b.imageUrl,
+      videoUrl: b.videoUrl || null,
       link: b.link || null,
       redirectType: b.redirectType || null,
       redirectValue: b.redirectValue || null,
@@ -305,6 +312,7 @@ async function getCategoryPayload(categoryId, subCategoryId = null) {
         isSaleable: p.isSaleable,
         isActive: p.isActive,
         status: p.status,
+        maxOrderLimit: pickMaxOrderLimit(p),
       };
     }),
   };

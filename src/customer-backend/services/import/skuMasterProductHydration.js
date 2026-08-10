@@ -133,6 +133,46 @@ function buildHeaderPathMap() {
     { aliases: ['ars calculation method'], path: 'arsCalculationMethod', kind: 'string' },
     { aliases: ['fixed stock'], path: 'fixedStock', kind: 'number' },
     { aliases: ['model stock'], path: 'modelStock', kind: 'number' },
+    // Empty / blank → null (unlimited). Positive integer → per-line purchase cap.
+    {
+      aliases: [
+        'max order limit',
+        'maxorderlimit',
+        'max order qty',
+        'max order quantity',
+        'maximum order limit',
+        'product order limit',
+        'productorderlimit',
+        'purchase limit',
+        'max purchase qty',
+        'max qty per order',
+        'max cart qty',
+        'maximum qty per order',
+        'max quantity per order',
+      ],
+      path: 'maxOrderLimit',
+      kind: 'maxOrderLimit',
+    },
+    {
+      aliases: ['min qty per order', 'min quantity per order', 'minimum qty per order'],
+      path: 'minOrderQty',
+      kind: 'numberOptional',
+    },
+    {
+      aliases: ['order limit type'],
+      path: 'orderLimitType',
+      kind: 'string',
+    },
+    {
+      aliases: ['restriction type'],
+      path: 'orderRestrictionType',
+      kind: 'string',
+    },
+    {
+      aliases: ['search keywords', 'search keyword'],
+      path: '__searchKeywordsSheet',
+      kind: 'string',
+    },
     { aliases: ['sku uom', 'uom'], path: 'uom', kind: 'string' },
     { aliases: ['skuimgurl', 'sku img url', 'skuimg url'], path: 'imageUrl', kind: 'string' },
     { aliases: ['taxpercent', 'tax percent', 'tax %', 'tax%'], path: 'taxPercent', kind: 'number' },
@@ -207,6 +247,13 @@ function coerceValue(raw, kind) {
       if (!str) return undefined;
       const n = Number.parseFloat(String(raw).replace(/,/g, '').replace(/[^\d.-]/g, ''));
       return Number.isFinite(n) ? n : undefined;
+    }
+    case 'maxOrderLimit': {
+      const str = String(raw ?? '').trim();
+      if (!str) return null; // unlimited
+      const n = Number.parseFloat(str.replace(/,/g, '').replace(/[^\d.-]/g, ''));
+      if (!Number.isFinite(n) || n <= 0) return null;
+      return Math.floor(n);
     }
     case 'bool':
       return parseBoolean(raw, false);
@@ -375,6 +422,18 @@ function applySkuRowToProductDoc(doc, row, headerMap, io) {
 
     if (mapping.path === '__productDetails') {
       productDetailsRaw = raw;
+      continue;
+    }
+
+    if (mapping.path === '__searchKeywordsSheet') {
+      const parts = String(raw || '')
+        .split(/[,;|]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (parts.length) {
+        const existing = Array.isArray(doc.searchKeywords) ? doc.searchKeywords : [];
+        doc.searchKeywords = [...new Set([...existing, ...parts])];
+      }
       continue;
     }
 

@@ -134,6 +134,38 @@ async function resolveAvailableStockForProduct(product, options = {}) {
   return resolveAvailableStock(product, map.get(String(id)) || 0);
 }
 
+/**
+ * Master Sheet MaxOrderLimit — null / missing / <= 0 means unlimited.
+ * @returns {number|null}
+ */
+function resolveMaxOrderLimit(product) {
+  if (!product) return null;
+  const raw = product.maxOrderLimit;
+  if (raw == null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+/**
+ * Enforce MaxOrderLimit from Master Sheet (server-side cart + checkout).
+ */
+function assertMaxOrderLimit(product, requestedQty, existingCartQty = 0, mode = 'set') {
+  const max = resolveMaxOrderLimit(product);
+  if (max == null) return { maxOrderLimit: null };
+  const desired =
+    mode === 'add'
+      ? (Number(existingCartQty) || 0) + (Number(requestedQty) || 0)
+      : Number(requestedQty) || 0;
+  if (desired > max) {
+    return {
+      error: `Maximum order limit reached. You can order only ${max} units of this product.`,
+      maxOrderLimit: max,
+    };
+  }
+  return { maxOrderLimit: max };
+}
+
 function assertStockAllows(product, requestedQty, existingCartQty = 0, mode = 'set', storeQty = null) {
   if (!product) return { error: 'Product not found' };
   if (product.isActive === false || product.status === 'inactive' || product.status === 'draft') {
@@ -142,6 +174,9 @@ function assertStockAllows(product, requestedQty, existingCartQty = 0, mode = 's
   if (product.isSaleable === false) {
     return { error: 'This product is currently unavailable.' };
   }
+  const limitCheck = assertMaxOrderLimit(product, requestedQty, existingCartQty, mode);
+  if (limitCheck.error) return limitCheck;
+
   const available = resolveAvailableStock(product, storeQty);
   if (available <= 0) {
     return { error: 'This product is currently out of stock.' };
@@ -156,7 +191,12 @@ function assertStockAllows(product, requestedQty, existingCartQty = 0, mode = 's
       available,
     };
   }
-  return { available, stock: available, inStock: true };
+  return {
+    available,
+    stock: available,
+    inStock: true,
+    maxOrderLimit: limitCheck.maxOrderLimit,
+  };
 }
 
 async function assertStockAllowsAsync(product, requestedQty, existingCartQty = 0, mode = 'set', options = {}) {
@@ -169,6 +209,8 @@ module.exports = {
   resolveCatalogStock,
   resolveAvailableStock,
   resolveAvailableStockForProduct,
+  resolveMaxOrderLimit,
+  assertMaxOrderLimit,
   isProductPurchasable,
   assertStockAllows,
   assertStockAllowsAsync,

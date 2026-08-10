@@ -14,6 +14,7 @@ const { enrichProductsWithVariants, pickImageFields } = require('../utils/produc
 const { enrichProduct, enrichCategory } = require('../utils/customerMediaEnrichment');
 const { attachLiveSellableStock } = require('../utils/productStock');
 const { filterCatalogLabels } = require('../utils/filterDummyCatalog');
+const { pickCategoryMediaFields, pickMaxOrderLimit } = require('../utils/catalogMediaFields');
 const {
   dedupeSubcategoriesByName,
   dedupeTopCategoriesByFingerprint,
@@ -74,6 +75,7 @@ async function listCategories(req, res) {
           cardImageUrl: media.cardImageUrl || '',
           emoji: c.emoji || '',
           order: c.order ?? 0,
+          // L1 categories: no bannerImage / bannerVideo / youtubeUrl
         };
       })
     );
@@ -285,7 +287,7 @@ async function getCategoryProductsBySlug(req, res) {
         .skip(skip)
         .limit(limit)
         .select(
-          '_id sku name size tag price mrp taxPercent imageUrl thumbnailUrl cardImageUrl images isSaleable isActive status stock stockQuantity categoryId subcategoryId',
+          '_id sku name size tag price mrp taxPercent imageUrl thumbnailUrl cardImageUrl images isSaleable isActive status stock stockQuantity categoryId subcategoryId maxOrderLimit',
         )
         .lean(),
       Product.countDocuments(query),
@@ -315,6 +317,7 @@ async function getCategoryProductsBySlug(req, res) {
 
     const mappedSubs = subcategories.map((s) => {
       const media = enrichCategory(s);
+      const catMedia = pickCategoryMediaFields(s);
       return {
         _id: String(s._id),
         name: s.name,
@@ -324,6 +327,9 @@ async function getCategoryProductsBySlug(req, res) {
         thumbnailUrl: media.thumbnailUrl || '',
         cardImageUrl: media.cardImageUrl || '',
         productCount: countMap.get(String(s._id)) || 0,
+        bannerImage: catMedia.bannerImage,
+        bannerVideo: catMedia.bannerVideo,
+        youtubeUrl: catMedia.youtubeUrl,
       };
     });
 
@@ -361,6 +367,7 @@ async function getCategoryProductsBySlug(req, res) {
             isSaleable: p.isSaleable,
             isActive: p.isActive,
             status: p.status,
+            maxOrderLimit: pickMaxOrderLimit(p),
           };
         }),
         pagination: {
@@ -418,6 +425,7 @@ async function getSubcategoriesByCategorySlug(req, res) {
     const countMap = new Map(countEntries);
     const mappedSubs = subcategories.map((s) => {
       const media = enrichCategory(s);
+      const catMedia = pickCategoryMediaFields(s);
       return {
         _id: String(s._id),
         name: s.name,
@@ -427,6 +435,9 @@ async function getSubcategoriesByCategorySlug(req, res) {
         thumbnailUrl: media.thumbnailUrl || '',
         cardImageUrl: media.cardImageUrl || '',
         productCount: countMap.get(String(s._id)) || 0,
+        bannerImage: catMedia.bannerImage,
+        bannerVideo: catMedia.bannerVideo,
+        youtubeUrl: catMedia.youtubeUrl,
       };
     });
     const deduped = filterCatalogLabels(dedupeSubcategoriesByName(mappedSubs));

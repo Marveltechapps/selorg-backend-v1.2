@@ -34,6 +34,7 @@ const mongoose = require('mongoose');
  * | TaxPercent, SGST/CGST/IGST/Cess % and ₹, Price incl. GST | taxPercent, taxBreakup.* |
  * | Is Unique Barcode(×2)     | isUniqueBarcode |
  * | Fixed Stock               | fixedStock + stockQuantity |
+ * | MaxOrderLimit / Product Order Limit / Max Qty Per Order | maxOrderLimit (null = unlimited) |
  */
 
 const productSchema = new mongoose.Schema(
@@ -85,6 +86,17 @@ const productSchema = new mongoose.Schema(
     stockQuantity: { type: Number, default: 0 },
     stock: { type: Number, default: 0 },
     lowStockThreshold: { type: Number, default: 10 },
+    /**
+     * Max units a customer may purchase per cart line (Master Sheet Product Order Limit /
+     * MaxOrderLimit / Max Qty Per Order). null / undefined / <= 0 → unlimited (stock still applies).
+     */
+    maxOrderLimit: { type: Number, default: null },
+    /** Master Sheet Min Qty Per Order (optional). */
+    minOrderQty: { type: Number, default: null },
+    /** Master Sheet Order Limit Type (e.g. Quantity, Both). */
+    orderLimitType: { type: String, default: '' },
+    /** Master Sheet Restriction Type (e.g. Qty, Qty + Weight). */
+    orderRestrictionType: { type: String, default: '' },
     brand: { type: String, default: '' },
     brandCode: { type: String, default: '' },
     vendorCode: { type: String, default: '' }, // Now properly mapped from SKU Master

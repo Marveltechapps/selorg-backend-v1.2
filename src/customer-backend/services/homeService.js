@@ -21,7 +21,8 @@ const { collectionMergeKey, stripKeyNumericSuffix } = require('../utils/homeSect
 const cacheService = require('../../core/services/cache.service');
 const appConfig = require('../../config/app');
 
-const HOME_PAYLOAD_CACHE_KEY = 'home:payload:shared:v1';
+/** v2: include Product.maxOrderLimit on home/collection product payloads. */
+const HOME_PAYLOAD_CACHE_KEY = 'home:payload:shared:v2';
 
 async function resolveProducts(productIds = []) {
   if (!Array.isArray(productIds) || productIds.length === 0) return [];
@@ -53,6 +54,7 @@ async function resolveProducts(productIds = []) {
       isSaleable: 1,
       stock: 1,
       stockQuantity: 1,
+      maxOrderLimit: 1,
       images: 1,
       hierarchyCode: 1,
       variants: 1,

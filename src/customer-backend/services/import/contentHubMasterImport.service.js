@@ -8,6 +8,7 @@ const { applySearchKeywordsWithCategories } = require('../search/productSearchKe
 const { applyBannerDetails } = require('./bannerDetailsImport.service');
 const { applyHomePageContent } = require('./homePageContentImport.service');
 const { applyCollectionsSheet } = require('./cmsPagesImport.service');
+const { applyCategoryMediaSheets } = require('./categoryMediaImport.service');
 const { promoteStyleForVariantOnlyGroups } = require('./ensureStyleClassification');
 const {
   deactivateLegacySeedProducts,
@@ -1307,6 +1308,24 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
           // -------------------------
           await timer.begin('banners', 80, 'Importing banners');
           await applyBannerDetails(wb, { session: txnSession, counts, warnings, errors });
+
+          // -------------------------
+          // 3b) Category / SubCategory Media (Banner Image, Video, YouTube)
+          // -------------------------
+          await timer.begin('category_media', 83, 'Importing category & subcategory media');
+          try {
+            await applyCategoryMediaSheets(wb, {
+              session: txnSession,
+              counts,
+              warnings,
+              errors,
+            });
+          } catch (e) {
+            errors.push({
+              sheet: 'Category Media',
+              message: `Category media import failed: ${e.message}`,
+            });
+          }
 
           // -------------------------
           // 4) Category Display Images

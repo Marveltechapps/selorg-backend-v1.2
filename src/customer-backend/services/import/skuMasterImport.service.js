@@ -15,6 +15,7 @@ const {
   consolidateDuplicateTopCategories,
 } = require('../../utils/categoryTaxonomyCleanup');
 const { applySearchKeywordsWithCategories } = require('../search/productSearchKeywords');
+const { applyCategoryMediaSheets } = require('./categoryMediaImport.service');
 
 const SKIP_VALUES = new Set(['SKU Code', 'Mandatory', 'Not Null, Unique', 'Not Null', 'varchar(20)', 'varchar(100)']);
 
@@ -690,6 +691,16 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
         }
       }
       counts.buttons.upserted = upserted;
+    }
+
+    // ── Category / SubCategory Media (optional sheets) ─────────────────────
+    try {
+      await applyCategoryMediaSheets(wb, { session, counts, warnings, errors });
+    } catch (e) {
+      warnings.push({
+        sheet: 'Category Media',
+        message: `Category media import failed: ${e.message}`,
+      });
     }
 
     // Catalog hygiene — deactivate seed SKUs and collapse duplicate L2s
