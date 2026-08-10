@@ -219,11 +219,20 @@ function getResendReplyTo() {
   return (process.env.PICKER_EMAIL_REPLY_TO || 'admin@selorg.com').trim();
 }
 
+/** True when the brand string is the customer app (not picker/rider). */
+function isCustomerBrand(brandName) {
+  const brand = String(brandName || '').trim();
+  if (!brand) return false;
+  if (/customer/i.test(brand)) return true;
+  const customerApp = String(process.env.CUSTOMER_APP_NAME || 'Selorg').trim();
+  return brand.toLowerCase() === customerApp.toLowerCase();
+}
+
 function buildVerifiedFromForPayload(payload) {
   const brand = parseFromAddress(payload && payload.from);
   const brandName = brand.name || APP_NAME;
 
-  if (/customer/i.test(brandName)) {
+  if (isCustomerBrand(brandName)) {
     const customerVerified = (
       process.env.CUSTOMER_RESEND_VERIFIED_FROM ||
       process.env.CUSTOMER_RESEND_FROM ||
@@ -253,11 +262,11 @@ function buildAppEmailFrom(appName, explicitFrom) {
   if (explicitFrom) return explicitFrom;
   const brand = String(appName || APP_NAME).trim();
 
-  if (/customer/i.test(brand)) {
+  if (isCustomerBrand(brand)) {
     const customerFrom = (
+      process.env.CUSTOMER_RESEND_VERIFIED_FROM ||
       process.env.CUSTOMER_RESEND_FROM ||
       process.env.CUSTOMER_EMAIL_FROM ||
-      process.env.CUSTOMER_RESEND_VERIFIED_FROM ||
       ''
     ).trim();
     if (customerFrom) return customerFrom;

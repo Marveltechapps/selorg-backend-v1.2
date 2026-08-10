@@ -65,25 +65,55 @@ function isPlaceholderEmail(email) {
 }
 
 /**
+ * Test-only destination overrides (CUSTOMER_NOTIF_*_TO).
+ * Disabled in production unless ALLOW_CUSTOMER_NOTIF_OVERRIDES=true so a leftover
+ * staging override cannot silently redirect real customer SMS/WhatsApp/email.
+ */
+function customerNotifOverridesAllowed() {
+  if (String(process.env.ALLOW_CUSTOMER_NOTIF_OVERRIDES || '').toLowerCase() === 'true') {
+    return true;
+  }
+  return String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+}
+
+function readEmailOverride() {
+  if (!customerNotifOverridesAllowed()) return '';
+  return String(process.env.CUSTOMER_NOTIF_EMAIL_TO || '')
+    .trim()
+    .replace(/^mailto:/i, '');
+}
+
+/**
  * Resolve SMS destination: env override for testing, else user's phone.
  */
 function resolveSmsTo(userPhone) {
-  const override = String(process.env.CUSTOMER_NOTIF_SMS_TO || '').replace(/\D/g, '').slice(-10);
-  if (override.length === 10) return override;
+  if (customerNotifOverridesAllowed()) {
+    const override = String(process.env.CUSTOMER_NOTIF_SMS_TO || '').replace(/\D/g, '').slice(-10);
+    if (override.length === 10) {
+      logger.warn('SMS destination overridden by CUSTOMER_NOTIF_SMS_TO (non-production/test)');
+      return override;
+    }
+  }
   return digits10(userPhone);
 }
 
 function resolveWhatsAppTo(userPhone) {
-  const override = String(process.env.CUSTOMER_NOTIF_WHATSAPP_TO || '').replace(/\D/g, '').slice(-10);
-  if (override.length === 10) return override;
+  if (customerNotifOverridesAllowed()) {
+    const override = String(process.env.CUSTOMER_NOTIF_WHATSAPP_TO || '').replace(/\D/g, '').slice(-10);
+    if (override.length === 10) {
+      logger.warn('WhatsApp destination overridden by CUSTOMER_NOTIF_WHATSAPP_TO (non-production/test)');
+      return override;
+    }
+  }
   return digits10(userPhone);
 }
 
 function resolveEmailTo(userEmail, savedCheckoutEmail) {
-  const override = String(process.env.CUSTOMER_NOTIF_EMAIL_TO || '')
-    .trim()
-    .replace(/^mailto:/i, '');
-  if (override && !isPlaceholderEmail(override)) return override;
+  const override = readEmailOverride();
+  if (override && !isPlaceholderEmail(override)) {
+    logger.warn('Email destination overridden by CUSTOMER_NOTIF_EMAIL_TO (non-production/test)');
+    return override;
+  }
   if (!isPlaceholderEmail(userEmail)) return String(userEmail).trim();
   if (!isPlaceholderEmail(savedCheckoutEmail)) return String(savedCheckoutEmail).trim();
   return '';
@@ -191,6 +221,13 @@ async function deliverEmail({ customerId, email, checkoutEmail, type, title, bod
   }
 
   const { sendTransactionalEmail } = require('../../picker/services/emailOtp.service');
+  // Prefer Resend-verified customer From when present; unverified domains cause
+  // Resend to reject and fall back. Let emailOtp.service resolve brand From.
+  const customerFrom =
+    process.env.CUSTOMER_RESEND_VERIFIED_FROM ||
+    process.env.CUSTOMER_RESEND_FROM ||
+    process.env.CUSTOMER_EMAIL_FROM ||
+    undefined;
   const result = await withRetry(
     () =>
       sendTransactionalEmail({
@@ -198,11 +235,7 @@ async function deliverEmail({ customerId, email, checkoutEmail, type, title, bod
         subject: String(title || 'Selorg notification'),
         text: String(body || ''),
         appName: process.env.CUSTOMER_APP_NAME || 'Selorg',
-        from:
-          process.env.CUSTOMER_EMAIL_FROM ||
-          process.env.CUSTOMER_RESEND_FROM ||
-          process.env.ADMIN_EMAIL_FROM ||
-          undefined,
+        from: customerFrom,
       }),
     { label: 'Email' }
   );
@@ -304,4 +337,5 @@ module.exports = {
   resolveWhatsAppTo,
   resolveEmailTo,
   formatChannelBody,
+  customerNotifOverridesAllowed,
 };
