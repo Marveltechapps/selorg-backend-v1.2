@@ -67,6 +67,12 @@ const worldlinePaymentSchema = new mongoose.Schema(
     rawSessionRequest: { type: Object, default: null },
     rawGatewayResponse: { type: Object, default: null },
     rawGatewayReturn: { type: Object, default: null },
+
+    /**
+     * Browser origin where web checkout started (e.g. https://www.selorg.com).
+     * Used to redirect gateway return to the same origin so localStorage auth survives.
+     */
+    checkoutOrigin: { type: String, default: '' },
   },
   { timestamps: true }
 );

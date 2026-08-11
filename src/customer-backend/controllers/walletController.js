@@ -160,6 +160,7 @@ async function initiateTopUp(req, res) {
       consumerEmailId,
       consumerMobileNo,
       paymentMode = 'all',
+      checkoutOrigin,
     } = req.body || {};
 
     const result = await createWalletTopUpSession(userId, {
@@ -169,6 +170,7 @@ async function initiateTopUp(req, res) {
       consumerEmailId,
       consumerMobileNo,
       paymentMode,
+      checkoutOrigin,
     });
 
     if (result.error) {

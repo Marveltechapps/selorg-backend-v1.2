@@ -111,8 +111,8 @@ function inferWorldlineReturnPresentation(response, resultStatus, errorMessage) 
   return { status: 'failed', message: err };
 }
 
-function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount, purpose }) {
-  const base = resolveWebAppBaseUrl(logger);
+function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount, purpose, checkoutOrigin }) {
+  const base = resolveWebAppBaseUrl(logger, checkoutOrigin);
   // Wallet top-ups return to the wallet tab; grocery checkout stays on /payment.
   const path = purpose === 'wallet_topup' ? '/account/wallet' : '/payment';
   const url = new URL(path, base.endsWith('/') ? base : `${base}/`);
@@ -131,7 +131,7 @@ function buildPaymentResultRedirectUrl({ status, message, orderId, txnId, amount
 
 function redirectToPaymentResultPage(res, payload) {
   const redirectUrl = buildPaymentResultRedirectUrl(payload);
-  const webAppBase = resolveWebAppBaseUrl(logger);
+  const webAppBase = resolveWebAppBaseUrl(logger, payload.checkoutOrigin);
 
   logger.info('WORLDLINE_RETURN_REDIRECT', {
     event: 'worldline_return_redirect',
@@ -140,6 +140,7 @@ function redirectToPaymentResultPage(res, payload) {
     txnId: payload.txnId || '',
     redirectUrl,
     webAppBase,
+    checkoutOrigin: payload.checkoutOrigin || null,
     webAppEnv: process.env.WORLDLINE_WEB_APP_URL || process.env.CUSTOMER_WEB_URL || process.env.FRONTEND_URL || null,
   });
 
@@ -155,7 +156,7 @@ async function createWorldlineSession(req, res) {
     const userId = req.user?._id;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    const { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode } = req.body || {};
+    const { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode, checkoutOrigin } = req.body || {};
     if (!orderId) return res.status(400).json({ success: false, message: 'orderId is required' });
     if (!platform) return res.status(400).json({ success: false, message: 'platform is required (android|ios|web)' });
 
@@ -168,11 +169,20 @@ async function createWorldlineSession(req, res) {
     console.log('Order ID:', orderId);
     console.log('Platform:', platform);
     console.log('Payment Mode:', paymentMode);
+    console.log('Checkout Origin:', checkoutOrigin || '');
     console.log('Consumer Email:', consumerEmailId);
     console.log('Consumer Mobile:', consumerMobileNo);
     console.log('========================================\n');
 
-    const result = await createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode });
+    const result = await createSession(userId, {
+      orderId,
+      platform,
+      algo,
+      consumerEmailId,
+      consumerMobileNo,
+      paymentMode,
+      checkoutOrigin,
+    });
     
     if (result.error) {
       console.log('\n========================================');
@@ -364,6 +374,7 @@ async function worldlineReturn(req, res) {
         txnId: result.data?.txnId,
         amount: gatewayAmount,
         purpose: result.data?.purpose,
+        checkoutOrigin: result.data?.checkoutOrigin,
       });
     }
 
@@ -380,6 +391,7 @@ async function worldlineReturn(req, res) {
       txnId: result.data.txnId,
       amount: gatewayAmount || result.data.amountInr,
       purpose: result.data.purpose,
+      checkoutOrigin: result.data.checkoutOrigin,
     });
   } catch (err) {
     // eslint-disable-next-line no-console

@@ -6,6 +6,9 @@
  *
  * Localhost redirects are opt-in only via ALLOW_LOCAL_PAYNIMO_REDIRECT=true.
  * Default fallback is always https://www.selorg.com.
+ *
+ * Client `checkoutOrigin` (window.location.origin) is preferred when safe so
+ * apex vs www does not drop origin-scoped localStorage auth on return.
  */
 
 const PRODUCTION_WEB_APP_URL = 'https://www.selorg.com';
@@ -16,6 +19,8 @@ const LOCAL_HOST_RE =
   /^(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)$/i;
 const PRIVATE_IP_RE =
   /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+/** Open-redirect allowlist: only Selorg customer web hosts. */
+const SELORG_WEB_HOST_RE = /^(www\.)?selorg\.com$/i;
 
 function trimEnv(value) {
   const s = String(value ?? '').trim();
@@ -80,12 +85,68 @@ function allowsLocalRedirectUrls() {
 }
 
 /**
+ * Sanitize a client-supplied checkout origin (window.location.origin).
+ * Returns a bare origin (no path) or null when unsafe / missing.
+ */
+function sanitizeCheckoutOrigin(candidate, logger) {
+  const trimmed = trimEnv(candidate);
+  if (!trimmed) return null;
+
+  let url;
+  try {
+    url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+  } catch {
+    if (logger && typeof logger.warn === 'function') {
+      logger.warn('Ignoring invalid checkoutOrigin for Paynimo redirect', {
+        candidate: trimmed,
+      });
+    }
+    return null;
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+
+  const host = url.hostname;
+  if (SELORG_WEB_HOST_RE.test(host)) {
+    // Force https for live Selorg hosts even if the client sent http.
+    return `https://${host}`;
+  }
+
+  if (isLocalOrPrivateHost(host)) {
+    if (!allowsLocalRedirectUrls()) {
+      if (logger && typeof logger.warn === 'function') {
+        logger.warn('Ignoring local checkoutOrigin for Paynimo redirect', {
+          candidate: trimmed,
+          fallback: PRODUCTION_WEB_APP_URL,
+          hint: 'Set ALLOW_LOCAL_PAYNIMO_REDIRECT=true only for local Paynimo testing',
+        });
+      }
+      return null;
+    }
+    return url.origin.replace(/\/$/, '');
+  }
+
+  if (logger && typeof logger.warn === 'function') {
+    logger.warn('Ignoring non-Selorg checkoutOrigin for Paynimo redirect', {
+      candidate: trimmed,
+      fallback: PRODUCTION_WEB_APP_URL,
+    });
+  }
+  return null;
+}
+
+/**
  * Customer web app origin used for gateway cancel/success/fail redirects.
+ * Prefers a sanitized client checkoutOrigin (same origin the shopper started on)
+ * so apex vs www does not drop origin-scoped localStorage auth.
  * Ignores localhost/private WORLDLINE_WEB_APP_URL, CUSTOMER_WEB_URL, and
  * FRONTEND_URL unless local redirects are explicitly opted in.
  * Always falls back to https://www.selorg.com (never localhost by default).
  */
-function resolveWebAppBaseUrl(logger) {
+function resolveWebAppBaseUrl(logger, preferredOrigin) {
+  const fromClient = sanitizeCheckoutOrigin(preferredOrigin, logger);
+  if (fromClient) return fromClient;
+
   const allowLocal = allowsLocalRedirectUrls();
   const candidates = [
     process.env.WORLDLINE_WEB_APP_URL,
@@ -152,13 +213,16 @@ function resolveWorldlineApiReturnUrl(logger) {
 
 /**
  * Platform-specific return URL embedded in the Paynimo session payload.
+ * @param {string} platform
+ * @param {object} [logger]
+ * @param {string} [checkoutOrigin] — browser origin where checkout started
  */
-function resolveReturnUrlForPlatform(platform, logger) {
+function resolveReturnUrlForPlatform(platform, logger, checkoutOrigin) {
   const normalized = String(platform || '')
     .trim()
     .toLowerCase();
   if (normalized === 'web') {
-    return `${resolveWebAppBaseUrl(logger)}/paynimo-return.html`;
+    return `${resolveWebAppBaseUrl(logger, checkoutOrigin)}/paynimo-return.html`;
   }
   return resolveWorldlineApiReturnUrl(logger);
 }
@@ -169,6 +233,7 @@ module.exports = {
   isLocalOrPrivateHost,
   isHostedWorldlineDeployment,
   allowsLocalRedirectUrls,
+  sanitizeCheckoutOrigin,
   resolveWebAppBaseUrl,
   resolveWorldlineApiReturnUrl,
   resolveReturnUrlForPlatform,

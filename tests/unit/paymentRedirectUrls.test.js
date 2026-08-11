@@ -7,6 +7,7 @@ const {
   resolveWebAppBaseUrl,
   resolveWorldlineApiReturnUrl,
   resolveReturnUrlForPlatform,
+  sanitizeCheckoutOrigin,
   PRODUCTION_WEB_APP_URL,
   PRODUCTION_API_RETURN_URL,
 } = require('../../src/customer-backend/utils/paymentRedirectUrls');
@@ -26,6 +27,35 @@ describe('paymentRedirectUrls', () => {
     expect(isLocalOrPrivateHost('https://api.selorg.com/api/v1/customer/payments/worldline/return')).toBe(
       false
     );
+  });
+
+  test('checkoutOrigin prefers apex when client started on selorg.com', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.WORLDLINE_WEB_APP_URL = 'https://www.selorg.com';
+
+    expect(sanitizeCheckoutOrigin('https://selorg.com')).toBe('https://selorg.com');
+    expect(resolveWebAppBaseUrl(null, 'https://selorg.com')).toBe('https://selorg.com');
+    expect(resolveReturnUrlForPlatform('web', null, 'https://selorg.com')).toBe(
+      'https://selorg.com/paynimo-return.html'
+    );
+  });
+
+  test('checkoutOrigin prefers www when client started on www.selorg.com', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.WORLDLINE_WEB_APP_URL;
+
+    expect(resolveWebAppBaseUrl(null, 'https://www.selorg.com')).toBe('https://www.selorg.com');
+    expect(resolveReturnUrlForPlatform('web', null, 'https://www.selorg.com')).toBe(
+      'https://www.selorg.com/paynimo-return.html'
+    );
+  });
+
+  test('checkoutOrigin rejects non-Selorg hosts (open-redirect safety)', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.WORLDLINE_WEB_APP_URL = 'https://www.selorg.com';
+
+    expect(sanitizeCheckoutOrigin('https://evil.example')).toBe(null);
+    expect(resolveWebAppBaseUrl(null, 'https://evil.example')).toBe('https://www.selorg.com');
   });
 
   test('production ignores localhost WORLDLINE_WEB_APP_URL', () => {

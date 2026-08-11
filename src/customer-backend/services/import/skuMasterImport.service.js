@@ -13,6 +13,7 @@ const {
   deactivateLegacySeedProducts,
   consolidateDuplicateSubcategories,
   consolidateDuplicateTopCategories,
+  sanitizeCategoryDisplayName,
 } = require('../../utils/categoryTaxonomyCleanup');
 const { applySearchKeywordsWithCategories } = require('../search/productSearchKeywords');
 const { applyCategoryMediaSheets } = require('./categoryMediaImport.service');
@@ -467,8 +468,8 @@ async function importSkuMaster(buffer, { overwrite = true } = {}) {
 
       for (let r = 2; r <= catsWs.rowCount; r += 1) {
         const row = catsWs.getRow(r);
-        const mainName = mainCol ? getCellText(row, mainCol) : '';
-        const subName = subCol ? getCellText(row, subCol) : '';
+        const mainName = mainCol ? sanitizeCategoryDisplayName(getCellText(row, mainCol)) : '';
+        const subName = subCol ? sanitizeCategoryDisplayName(getCellText(row, subCol)) : '';
         const name = subName || mainName;
         if (!name) continue;
 

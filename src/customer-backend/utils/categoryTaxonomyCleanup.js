@@ -9,11 +9,19 @@ const { Category } = require('../models/Category');
 const { Product } = require('../models/Product');
 const mongoose = require('mongoose');
 
-function normalizeCategoryName(name) {
+/**
+ * Strip master-sheet section-header punctuation (e.g. "Seeds:" → "Seeds").
+ * @param {string} name
+ */
+function sanitizeCategoryDisplayName(name) {
   return String(name || '')
     .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
+    .replace(/[:;.,]+\s*$/, '')
+    .trim();
+}
+
+function normalizeCategoryName(name) {
+  return sanitizeCategoryDisplayName(name).toLowerCase().replace(/\s+/g, ' ');
 }
 
 const CATEGORY_TOKEN_ALIAS = new Map([['diary', 'dairy']]);
@@ -49,11 +57,14 @@ function categoryFingerprint(name) {
 }
 
 /**
- * Dedupe key for L2s: strip a trailing " rice" so sheet variants like
+ * Dedupe key for L2s: normalize "&" ↔ "and" and strip a trailing " rice"
+ * so sheet variants like "Greens & Herbs" / "Greens And Herbs" and
  * "Basmathi & Seeraga Samba" / "Basmathi & Seeraga Samba RICE" collapse.
  */
 function normalizeSubcategoryDedupeKey(name) {
   return normalizeCategoryName(name)
+    .replace(/&/g, ' and ')
+    .replace(/\s+/g, ' ')
     .replace(/\s+rice$/, '')
     .trim();
 }
@@ -62,6 +73,12 @@ function normalizeSubcategoryDedupeKey(name) {
 function slugSuffixRank(slug) {
   const m = String(slug || '').match(/-(\d+)$/);
   return m ? Number(m[1]) : 0;
+}
+
+/** Prefer "Seeds" over master-sheet header "Seeds:". Lower is better. */
+function displayNameCleanlinessRank(name) {
+  const n = String(name || '').trim();
+  return /[:;.,]+$/.test(n) ? 1 : 0;
 }
 
 /**
@@ -74,6 +91,8 @@ function pickCanonicalSubcategory(group) {
   return [...group].sort((a, b) => {
     const pc = (b.productCount || 0) - (a.productCount || 0);
     if (pc !== 0) return pc;
+    const dn = displayNameCleanlinessRank(a.name) - displayNameCleanlinessRank(b.name);
+    if (dn !== 0) return dn;
     const sr = slugSuffixRank(a.slug) - slugSuffixRank(b.slug);
     if (sr !== 0) return sr;
     const oa = Number.isFinite(Number(a.order)) ? Number(a.order) : 9999;
@@ -113,6 +132,7 @@ function dedupeSubcategoriesByName(subcategories) {
     const winner = pickCanonicalSubcategory(group);
     out.push({
       ...winner,
+      name: sanitizeCategoryDisplayName(winner.name),
       productCount: totalCount,
     });
   }
@@ -459,6 +479,7 @@ function bindSession(query, session) {
 }
 
 module.exports = {
+  sanitizeCategoryDisplayName,
   normalizeCategoryName,
   categoryFingerprint,
   normalizeSubcategoryDedupeKey,

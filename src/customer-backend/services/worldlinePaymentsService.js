@@ -9,6 +9,7 @@ const logger = require('../../core/utils/logger');
 const {
   resolveWebAppBaseUrl,
   resolveReturnUrlForPlatform,
+  sanitizeCheckoutOrigin,
   resolveWorldlineApiReturnUrl,
   isLocalOrPrivateHost,
 } = require('../utils/paymentRedirectUrls');
@@ -823,7 +824,7 @@ function verifyGatewayResponse({ payment, response, salt, logContext }) {
   };
 }
 
-async function createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode }) {
+async function createSession(userId, { orderId, platform, algo, consumerEmailId, consumerMobileNo, paymentMode, checkoutOrigin }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
   warnWorldlineMerchantEnvMismatchOnce();
 
@@ -836,7 +837,8 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
   const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
   const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
   const salt = trimEnv(process.env.WORLDLINE_SALT);
-  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger);
+  const safeCheckoutOrigin = sanitizeCheckoutOrigin(checkoutOrigin, logger) || '';
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger, safeCheckoutOrigin || undefined);
 
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
@@ -1022,6 +1024,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
         status: 'created',
         sessionExpiresAt,
         rawSessionRequest: sessionPayload,
+        ...(safeCheckoutOrigin ? { checkoutOrigin: safeCheckoutOrigin } : {}),
       },
       $setOnInsert: {
         userId: new mongoose.Types.ObjectId(userId),
@@ -1041,6 +1044,7 @@ async function createSession(userId, { orderId, platform, algo, consumerEmailId,
     txnId: doc.txnId,
     attemptNo: doc.attemptNo,
     isNew: shouldCreateNew,
+    checkoutOrigin: safeCheckoutOrigin || null,
   });
 
   let returnUrlHost = null;
@@ -1083,6 +1087,7 @@ async function createWalletTopUpSession(userId, {
   consumerEmailId,
   consumerMobileNo,
   paymentMode,
+  checkoutOrigin,
 }) {
   if (!isEnabled()) return { error: 'Worldline payment is not enabled' };
   warnWorldlineMerchantEnvMismatchOnce();
@@ -1117,7 +1122,8 @@ async function createWalletTopUpSession(userId, {
   const merchantId = trimEnv(process.env.WORLDLINE_MERCHANT_ID || process.env.WORLDLINE_MERCHANT_CODE);
   const schemeCode = trimEnv(process.env.WORLDLINE_SCHEME_CODE) || 'FIRST';
   const salt = trimEnv(process.env.WORLDLINE_SALT);
-  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger);
+  const safeCheckoutOrigin = sanitizeCheckoutOrigin(checkoutOrigin, logger) || '';
+  const returnUrl = resolveReturnUrlForPlatform(normalizedPlatform, logger, safeCheckoutOrigin || undefined);
   if (!merchantId || !salt || !returnUrl) return { error: 'Worldline configuration incomplete' };
 
   const amountStr = formatWorldlineTxnAmount(parsedAmount);
@@ -1237,6 +1243,7 @@ async function createWalletTopUpSession(userId, {
         purpose: 'wallet_topup',
         walletCredited: false,
         walletCreditedAt: null,
+        ...(safeCheckoutOrigin ? { checkoutOrigin: safeCheckoutOrigin } : {}),
       },
       $setOnInsert: {
         userId: userObjectId,
@@ -1258,6 +1265,7 @@ async function createWalletTopUpSession(userId, {
     txnId: doc.txnId,
     amount: parsedAmount,
     attemptNo: doc.attemptNo,
+    checkoutOrigin: safeCheckoutOrigin || null,
   });
 
   return {
@@ -1837,7 +1845,12 @@ async function processGatewayReturn({ response, allowedUserId }) {
   }
 
   const order = payment.standaloneCheckout ? null : await Order.findOne({ _id: payment.orderId });
-  if (!payment.standaloneCheckout && !order) return { error: 'Order not found for payment' };
+  if (!payment.standaloneCheckout && !order) {
+    return {
+      error: 'Order not found for payment',
+      data: { checkoutOrigin: payment.checkoutOrigin || '', purpose: payment.purpose || 'order' },
+    };
+  }
 
   // Idempotency: if already terminal, don't mutate.
   if (isTerminal(payment.status) && payment.responseHash) {
@@ -1876,6 +1889,7 @@ async function processGatewayReturn({ response, allowedUserId }) {
         hashOk: payment.verificationError === 'none',
         purpose: payment.purpose || 'order',
         amountInr: payment.amountInr,
+        checkoutOrigin: payment.checkoutOrigin || '',
       },
     };
   }
@@ -2035,6 +2049,7 @@ async function processGatewayReturn({ response, allowedUserId }) {
     tpslTxnId: effectivePayment.tpslTxnId,
     amountInr: effectivePayment.amountInr,
     purpose: payment.purpose || 'order',
+    checkoutOrigin: payment.checkoutOrigin || '',
   };
 
   if (payloadError) {

@@ -14,6 +14,7 @@ const {
   deactivateLegacySeedProducts,
   consolidateDuplicateSubcategories,
   consolidateDuplicateTopCategories,
+  sanitizeCategoryDisplayName,
 } = require('../../utils/categoryTaxonomyCleanup');
 
 const PRODUCT_BULK_CHUNK = 250;
@@ -584,6 +585,8 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
           let productIdx = 0;
 
           const upsertCategoryNode = async (level, name, parentId, orderVal, userCode, rowNum, rawRow) => {
+            name = sanitizeCategoryDisplayName(name);
+            if (!name) return null;
             const codeTrim = String(userCode || '').trim();
             const internalKey = codeTrim || stableSheetHierarchyCode(level, carryMain, carrySub, name, rowNum);
             let existing = null;
@@ -607,6 +610,24 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
                   .session(txnSession)
                   .lean();
                 if (existing) cacheCategory(existing);
+              }
+              // Collapse mastersheet L2 twins ("Greens & Herbs" / "Greens And Herbs").
+              if (!existing && level === 2) {
+                const { normalizeSubcategoryDedupeKey } = require('../../utils/categoryTaxonomyCleanup');
+                const wantKey = normalizeSubcategoryDedupeKey(name);
+                if (wantKey) {
+                  const siblings = await Category.find({
+                    parentId,
+                    level: 2,
+                    isActive: true,
+                  })
+                    .select('_id name slug hierarchyCodes parentId level')
+                    .session(txnSession)
+                    .lean();
+                  existing =
+                    siblings.find((c) => normalizeSubcategoryDedupeKey(c.name) === wantKey) || null;
+                  if (existing) cacheCategory(existing);
+                }
               }
             }
             if (!existing && level === 1) {
@@ -711,12 +732,12 @@ async function importContentHubMaster(buffer, { overwrite = true, onProgress = n
             const productTrim = productRaw ? String(productRaw).trim() : '';
 
             if (mainRaw) {
-              carryMain = String(mainRaw).trim();
+              carryMain = sanitizeCategoryDisplayName(String(mainRaw).trim());
               carrySub = '';
               currentSubId = null;
             }
             if (subRaw) {
-              carrySub = String(subRaw).trim();
+              carrySub = sanitizeCategoryDisplayName(String(subRaw).trim());
             }
 
             if (productTrim) {
