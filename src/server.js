@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const dotenv = require('dotenv');
 
+
 // Load dotenv from Backend root so it works when run from Backend/ or Backend/src/.
 // In production, prefer `.env.production` if present (or use DOTENV_PATH to override).
 const rootDir = path.resolve(__dirname, '..');
@@ -14,8 +15,10 @@ const selectedEnvPath =
   overrideEnvPath || (isProd && fs.existsSync(prodEnvPath) ? prodEnvPath : defaultEnvPath);
 dotenv.config({ path: selectedEnvPath });
 
+
 // Sentry must initialize before other imports (OpenTelemetry auto-instrumentation)
 require('./instrument');
+
 
 const express = require('express');
 const helmet = require('helmet');
@@ -40,6 +43,7 @@ const logger = require('./core/utils/logger');
 const { registerEventListeners } = require('./events/registerListeners');
 const { apiEnvelopeMiddleware } = require('./core/middleware/apiEnvelope.middleware');
 
+
 // Import dashboard routes
 const productionRoutes = require('./production/routes');
 const merchRoutes = require('./merch/routes');
@@ -58,6 +62,7 @@ const pickerApp = require('./picker/app');
 const customerApp = require('./customer-backend/app');
 const paymentApiRoutes = require('./routes/paymentApiRoutes');
 
+
 // Rider routing: prefer legacy when USE_LEGACY_RIDER=1 (dashboard needs /summary, /orders, /hr).
 // Otherwise use v2 modules when present, fall back to legacy.
 let riderRoutes;
@@ -73,6 +78,7 @@ if (process.env.USE_LEGACY_RIDER === '1' || process.env.USE_LEGACY_RIDER === 'tr
     logger.info('Mounted legacy rider router for /api/v1/rider (v2 not available)');
   }
 }
+
 
 // Also mount v2 routers for orders, payouts, incidents if available so their endpoints
 // are handled by the v2 implementation while preserving existing paths.
@@ -111,6 +117,7 @@ try {
   logger.warn('Unable to load rider v2 auth router', { error: err?.message });
 }
 
+
 let v2SigninRouter = null;
 try {
   // Rider OTP flow depends on this router, so surface any load issue clearly.
@@ -119,6 +126,7 @@ try {
 } catch (err) {
   logger.warn('Unable to load rider v2 signin router', { error: err?.message });
 }
+
 
 // Validate critical environment variables on startup (skip in test mode)
 if (process.env.NODE_ENV !== 'test') {
@@ -132,6 +140,7 @@ if (process.env.NODE_ENV !== 'test') {
     process.exit(1);
   }
 
+
   // Customer app startup (index creation); runs when DB is connected
   require('./customer-backend/startup').run();
   // Bootstrap logistics module (RabbitMQ + Redis); non-fatal on failure
@@ -140,11 +149,14 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
+
 const app = express();
+
 
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
+
 
 if (process.env.NODE_ENV !== 'test') {
   try {
@@ -155,6 +167,7 @@ if (process.env.NODE_ENV !== 'test') {
   }
 }
 
+
 app.use((req, res, next) => {
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[GLOBAL LOG] ${req.method} ${req.path}`);
@@ -162,21 +175,27 @@ app.use((req, res, next) => {
   next();
 });
 
+
 // Request ID middleware (must be first to track all requests)
 app.use(requestIdMiddleware);
+
 
 // Request logging middleware (after request ID is set)
 app.use(requestLoggerMiddleware);
 
+
 // Health check endpoints (before auth middleware - no auth required)
 const { healthCheck, readinessCheck, databaseHealthCheck } = require('./core/controllers/health.controller');
+applyCors(app);
+
+
 app.get('/health', healthCheck);
 app.get('/healthz', healthCheck); // Alias for rider/k8s compatibility
 app.get('/health/ready', readinessCheck);
 app.get('/health/db', databaseHealthCheck);
-
 // CORS before helmet/body parsers so OPTIONS preflight succeeds
 applyCors(app);
+
 
 // Security middleware - Helmet (sets various HTTP headers)
 // CSP disabled for API server - API responses are JSON, not HTML; mobile apps don't apply CSP
@@ -188,14 +207,18 @@ app.use(
   })
 );
 
+
 // Prevent NoSQL injection attacks
 app.use(mongoSanitize());
+
 
 // Prevent HTTP Parameter Pollution
 app.use(hpp());
 
+
 // Prevent XSS attacks
 app.use(xss());
+
 
 // Response compression (skip tiny payloads)
 const compression = require('compression');
@@ -205,6 +228,7 @@ app.use(
     level: 6,
   })
 );
+
 
 // Local uploads (picker/HHD docs / support attachments when not on S3)
 const uploadsDir = process.env.UPLOAD_PATH || path.join(rootDir, 'uploads');
@@ -224,6 +248,7 @@ app.use(
   })
 );
 
+
 // Body parser with size limits
 app.use(
   express.json({
@@ -237,16 +262,20 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+
 // Phase A: normalize legacy JSON responses to standard envelope (skips `success` already set)
 app.use(apiEnvelopeMiddleware);
 
+
 // General API rate limit (per IP) for all /api/v1 routes
 app.use('/api/v1', apiLimiter);
+
 
 // Mount dashboard routers under /api/v1/<dashboard-name>
 app.use('/api/v1/darkstore', darkstoreRoutes);
 app.use('/api/v1/production', productionRoutes);
 app.use('/api/v1/merch', merchRoutes);
+
 
 // Rider & related endpoints: prefer v2 routers when present (mounted first to take precedence)
 if (v2OrderRouter) {
@@ -284,6 +313,7 @@ if (v2AuthRouter) {
   logger.warn('Rider v2 auth router unavailable; /api/v1/auth routes not mounted');
 }
 
+
 // Rider signin OTP (send-otp, verify-otp, resend-otp) — used by Rider mobile app
 const signinRouter = v2SigninRouter;
 if (signinRouter) {
@@ -293,9 +323,11 @@ if (signinRouter) {
   logger.warn('Rider v2 signin router unavailable; /api/signin routes not mounted');
 }
 
+
 // Rider dashboard auth is email/password based and lives in the legacy rider module.
 // Keep it mounted even when the rider operational APIs come from the v2 stack.
 app.use('/api/v1/rider/auth', riderAuthRoutes);
+
 
 // Explicitly mount kit and hr routes for dashboard and rider app access.
 // These legacy routes are needed when USE_LEGACY_RIDER is not set, as v2 modules
@@ -309,17 +341,20 @@ app.use('/api/v1/rider/kit', riderKitRoutes);
 app.use('/api/v1/rider/legal', riderLegalRoutes);
 app.use('/api/v1/rider/admin/legal', riderLegalAdminRoutes);
 
+
 // CRITICAL: Mount legacy rider orders (list, assign, alert) BEFORE main rider router.
 // This ensures /api/v1/rider/orders/:orderId/assign always uses warehouse orderService
 // with RiderOperational (string id), not ProductionRider/DarkstoreRider (ObjectId _id).
 const riderOrderRoutes = require('./rider/routes/orderRoutes');
 app.use('/api/v1/rider/orders', riderOrderRoutes);
 
+
 // Rider shift master CRUD + flows (available/list, my, select, start, end).
 // Must be mounted before the main /api/v1/rider router: when USE_LEGACY_RIDER is off,
 // riderMain is the v2 delivery router, which does not expose /shifts.
 const riderShiftRoutes = require('./rider/routes/shiftRoutes');
 app.use('/api/v1/rider/shifts', riderShiftRoutes);
+
 
 let v2CashRouter;
 try {
@@ -332,6 +367,7 @@ if (v2CashRouter) {
   logger.info('Mounted rider_v2 cash router at /api/v1/rider/cash');
 }
 
+
 const riderDashboardNotificationRoutes = require('./rider/routes/dashboardNotificationRoutes');
 app.use(
   '/api/v1/rider/notifications',
@@ -340,12 +376,14 @@ app.use(
   riderDashboardNotificationRoutes
 );
 
+
 // Fleet ops routes — always mounted for dashboard regardless of USE_LEGACY_RIDER / v2 stack.
 const overviewController = require('./rider/controllers/overviewController');
 const legacyDispatchRoutes = require('./rider/routes/dispatchRoutes');
 const legacyFleetRoutes = require('./rider/routes/fleetRoutes');
 const riderDashboardCountsRoutes = require('./rider/routes/dashboardCountsRoutes');
 const riderAuditRoutes = require('./rider/routes/auditRoutes');
+
 
 app.get('/api/v1/rider/summary', overviewController.getSummary);
 app.use('/api/v1/rider/dispatch', legacyDispatchRoutes);
@@ -363,10 +401,12 @@ app.use(
   riderAuditRoutes
 );
 
+
 const supportChatRoutes = require('./support-chat/supportChat.routes');
 app.use('/api/v1/support-chat/rider', supportChatRoutes.riderRouter);
 app.use('/api/v1/support-chat/admin', supportChatRoutes.adminRouter);
 logger.info('Mounted rider live chat support at /api/v1/support-chat');
+
 
 // Rider wrapper: health route + main router (v2 exports riderRouter, legacy exports router)
 const riderMain = riderRoutes.riderRouter || riderRoutes;
@@ -377,6 +417,7 @@ riderWithHealth.get('/health', (_req, res) =>
 riderWithHealth.use('/', riderMain);
 app.use('/api/v1/rider', riderWithHealth);
 
+
 // Delivery wrapper: prefers V2 delivery router for mobile apps
 const deliveryRouter = v2RiderRouter || riderMain;
 const deliveryWithHealth = express.Router();
@@ -385,6 +426,7 @@ deliveryWithHealth.get('/health', (_req, res) =>
 );
 deliveryWithHealth.use('/', deliveryRouter);
 app.use('/api/v1/delivery', deliveryWithHealth);
+
 
 app.use('/api/v1/finance', financeRoutes);
 app.use('/api/v1/vendor', vendorRoutes);
@@ -395,11 +437,13 @@ app.use('/api/v1/support', require('./support/routes/supportRoutes'));
 app.use('/api/v1/shared', sharedRoutes);
 app.use('/api/v1/staff', staffRoutes);
 
+
 // HHD, Picker, and Customer APIs – unified backend (versioned)
 app.use('/api/v1/hhd', hhdApp);
 app.use('/api/v1/picker', pickerApp);
 app.use('/api/v1/customer', customerApp); // Customer app: onboarding, auth, home, products, user
 app.use('/api/payment', paymentApiRoutes); // Standalone payment initiate / callback / status (React Native friendly CORS)
+
 
 // API Documentation (Swagger)
 if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true') {
@@ -411,6 +455,7 @@ if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'tru
   }));
   logger.info('Swagger documentation available at /api-docs');
 }
+
 
 // Metrics endpoint (Prometheus)
 const metricsModule = require('./utils/metrics');
@@ -427,6 +472,7 @@ if (metricsModule.isMetricsEnabled()) {
   logger.info('Prometheus metrics available at /metrics');
 }
 
+
 // Sentry Express error capture (before custom JSON error formatter)
 if (process.env.SENTRY_DSN || process.env.SENTRY_BACKEND_DSN) {
   try {
@@ -438,18 +484,23 @@ if (process.env.SENTRY_DSN || process.env.SENTRY_BACKEND_DSN) {
   }
 }
 
+
 // Global error handler middleware (must be last)
 app.use(errorHandler);
 
+
 // Export app for testing (after all routes are configured)
 module.exports = app;
+
 
 // Default 3333:5000 often conflicts with macOS AirPlay; 5554–5585 with Android emulator ADB/console.
 // Override with PORT in .env.
 const PORT = process.env.PORT || 3333;
 
+
 // Create HTTP server
 const httpServer = createServer(app);
+
 
 // Initialize WebSocket publisher (Redis Pub/Sub)
 if (process.env.NODE_ENV !== 'test') {
@@ -475,11 +526,13 @@ if (process.env.NODE_ENV !== 'test') {
   }
 }
 
+
 // Start server (only if not in test mode)
 // Bind to 0.0.0.0 so mobile devices on LAN (e.g. 192.168.x.x) can reach the API
 if (process.env.NODE_ENV !== 'test') {
   const HOST = process.env.HOST || '0.0.0.0';
   const { waitForConnection } = require('./config/db');
+
 
   const startListening = () => {
   httpServer.listen(PORT, HOST, () => {
@@ -491,6 +544,7 @@ if (process.env.NODE_ENV !== 'test') {
     });
     logger.info('WebSocket server initialized');
 
+
     try {
       const { warmSmtpConnection, logProviderStatus } = require('./picker/services/emailOtp.service');
       logProviderStatus();
@@ -498,6 +552,7 @@ if (process.env.NODE_ENV !== 'test') {
     } catch (warmErr) {
       logger.warn('Picker email warm-up failed', { error: warmErr?.message });
     }
+
 
     // Start operational alerts job (ORDER_SLA_BREACHED, PICKER_INACTIVE)
     try {
@@ -508,6 +563,7 @@ if (process.env.NODE_ENV !== 'test') {
       logger.warn('Operational alerts job failed to start', { error: jobErr?.message });
     }
 
+
     // Start coupon status management job (SCHEDULED -> ACTIVE, ACTIVE -> EXPIRED)
     try {
       const couponStatusJob = require('./customer-backend/jobs/couponStatusJob');
@@ -516,6 +572,7 @@ if (process.env.NODE_ENV !== 'test') {
     } catch (couponJobErr) {
       logger.warn('Coupon status management job failed to start', { error: couponJobErr?.message });
     }
+
 
     // Scheduled notification campaigns (pending → dispatch)
     try {
@@ -526,6 +583,7 @@ if (process.env.NODE_ENV !== 'test') {
       logger.warn('Notification scheduler job failed to start', { error: notifSchedErr?.message });
     }
 
+
     // Start Worldline payment reconciliation job (stale pending -> unknown)
     try {
       const worldlineReconciliationJob = require('./customer-backend/jobs/worldlineReconciliationJob');
@@ -534,6 +592,7 @@ if (process.env.NODE_ENV !== 'test') {
     } catch (wlJobErr) {
       logger.warn('Worldline reconciliation job failed to start', { error: wlJobErr?.message });
     }
+
 
     try {
       const { startAnalyticsReportJob } = require('./shared/jobs/analyticsReportJob');
@@ -562,6 +621,7 @@ if (process.env.NODE_ENV !== 'test') {
   });
   };
 
+
   (async () => {
     try {
       await connectDB();
@@ -576,6 +636,7 @@ if (process.env.NODE_ENV !== 'test') {
     }
   })();
 }
+
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
@@ -592,6 +653,7 @@ process.on('unhandledRejection', (err, promise) => {
   });
   // In dev mode, we keep the server running to allow the user to fix issues
 });
+
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
@@ -621,4 +683,8 @@ process.on('uncaughtException', (err) => {
   // Exit process for uncaught exceptions (server is in undefined state)
   process.exit(1);
 });
+
+
+
+
 
